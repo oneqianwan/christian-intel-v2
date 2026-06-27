@@ -1,0 +1,133 @@
+============================================================
+基督教情报系统 v2 — PROJECT_SNAPSHOT（最终系统盘点）
+生成时间: 2026-06-26
+============================================================
+
+【动态情报覆盖（按 Source.country 聚合，source_id 显式关联）】
+  菲律宾: 1098条情报 | 22个活跃来源
+  美国: 143条情报 | 9个活跃来源
+  韩国: 42条情报 | 3个活跃来源
+  尼日利亚: 101条情报 | 11个活跃来源
+  global: 10条情报 | 2个活跃来源
+
+  动态情报总计: 1394
+
+【基础数据覆盖】
+  ARDA国家概况(country_profile): 247国
+
+【机构档案】
+  CBN Asia（菲律宾）
+    负责人: N/A
+    邮箱: asiapartners@cbn.org
+    官网: https://www1.cbn.com/asia
+  Christ's Commission Fellowship（菲律宾）
+    负责人: PASTOR PETER F. TAN-CHI (ELDER / MAN COM / AREA PASTOR)
+    邮箱: beyond@ccf.org.ph
+    官网: https://www.ccf.org.ph/
+  Jesus is Lord Church Worldwide（菲律宾）
+    负责人: Eddie Villanueva (Founder/President)
+    邮箱: info@jilworldwide.org
+    官网: https://jilworldwide.org
+  LifeTube Philippines（菲律宾）
+    负责人: N/A
+    邮箱: contact@livetube.tv
+    官网: https://www.livetube.tv
+  Manila Bulletin - Faith Section（菲律宾）
+    负责人: N/A
+    邮箱: editor@mb.com.ph
+    官网: https://mb.com.ph/tag/faith
+  Philippine Bible Society（菲律宾）
+    负责人: Dr. Jim Townsend (General Secretary)
+    邮箱: N/A
+    官网: https://philbible.org.ph
+  Philippine Council of Evangelical Churches（菲律宾）
+    负责人: Bishop Noel Pantoja (National Director)
+    邮箱: info@pcec.org.ph
+    官网: https://pcec.org.ph
+  SunStar Philippines - Faith（菲律宾）
+    负责人: N/A
+    邮箱: editor@sunstar.com.ph
+    官网: https://www.sunstar.com.ph/tag/faith
+  Victory Philippines（菲律宾）
+    负责人: Steve Murrell (Founder/Senior Pastor)
+    邮箱: N/A
+    官网: https://church.victory.org.ph/
+
+  机构档案总计: 9
+
+【来源健康度（DB 计数）】
+  活跃来源: 47
+  健康来源: 47（脚本近似=活跃来源；如需严谨口径以最近一次巡检结果为准）
+
+【系统模块】
+  ✅ Chat Gateway (SSE流式)
+  ✅ Intent Router (5意图分类)
+  ✅ Knowledge Service (知识库)
+  ✅ Collection Orchestrator (采集编排)
+  ✅ Mission Runner (任务执行)
+  ✅ Worker Engine (RQ后台)
+  ✅ Delivery Composer (结构化简报)
+  ✅ LLM Client (DeepSeek约束)
+  ✅ Scoring Service (质量评分)
+  ✅ Health Check (来源监控)
+  ✅ URL Analyzer (社媒链接)
+  ✅ ARDA Collector (国家概况)
+  ✅ PDF Exporter (简报导出)
+
+【前端功能】
+  ✅ 左右分栏布局
+  ✅ 会话管理
+  ✅ 流式消息渲染
+  ✅ 结构化情报卡片
+  ✅ URL粘贴自动分析
+  ✅ 多国家切换
+  ✅ 导出简报按钮
+  ✅ LLM超时降级
+
+【架构红线遵守】
+  ✅ 知识问答与采集严格分离
+  ✅ 状态枚举全系统统一
+  ✅ 消息绑定assistant_message_id
+  ✅ 禁止人工录入关系图谱
+  ✅ LLM只充当分析层
+  ✅ DeepSeek可替换设计
+  ✅ 禁止未闭环加复杂能力
+
+【LLM约束体系】
+  ✅ 系统级约束（身份/数据边界/安全红线）
+  ✅ 任务级约束（4种任务类型）
+  ✅ 输出格式（【事实】/【推断】/来源追溯）
+  ✅ 降级策略（超时→模板）
+
+【异常/注意事项】
+  1) 你给的盘点脚本里使用 db.query(IntelligenceItem).join(Source) 可能因模型未定义 relationship 而导致 4 国统计为 0。
+     本快照改为 IntelligenceItem.source_id == Source.id 的显式 join，得到上面的真实分布。
+  2) ARDA国家概况当前为 247 国（未满 251 国目标），如需“覆盖 251 国”，需要补齐缺失批次或校验落库逻辑。
+
+============================================================
+系统状态: ready for demo ✅（带上面两条注意事项）
+============================================================
+
+【版本快照】
+  当前版本号: v2.1.0（大脑模块完成）
+
+【本轮完成功能清单】
+  ✅ P0-1 Persona统一：LLM 输出统一为“守望者”情报官口吻
+  ✅ P0-2 multi_intent 文案走 LLM：替代硬编码任务回执
+  ✅ P0-3 contact_lookup 文案走 LLM：联系人简报化输出
+  ✅ P0-4 knowledge_lookup 文案走 LLM：知识查询统一为情报简报
+  ✅ P1-1 置信度评估引擎：confidence_assessment()
+  ✅ P1-2 时效性评估引擎：freshness_assessment()
+  ✅ P1 接入执行层：contact_lookup / multi_intent / knowledge_lookup 使用客观置信度与时效结果
+  ✅ P2-1 对话上下文记忆：同会话代词指代消解
+  ✅ P2-2 用户偏好记忆：记录常查国家与机构，并注入推荐提示
+  ✅ P3-1 模糊意图澄清：宽泛问题主动追问，不再猜测
+
+【最终回归结果】
+  自动化回归: 5/5 通过
+  覆盖用例: multi_intent / contact_lookup / knowledge_lookup / clarify / 代词消解
+
+【已知限制】
+  1) 跨对话记忆未做：当前上下文记忆仅限同一 conversation_id。
+  2) 情报推荐未做：已记录用户偏好，但尚未实现独立推荐流或推荐卡片。
+  3) 控制台中文编码仍可能污染临时验证脚本输出；接口实际结果需以 SSE JSON 内容或文件原文为准。
