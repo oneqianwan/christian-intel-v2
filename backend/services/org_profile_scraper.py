@@ -59,6 +59,59 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip())
 
 
+def _is_probable_person_name(name: str) -> bool:
+    n = _normalize_text(name)
+    if not n or len(n) < 5 or len(n) > 60:
+        return False
+    if any(bad in n.lower() for bad in ["document", "documents", "executive", "governing", "our ", "from ", "about", "who we are"]):
+        return False
+    if re.search(r"\d", n):
+        return False
+    if n.isupper():
+        return False
+    if not re.fullmatch(r"[A-Za-z .,'’\\-]+", n):
+        return False
+    if re.search(r"\b(Team|Leadership|Leaders|Staff|Board|Office|Contact|Committee|Convention|Administration|Assembly|Department)\b", n, re.IGNORECASE):
+        return False
+
+    raw_tokens = [t.strip(" ,") for t in n.split() if t.strip(" ,")]
+    if len(raw_tokens) < 2 or len(raw_tokens) > 4:
+        return False
+
+    stopwords = {"of", "the", "and", "for", "to", "in", "on", "at", "a", "an"}
+    if any(t.lower().strip(".") in stopwords for t in raw_tokens):
+        return False
+
+    title_words = {
+        "president",
+        "director",
+        "secretary",
+        "bishop",
+        "pastor",
+        "rev",
+        "reverend",
+        "chief",
+        "executive",
+        "vice",
+        "chairman",
+        "administrator",
+        "admin",
+        "lead",
+        "senior",
+        "metropolitan",
+    }
+    if any(t.lower().strip(".") in title_words for t in raw_tokens):
+        return False
+
+    for t in raw_tokens:
+        if re.fullmatch(r"[A-Z]\\.", t):
+            continue
+        if not re.fullmatch(r"[A-Z][a-zA-Z'’\\-]+", t):
+            return False
+
+    return True
+
+
 def _extract_emails(text: str) -> List[str]:
     if not text:
         return []
@@ -245,23 +298,14 @@ def scrape_leadership_page(base_url: str, org_name: str, title_hints: list) -> D
             page_text = _normalize_text(soup.get_text(" ", strip=True))
             page_text_low = page_text.lower()
 
-            if any(hint.lower() in page_text_low for hint in hints):
-                name_hints = [h for h in hints if re.search(r"[A-Za-z]", h) and (" " in h or "-" in h)]
-                for name_hint in name_hints:
-                    if name_hint.lower() in page_text_low:
-                        title_part = ", ".join(
-                            [
-                                h
-                                for h in hints
-                                if (h != name_hint) and h.lower() in page_text_low and len(h) <= 40
-                            ][:2]
-                        )
-                        return {
-                            "status": "success",
-                            "leader_name": name_hint.strip(),
-                            "leader_title": title_part or None,
-                            "source_url": str(resp.url),
-                        }
+            leader_name, leader_title = _extract_leader_from_page(soup, hints)
+            if leader_name and _is_probable_person_name(leader_name):
+                return {
+                    "status": "success",
+                    "leader_name": _normalize_text(leader_name),
+                    "leader_title": _normalize_text(leader_title) if leader_title else None,
+                    "source_url": str(resp.url),
+                }
 
             for header in soup.find_all(["h2", "h3", "h4", "strong"]):
                 text = _normalize_text(header.get_text(" ", strip=True))
@@ -282,7 +326,7 @@ def scrape_leadership_page(base_url: str, org_name: str, title_hints: list) -> D
                         title_part = ", ".join([h for h in hints if h.lower() in lower_text][:2])
 
                     name = name.strip(" -|:")
-                    if name and len(name) <= 80:
+                    if name and len(name) <= 80 and _is_probable_person_name(name):
                         return {
                             "status": "success",
                             "leader_name": name,
@@ -299,7 +343,7 @@ def scrape_leadership_page(base_url: str, org_name: str, title_hints: list) -> D
                     name_tag = div.find(["h2", "h3", "h4", "strong"])
                     if name_tag:
                         name = _normalize_text(name_tag.get_text(" ", strip=True))
-                        if name and len(name) <= 80 and not any(bad in name.lower() for bad in ["staff", "team", "our team"]):
+                        if name and len(name) <= 80 and _is_probable_person_name(name):
                             return {
                                 "status": "success",
                                 "leader_name": name,
@@ -311,7 +355,7 @@ def scrape_leadership_page(base_url: str, org_name: str, title_hints: list) -> D
                         cand = div.find(["h1", "h2", "h3", "h4"])
                         if cand:
                             name = _normalize_text(cand.get_text(" ", strip=True))
-                            if name and len(name) <= 80 and not any(bad in name.lower() for bad in ["staff", "team"]):
+                            if name and len(name) <= 80 and _is_probable_person_name(name):
                                 return {
                                     "status": "success",
                                     "leader_name": name,
@@ -335,10 +379,10 @@ def enrich_org_with_leader(db: Session, org_id: str, base_url: str, title_hints:
             org.leader_title = leader_data.get("leader_title")
             org.leader_bio_url = leader_data.get("source_url")
             db.commit()
-            print(f"✅ 补充负责人: {org.name} -> {org.leader_name} ({org.leader_title})")
+            print(f"[OK] 补充负责人: {org.name} -> {org.leader_name} ({org.leader_title})")
             return True
 
-    print(f"⚠️ 未找到负责人: {base_url}")
+    print(f"[WARN] 未找到负责人: {base_url}")
     return False
 
 

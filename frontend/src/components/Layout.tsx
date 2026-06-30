@@ -13,28 +13,10 @@ function Layout() {
         <Sidebar />
       </div>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          padding: '12px 16px 0',
-          background: '#f5f5f5',
-        }}>
-          <button
-            onClick={() => setShowSettings((prev) => !prev)}
-            style={{
-              border: '1px solid #d1d5db',
-              background: '#fff',
-              borderRadius: '999px',
-              padding: '8px 14px',
-              fontSize: '13px',
-              cursor: 'pointer',
-              color: '#374151',
-            }}
-          >
-            {showSettings ? '关闭设置' : '打开设置'}
-          </button>
-        </div>
-        <ChatArea />
+        <ChatArea
+          showSettings={showSettings}
+          onToggleSettings={() => setShowSettings((prev) => !prev)}
+        />
       </div>
       {showSettings && (
         <div style={{

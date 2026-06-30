@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from models.database import IntelligenceItem, SessionLocal, Source
+from models.database import IntelligenceItem, RSSSource, SessionLocal, Source
 from services.api_config_service import get_api_key
 
 
@@ -138,6 +138,24 @@ class NewsAPICollector:
         "Lausanne",
         "World Evangelical Alliance",
     ]
+    NEWSAPI_BACKUP_SOURCES = {
+        "newsapi:lausanne": {
+            "name": "洛桑运动 (Lausanne)",
+            "keywords": ["Lausanne Movement", "Lausanne Congress"],
+        },
+        "newsapi:open_doors": {
+            "name": "敞开的门 (Open Doors)",
+            "keywords": ["Open Doors", "persecuted Christians"],
+        },
+        "newsapi:cbn": {
+            "name": "CBN News",
+            "keywords": ["CBN News", "Christian Broadcasting Network"],
+        },
+        "newsapi:world_vision": {
+            "name": "世界宣明会 (World Vision)",
+            "keywords": ["World Vision", "Christian humanitarian"],
+        },
+    }
 
     def __init__(self, db):
         self.db = db
@@ -150,62 +168,101 @@ class NewsAPICollector:
             trust_level="medium",
         )
 
+    def _collect_keyword(self, keyword: str, *, label: str, limit_per_keyword: int) -> int:
+        params = {
+            "apiKey": self.api_key,
+            "q": keyword,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "from": (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d"),
+            "pageSize": limit_per_keyword,
+        }
+        resp = httpx.get(NEWSAPI_URL, params=params, timeout=20)
+        data = resp.json()
+        if data.get("status") != "ok":
+            return 0
+
+        added = 0
+        for article in data.get("articles", []):
+            url = article.get("url") or ""
+            if not url or _item_exists(self.db, url):
+                continue
+
+            published_at = None
+            date_text = article.get("publishedAt") or ""
+            if date_text:
+                try:
+                    published_at = datetime.fromisoformat(date_text.replace("Z", "+00:00")).replace(tzinfo=None)
+                except Exception:
+                    published_at = None
+
+            self.db.add(
+                IntelligenceItem(
+                    id=str(uuid.uuid4()),
+                    source_id=self.source.id,
+                    title=(article.get("title") or "")[:300],
+                    content=((article.get("description") or "")[:2000]),
+                    entity_name=label,
+                    entity_type="news_topic",
+                    country="全球",
+                    category="api_news",
+                    source_url=url,
+                    source_name=f"NewsAPI / {(article.get('source') or {}).get('name', label)}",
+                    published_at=published_at,
+                    ingested_at=datetime.utcnow(),
+                    confidence=0.76,
+                    scope="global",
+                )
+            )
+            added += 1
+
+        self.db.commit()
+        return added
+
+    def collect_newsapi_backup(self, limit_per_keyword: int = 2) -> int:
+        total = 0
+        inactive_rss_sources = (
+            self.db.query(RSSSource)
+            .filter(RSSSource.is_active == False)
+            .filter(RSSSource.category.ilike("newsapi:%"))
+            .all()
+        )
+
+        for rss_source in inactive_rss_sources:
+            config = self.NEWSAPI_BACKUP_SOURCES.get(rss_source.category or "", {})
+            keywords = config.get("keywords") or []
+            source_label = config.get("name") or rss_source.name
+
+            source_total = 0
+            for keyword in keywords:
+                try:
+                    source_total += self._collect_keyword(
+                        keyword,
+                        label=source_label,
+                        limit_per_keyword=limit_per_keyword,
+                    )
+                except Exception as exc:
+                    print(f"NewsAPI Backup {source_label} / {keyword}: {exc}")
+            print(f"NewsAPI Backup {source_label}: +{source_total}")
+            total += source_total
+
+        return total
+
     def collect(self, limit_per_keyword: int = 3) -> int:
         if not self.api_key:
             return 0
 
         total = 0
-        since = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
         for keyword in self.KEYWORDS[:5]:
             try:
-                params = {
-                    "apiKey": self.api_key,
-                    "q": keyword,
-                    "language": "en",
-                    "sortBy": "publishedAt",
-                    "from": since,
-                    "pageSize": limit_per_keyword,
-                }
-                resp = httpx.get(NEWSAPI_URL, params=params, timeout=20)
-                data = resp.json()
-                if data.get("status") != "ok":
-                    continue
-
-                for article in data.get("articles", []):
-                    url = article.get("url") or ""
-                    if not url or _item_exists(self.db, url):
-                        continue
-
-                    published_at = None
-                    date_text = article.get("publishedAt") or ""
-                    if date_text:
-                        try:
-                            published_at = datetime.fromisoformat(date_text.replace("Z", "+00:00")).replace(tzinfo=None)
-                        except Exception:
-                            published_at = None
-
-                    self.db.add(
-                        IntelligenceItem(
-                            id=str(uuid.uuid4()),
-                            source_id=self.source.id,
-                            title=(article.get("title") or "")[:300],
-                            content=((article.get("description") or "")[:2000]),
-                            entity_name=keyword,
-                            entity_type="news_topic",
-                            country="全球",
-                            category="api_news",
-                            source_url=url,
-                            source_name=f"NewsAPI / {(article.get('source') or {}).get('name', 'Unknown')}",
-                            published_at=published_at,
-                            ingested_at=datetime.utcnow(),
-                            confidence=0.76,
-                            scope="global",
-                        )
-                    )
-                    total += 1
-                self.db.commit()
+                total += self._collect_keyword(
+                    keyword,
+                    label=keyword,
+                    limit_per_keyword=limit_per_keyword,
+                )
             except Exception as exc:
                 print(f"NewsAPI {keyword} error: {exc}")
+        total += self.collect_newsapi_backup(limit_per_keyword=2)
         return total
 
 

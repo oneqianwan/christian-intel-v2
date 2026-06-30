@@ -23,13 +23,16 @@ export async function fetchMessages(conversationId: string) {
 export async function sendChatStream(
   message: string,
   conversationId: string | null,
-  onEvent: (type: string, data: any) => void
+  onEvent: (type: string, data: any) => void,
+  signal?: AbortSignal
 ) {
   const r = await fetch(`${API_BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, conversation_id: conversationId }),
+    signal,
   })
+  if (!r.ok) throw new Error(`http ${r.status}`)
   if (!r.body) throw new Error('no body')
   const reader = r.body.getReader()
   const decoder = new TextDecoder()
@@ -42,6 +45,8 @@ export async function sendChatStream(
     buffer = lines.pop() || ''
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim()
+      if (!line) continue
+
       if (line.startsWith('event:')) {
         const eventType = line.slice(6).trim()
         const dataLine = lines[++i]
@@ -50,6 +55,14 @@ export async function sendChatStream(
             onEvent(eventType, JSON.parse(dataLine.slice(5)))
           } catch {}
         }
+      } else if (line.startsWith('data:')) {
+        const data = line.slice(5).trim()
+        if (!data || data === '[DONE]') continue
+        try {
+          const parsed = JSON.parse(data)
+          const type = parsed?.type || 'message'
+          onEvent(type, parsed)
+        } catch {}
       }
     }
   }

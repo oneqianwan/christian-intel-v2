@@ -16,6 +16,7 @@ class Memory:
     def __init__(self):
         self._db_gen = get_db()
         self.db = next(self._db_gen)
+        self.is_sqlite = getattr(getattr(self.db, "bind", None), "dialect", None).name == "sqlite"
         self._ensure_tables()
 
     def __del__(self):
@@ -25,49 +26,85 @@ class Memory:
             pass
 
     def _ensure_tables(self):
-        self.db.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS agent_logs (
-                    id SERIAL PRIMARY KEY,
-                    level VARCHAR(20) DEFAULT 'info',
-                    module VARCHAR(50),
-                    message TEXT NOT NULL,
-                    detail JSONB,
-                    created_at TIMESTAMP DEFAULT NOW()
+        if self.is_sqlite:
+            self.db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        level VARCHAR(20) DEFAULT 'info',
+                        module VARCHAR(50),
+                        message TEXT NOT NULL,
+                        detail TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
                 )
-                """
             )
-        )
-        self.db.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS agent_tasks (
-                    id SERIAL PRIMARY KEY,
-                    task_type VARCHAR(50) NOT NULL,
-                    status VARCHAR(20) DEFAULT 'pending',
-                    target VARCHAR(100),
-                    reason TEXT,
-                    plan JSONB,
-                    result JSONB,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    started_at TIMESTAMP,
-                    completed_at TIMESTAMP
+            self.db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_tasks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_type VARCHAR(50) NOT NULL,
+                        status VARCHAR(20) DEFAULT 'pending',
+                        target VARCHAR(100),
+                        reason TEXT,
+                        plan TEXT,
+                        result TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP
+                    )
+                    """
                 )
-                """
             )
-        )
+        else:
+            self.db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_logs (
+                        id SERIAL PRIMARY KEY,
+                        level VARCHAR(20) DEFAULT 'info',
+                        module VARCHAR(50),
+                        message TEXT NOT NULL,
+                        detail JSONB,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    )
+                    """
+                )
+            )
+            self.db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_tasks (
+                        id SERIAL PRIMARY KEY,
+                        task_type VARCHAR(50) NOT NULL,
+                        status VARCHAR(20) DEFAULT 'pending',
+                        target VARCHAR(100),
+                        reason TEXT,
+                        plan JSONB,
+                        result JSONB,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        started_at TIMESTAMP,
+                        completed_at TIMESTAMP
+                    )
+                    """
+                )
+            )
         self.db.commit()
 
     def log(self, module: str, message: str, detail: dict = None, level: str = "info"):
         try:
+            sql = """
+                INSERT INTO agent_logs (level, module, message, detail, created_at)
+                VALUES (:level, :module, :message, :detail, CURRENT_TIMESTAMP)
+            """ if self.is_sqlite else """
+                INSERT INTO agent_logs (level, module, message, detail, created_at)
+                VALUES (:level, :module, :message, CAST(:detail AS JSONB), NOW())
+            """
             self.db.execute(
-                text(
-                    """
-                    INSERT INTO agent_logs (level, module, message, detail, created_at)
-                    VALUES (:level, :module, :message, CAST(:detail AS JSONB), NOW())
-                    """
-                ),
+                text(sql),
                 {
                     "level": level,
                     "module": module,
@@ -82,14 +119,16 @@ class Memory:
 
     def create_task(self, task_type: str, target: str, reason: str, plan: dict = None) -> int:
         try:
+            sql = """
+                INSERT INTO agent_tasks (task_type, target, reason, plan, created_at)
+                VALUES (:type, :target, :reason, :plan, CURRENT_TIMESTAMP)
+            """ if self.is_sqlite else """
+                INSERT INTO agent_tasks (task_type, target, reason, plan, created_at)
+                VALUES (:type, :target, :reason, CAST(:plan AS JSONB), NOW())
+                RETURNING id
+            """
             result = self.db.execute(
-                text(
-                    """
-                    INSERT INTO agent_tasks (task_type, target, reason, plan, created_at)
-                    VALUES (:type, :target, :reason, CAST(:plan AS JSONB), NOW())
-                    RETURNING id
-                    """
-                ),
+                text(sql),
                 {
                     "type": task_type,
                     "target": target,
@@ -97,8 +136,8 @@ class Memory:
                     "plan": self._json_value(plan),
                 },
             )
-            task_id = result.scalar()
             self.db.commit()
+            task_id = result.lastrowid if self.is_sqlite else result.scalar()
             return int(task_id or 0)
         except Exception as exc:
             print(f"[Memory] 任务创建失败: {exc}")
@@ -108,27 +147,35 @@ class Memory:
     def update_task(self, task_id: int, status: str, result: dict = None):
         try:
             if status == "running":
+                sql = """
+                    UPDATE agent_tasks
+                    SET status = :status, started_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                """ if self.is_sqlite else """
+                    UPDATE agent_tasks
+                    SET status = :status, started_at = NOW()
+                    WHERE id = :id
+                """
                 self.db.execute(
-                    text(
-                        """
-                        UPDATE agent_tasks
-                        SET status = :status, started_at = NOW()
-                        WHERE id = :id
-                        """
-                    ),
+                    text(sql),
                     {"status": status, "id": task_id},
                 )
             elif status in ("done", "failed"):
+                sql = """
+                    UPDATE agent_tasks
+                    SET status = :status,
+                        result = :result,
+                        completed_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                """ if self.is_sqlite else """
+                    UPDATE agent_tasks
+                    SET status = :status,
+                        result = CAST(:result AS JSONB),
+                        completed_at = NOW()
+                    WHERE id = :id
+                """
                 self.db.execute(
-                    text(
-                        """
-                        UPDATE agent_tasks
-                        SET status = :status,
-                            result = CAST(:result AS JSONB),
-                            completed_at = NOW()
-                        WHERE id = :id
-                        """
-                    ),
+                    text(sql),
                     {
                         "status": status,
                         "result": self._json_value(result),

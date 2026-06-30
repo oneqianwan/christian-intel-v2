@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -223,6 +224,43 @@ class LLMClient:
 
 
 llm = LLMClient()
+
+
+def call_llm(prompt: str, max_tokens: int = 1500, temperature: float = 0.1) -> str:
+    """同步兼容入口，返回原始文本。"""
+    if not llm.enabled:
+        raise RuntimeError("LLM API key 未配置")
+
+    async def _call() -> str:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{llm.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {llm.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": llm.model,
+                    "messages": [
+                        {"role": "system", "content": "你是信息提取器，只输出用户要求的结果。"},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
+
+    try:
+        return asyncio.run(_call())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_call())
+        finally:
+            loop.close()
 
 
 def get_llm_client() -> LLMClient:

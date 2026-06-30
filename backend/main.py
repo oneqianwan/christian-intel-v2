@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from models.database import init_db
-from routers import agent, bookmarks, chat, configs, conversations, diagnostics, export, health, missions, search, url_analysis
+from routers import agent, bookmarks, chat, collection, configs, conversations, dashboard, diagnostics, export, feedback, health, missions, search, tasks, url_analysis
 
 app = FastAPI(title="Christian Intel v2", version="0.1.0")
 
@@ -31,4 +31,8 @@ app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(bookmarks.router, prefix="/api", tags=["bookmarks"])
 app.include_router(search.router, prefix="/api", tags=["search"])
 app.include_router(configs.router, prefix="/api", tags=["configs"])
+app.include_router(tasks.router, prefix="/api", tags=["tasks"])
+app.include_router(feedback.router, prefix="/api", tags=["feedback"])
 app.include_router(agent.router)
+app.include_router(collection.router)
+app.include_router(dashboard.router)

@@ -6,13 +6,23 @@ from datetime import datetime
 from typing import Any
 
 from cryptography.fernet import Fernet
+from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from models.database import ApiConfig, SessionLocal, init_db
 
+load_dotenv(override=True)
+
 
 MASTER_KEY_ENV = "API_CONFIG_MASTER_KEY"
+ENV_FALLBACKS = {
+    "newsapi": ["NEWSAPI_KEY", "NEWS_API_KEY"],
+    "youtube": ["YOUTUBE_API_KEY", "GOOGLE_CSE_API_KEY"],
+    "google_cse": ["GOOGLE_CSE_API_KEY", "YOUTUBE_API_KEY"],
+    "scrapingbee": ["SCRAPINGBEE_API_KEY"],
+    "deepseek": ["DEEPSEEK_API_KEY"],
+}
 
 
 def _derive_fernet_key(raw_value: str) -> bytes:
@@ -139,7 +149,15 @@ def save_api_key(
 
 def get_api_key(db: Session, api_name: str) -> str:
     config = get_api_config(db, api_name)
-    return (config or {}).get("api_key", "")
+    stored_key = (config or {}).get("api_key", "")
+    if stored_key:
+        return stored_key
+
+    for env_name in ENV_FALLBACKS.get(api_name, []):
+        env_value = os.getenv(env_name, "").strip()
+        if env_value:
+            return env_value
+    return ""
 
 
 def test_api_key(db: Session, api_name: str) -> dict[str, Any] | None:

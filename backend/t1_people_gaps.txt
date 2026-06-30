@@ -1,0 +1,334 @@
+# T1 People Gaps - Manual Entry List
+# Total: 269 organizations need People info
+# Format: Organization Name | Website | Suggested Leader | Title
+#--------------------------------------------------------------------------------
+
+## Argentina
+
+Archdiocese of Buenos Aires | http://www.arzbaires.org.ar/inicio/index.html | ??? | ???
+Argentine Catholic Apostolic Church | https://www.aca.org | ??? | ???
+Buenos Aires Metropolitan Cathedral | https://www.bamc.org | ??? | ???
+Russian Orthodox Cathedral of the Holy Trinity | https://www.holytrinitycathedral.org/ | ??? | ???
+## Australia
+
+All Saints Anglican Church | https://www.swananglicans.org.au/all-saints-church-c1n0c | ??? | ???
+Anglican Church of Australia | https://anglican.org.au | ??? | ???
+Australian Christian Churches | https://www.acc.org.au/ | ??? | ???
+Baptist Union of Australia | https://www.boa.com | ??? | ???
+CRC Churches International | https://www.crces.com | ??? | ???
+Cathedral of St Andrew | https://www.cosa.org | ??? | ???
+National Church Life Survey | NO_URL | ??? | ???
+National Council of Churches in Australia | NO_URL | ??? | ???
+## Brazil
+
+Anglican Episcopal Church of Brazil | http://www.ieab.org.br | ??? | ???
+Antiochian Orthodox Church | https://www.genuineorthodoxchurch.org/ | ??? | ???
+Brazilian Catholic Apostolic Church | https://www.bca.org | ??? | ???
+Eastern Orthodox Church | https://www.easternorthodoxchurch.org/ | ??? | ???
+Ukrainian Autocephalous Orthodox Church in Diaspora | NO_URL | ??? | ???
+## Canada
+
+American-Canadian Macedonian Orthodox Diocese | https://www.amod.org | ??? | ???
+Anglican Church of Canada | http://www.anglican.ca/ | ??? | ???
+Antiochian Orthodox Archdiocese, N.Am. | https://www.aoan.org | ??? | ???
+Apostolic Christian Church (Nazarene) | https://www.apostolicchristian.org | ??? | ???
+Apostolic Church of Pentecost | http://www.acop.ca | ??? | ???
+Armenian Apostolic Diocese of Am. | https://www.aadoa.com | ??? | ???
+Associated Gospel Churches | http://www.agcofcanada.com | ??? | ???
+Brethren in Christ Church of Canada | https://www.bicoc.org | ??? | ???
+British Methodist Episcopal Church | https://www.bme.org | ??? | ???
+Canadian Conference of Catholic Bishops | NO_URL | ??? | ???
+Canadian Conference of Mennonite Brethren Churches | https://www.ccomb.org | ??? | ???
+Canadian Council of Churches | NO_URL | ??? | ???
+Canadian Mennonite Brethren Churches | https://www.cmb.org | ??? | ???
+Canadian and American Reformed Churches | https://www.caar.org | ??? | ???
+Catholic Church in Canada | https://www.catholicincanada.com | ??? | ???
+Christian Reformed Church in North America | NO_URL | ??? | ???
+Evangelical Lutheran Church in Canada | NO_URL | ??? | ???
+Lutheran Church–Canada | NO_URL | ??? | ???
+Presbyterian Church in Canada | NO_URL | ??? | ???
+Russian Orthodox Church Outside Russia | NO_URL | ??? | ???
+Yearbook of American and Canadian Churches | NO_URL | ??? | ???
+## Democratic Republic of the Congo
+
+Baptist Missionary Society | https://www.bms.com | ??? | ???
+Cathedral of Saints Peter and Paul | https://www.cospap.com | ??? | ???
+## Egypt
+
+All Saint's Church | https://www.svenskakyrkan.se/gallivare/kyrkor/allhelgonakyrkan | ??? | ???
+Armenian Apostolic Church | https://armenianchurch.org | ??? | ???
+Armenian Catholic Church | https://www.armeniancatholic.org/ | ??? | ???
+Armenian Evangelical Church | https://eca.am | ??? | ???
+Catholic Church in Egypt | NO_URL | ??? | ???
+Diocese of Egypt | https://dioceseofegypt.org/ | ??? | ???
+Evangelical Presbyterian Church of Egypt, Synod of the Nile | https://www.epcegypt.org/about | ??? | ???
+Free Methodist Church | https://fmcusa.org/ | ??? | ???
+Greek Orthodox Church | https://www.greekorthodoxchurch.org/ | ??? | ???
+## France
+
+1905 French law on the Separation of the Churches and the State | http://www.legifrance.gouv.fr/affichTexte.do?cidTexte=JORFTEXT000000508749&amp;fastPos=1&amp;fastReqId=1194187241&amp;categorieLien=cid&amp;oldAction=rechTexte | ??? | ???
+## Germany
+
+Assyrian Church of the East | http://assyrianchurch.org/ | ??? | ???
+Bulgarian Orthodox Church | NO_URL | ??? | ???
+Catholic Church in Germany | https://www.cig.org | ??? | ???
+Church of Scientology | NO_URL | ??? | ???
+Independent Evangelical-Lutheran Church | NO_URL | ??? | ???
+## Ghana
+
+Anglican Diocese of Accra | http://www.accra.anglican.org | ??? | ???
+Catholic Church in Ghana | https://www.cig.org | ??? | ???
+## Guatemala
+
+Anglican Church in Central America | NO_URL | ??? | ???
+Catholic Church in Guatemala | https://www.cig.org | ??? | ???
+## India
+
+All India Catholic Union | http://aicu.in/ | ??? | ???
+All Saints Cathedral, Allahabad | https://www.asca.org | ??? | ???
+American Marathi Mission | https://www.amm.org | ??? | ???
+American Missionary Association | https://www.americanmissionary.org | ??? | ???
+Andhra Evangelical Lutheran Church | https://www.ael.org | ??? | ???
+Archdiocese of Angamaly | https://www.aoa.org | ??? | ???
+Archdiocese of Angamalé | https://www.aoa.org | ??? | ???
+Archdiocese of Goa | http://www.archgoadaman.org/ | ??? | ???
+Archdiocese of Lisbon | http://www.patriarcado-lisboa.pt | ??? | ???
+Arunachal Baptist Church Council | https://www.ab.org | ??? | ???
+Assam Baptist Convention | https://www.abc.com | ??? | ???
+Baptist Church of Mizoram | https://www.bom.org | ??? | ???
+Baptist Union of North India | https://www.boni.com | ??? | ???
+Believers Eastern Church | https://www.be.org | ??? | ???
+Bengal Orissa Bihar Baptist Convention | https://www.bobbc.com | ??? | ???
+Bodo Evangelical Lutheran Church | https://www.bel.org | ??? | ???
+Boro Baptist Convention | https://bbc.org | ??? | ???
+CMS Mission to India | https://www.cmti.com | ??? | ???
+CNI Afghan Church | https://www.ca.org | ??? | ???
+CNI Cathedral Church of Redemption | https://www.ccor.org | ??? | ???
+Catholic Church in India | https://www.cii.org | ??? | ???
+Christian Congregation in India | https://christiancongregationintheworld.org | ??? | ???
+Church Mission Society | https://churchmissionsociety.org/ | ??? | ???
+Church of India, Burma and Ceylon | NO_URL | ??? | ???
+India Pentecostal Church of God | NO_URL | ??? | ???
+Infant Jesus Cathedral | NO_URL | ??? | ???
+Jacobite Syrian Christian Church | NO_URL | ??? | ???
+Jacobite Syrian Orthodox Church | NO_URL | ??? | ???
+Jeypore Evangelical Lutheran Church | NO_URL | ??? | ???
+Malabar Independent Syrian Church | NO_URL | ??? | ???
+Methodist Church in India | NO_URL | ??? | ???
+National Council of Churches in India | http://ncci1914.com | ??? | ???
+North Bank Baptist Christian Association | NO_URL | ??? | ???
+Presbyterian Church in India (Reformed) | http://www.pciga.org/ | ??? | ???
+Presbyterian Church in South India | NO_URL | ??? | ???
+The Pentecostal Mission | NO_URL | ??? | ???
+Union of Catholic Asian News | NO_URL | ??? | ???
+World Methodist Council | NO_URL | ??? | ???
+## Indonesia
+
+American Board of Commissioners for Foreign Missions | https://www.americanboard.org | ??? | ???
+Angkola Protestant Christian Church | https://www.apc.org | ??? | ???
+Anglican Diocese of Singapore | http://www.anglican.org.sg | ??? | ???
+Batak Christian Protestant Church | https://www.bcp.org | ??? | ???
+Bethany Indonesian Church | https://www.bi.org | ??? | ???
+## Israel
+
+Aid to the Church in Need | https://acninternational.org/ | ??? | ???
+Catholic Church and Judaism | https://www.caj.org | ??? | ???
+## Japan
+
+American Bible Society | http://americanbible.org | ??? | ???
+American Presbyterian Mission | https://www.presbyterianmission.org | ??? | ???
+Anglican Episcopal Church in Japan | https://www.nskk.org/ | ??? | ???
+British and Foreign Bible Society | https://www.bafbs.com | ??? | ???
+## Mexico
+
+Anglican Church in North America | https://anglicanchurch.net | ??? | ???
+Anglican Church of Mexico | http://mexico-anglican.org/ | ??? | ???
+Antiochian Orthodox Archdiocese of Mexico, Venezuela, Central America and the Caribbean | https://iglesiaortodoxa.org.mx/informacion/ | ??? | ???
+Associate Reformed Presbyterian Church | https://arpchurch.org | ??? | ???
+Associate Reformed Presbyterian Church of Mexico | https://www.arpom.org | ??? | ???
+## Nigeria
+
+African Methodist Episcopal Church in Nigeria | https://www.amein.org | ??? | ???
+Celestial Church of Christ | http://www.cccworldwide.org/ | ??? | ???
+Christ Apostolic Church | http://www.cacworldwide.net | ??? | ???
+Christian Association of Nigeria | http://christianassociationofnigeria.org/ | ??? | ???
+Church of Nigeria | http://www.anglican-nig.org/ | ??? | ???
+Church of Scotland | http://churchofscotland.org.uk | ??? | ???
+Church of the Brethren in Nigeria | NO_URL | ??? | ???
+Deeper Christian Life Ministry | http://www.deeperlifeonline.org/ | ??? | ???
+Fellowship of Churches of Christ in Nigeria | NO_URL | ??? | ???
+Gospel Faith Mission | http://www.gofamint.org | ??? | ???
+International Church of the Foursquare Gospel | https://www.foursquare.org/ | ??? | ???
+Living Faith Church Worldwide | http://faithtabernacle.org.ng/ | ??? | ???
+Lutheran Church of Christ in Nigeria | http://www.lccnigeria.org/ | ??? | ???
+Redeemed Christian Church of God | http://rccg.org/ | ??? | ???
+Society of African Missions | https://www.sma.ie | ??? | ???
+Synagogue Church of All Nations | https://www.scoan.org/ | ??? | ???
+The African Church | https://theafricanchurch.org/ | ??? | ???
+Word of Life Bible Church | https://ayo-oritsejafor.org | ??? | ???
+World Communion of Reformed Churches | https://wcrc.eu/ | ??? | ???
+## Philippines
+
+Apostolic Catholic Church | http://nsipb.com/ | ??? | ???
+Archdiocese of Palo | http://archdioceseofpalo.com | ??? | ???
+Baptist Bible Fellowship International | http://bbfi.org | ??? | ???
+Cathedral of Praise | http://cathedralofpraisemanila.com.ph | ??? | ???
+Charismatic Episcopal Church | https://www.iccec.org/ | ??? | ???
+Christ's Commission Fellowship | http://www.ccf.org.ph | ??? | ???
+Convention of Philippine Baptist Churches | https://www.cpbcph.org/ | ??? | ???
+Episcopal Church in the Philippines | http://www.episcopalchurchphilippines.com | ??? | ???
+Jesus Is Lord Church Worldwide | http://www.jilworldwide.org/ | ??? | ???
+Members Church of God International | https://www.mcgi.org/ | ??? | ???
+Philippine Chinese Baptist Convention | https://www.google.com/search?as_eq=wikipedia&q=%22Philippine+Chinese+Baptist+Convention%22 | ??? | ???
+Philippine Independent Church | http://www.ifi.org.ph/ | ??? | ???
+Philippine Orthodox Church | http://orthodoxchurchinphilippines.omhksea.org/ | ??? | ???
+Presbyterian Church of the Philippines | http://gapcp.org | ??? | ???
+Seventh-day Adventist Church | https://www.adventist.org | ??? | ???
+United Church of Christ in the Philippines | http://uccpchurch.com | ??? | ???
+United Methodist Church | https://www.umc.org/ | ??? | ???
+Victory Christian Fellowship | http://www.victory.org.ph/ | ??? | ???
+## Poland
+
+Baptist Christian Church of the Republic of Poland | https://www.baptistchristian.org | ??? | ???
+## Romania
+
+Anglican Church of the Resurrection | https://www.aotr.com | ??? | ???
+Apostolic Church of God | https://www.aog.org | ??? | ???
+Baptist Union of Romania | https://www.bor.org | ??? | ???
+## Russia
+
+Archdiocese of Mother of God at Moscow | http://www.cathmos.ru | ??? | ???
+Cathedral of the Immaculate Conception | https://www.cotic.org | ??? | ???
+Russian Orthodox Church Outside of Russia, The | http://www.synod.com/synod/indexeng.htm | ??? | ???
+## Singapore
+
+Archdiocese | http://www.webdiocesi.chiesacattolica.it/triveneto/trento/00019580_TRENTO.html | ??? | ???
+Barker Road Methodist Church | http://brmc.org.sg | ??? | ???
+New Creation Church | NO_URL | ??? | ???
+Telok Ayer Chinese Methodist Church | NO_URL | ??? | ???
+## South Africa
+
+African initiated churches | http://www.africanchristian.org | ??? | ???
+Afrikaans Protestant Church | http://apk.co.za/ | ??? | ???
+Anglican Church of Southern Africa | http://www.anglicanchurchsa.org | ??? | ???
+Apostolic Church of South Africa | https://web.archive.org/web/20111227071037/http://www.apostleunity.co.za/home.htm | ??? | ???
+Apostolic Faith Mission | http://www.afcbrooklyn.org | ??? | ???
+Apostolic Faith Mission of South Africa | http://www.afm-ags.org/ | ??? | ???
+Baptist Union of Southern Africa | https://www.bosa.org | ??? | ???
+CRL Rights Commission | https://www.crc.org | ??? | ???
+## South Korea
+
+Anglican Church of Korea | https://www.skh.or.kr/ | ??? | ???
+Archdiocese of Seoul | http://aos.catholic.or.kr | ??? | ???
+Church of the East | NO_URL | ??? | ???
+Conservative Reformed Presbyterian Church in Korea | NO_URL | ??? | ???
+Independent Reformed Church in Korea | http://www.irc.or.kr | ??? | ???
+Lutheran Church in Korea | http://www.lck.or.kr | ??? | ???
+Presbyterian Church in Korea (HapDong) | http://www.gapck.org/ | ??? | ???
+Presbyterian Church in Korea (Koshin) | NO_URL | ??? | ???
+Presbyterian Church in Korea (Tonghap) | http://www.pck.or.kr/ | ??? | ???
+Presbyterian Church in the Republic of Korea | http://www.prok.org/ | ??? | ???
+Presbyterian Church of Korea | NO_URL | ??? | ???
+Pyongyang Theological Seminary | NO_URL | ??? | ???
+Russian Orthodox Church | http://www.patriarchia.ru/ | ??? | ???
+## Tanzania
+
+Anglican Church of Tanzania | http://www.anglican.or.tz/ | ??? | ???
+Azania Front Lutheran Church | https://www.afl.org | ??? | ???
+## Thailand
+
+Anglican Church in Thailand | https://www.ait.com | ??? | ???
+Archdiocese of Bangkok | https://www.aob.org | ??? | ???
+Bangkok Mission Hospital | NO_URL | ??? | ???
+Bangkok's Assumption Cathedral | https://www.bac.org | ??? | ???
+## Uganda
+
+Baptist Union of Uganda | https://www.bou.org | ??? | ???
+## United Kingdom
+
+Albanian Orthodox Church | https://orthodoxalbania.org | ??? | ???
+Asso. Presbyterian Churches | https://www.ap.org | ??? | ???
+Association of Baptist Churches in Ireland | http://www.ireland.anglican.org/ | ??? | ???
+Baptist Union of Great Britain | https://www.bogb.org | ??? | ???
+Baptist Union of Wales | http://www.buw.org.uk/ | ??? | ???
+British Methodist Church | https://www.bm.org | ??? | ???
+British New Church | https://www.bn.org | ??? | ???
+British Orthodox Church | https://britishorthodox.org | ??? | ???
+Catholic Apostolic Church | https://www.ca.org | ??? | ???
+Catholic Church in Scotland | NO_URL | ??? | ???
+Church of God | NO_URL | ??? | ???
+General Assembly of Unitarian and Free Christian Churches | NO_URL | ??? | ???
+Gospel Standard | https://www.gospelstandard.org.uk/ | ??? | ???
+Gospel Standard Trust Publications | https://www.gospelstandard.org.uk/ | ??? | ???
+LDS Church in England | https://www.mormonnewsroom.org.uk/ | ??? | ???
+Moderator of the General Assembly of the Church of Scotland | http://www.churchofscotland.org.uk/ | ??? | ???
+Russian Orthodox Diocese of Sourozh | NO_URL | ??? | ???
+Scottish Episcopal Church | NO_URL | ??? | ???
+Unitarian Christian Association | NO_URL | ??? | ???
+## United States
+
+Albanian Orthodox Archdiocese of the Orthodox Church in America | https://albanianarchdiocese.org/ | ??? | ???
+Biola University | https://www.biola.edu/ | ??? | ???
+Central Yearly Meeting of Friends | https://www.holinessmovement.org/central-yearly-meeting-of-friends/ | ??? | ???
+North American Lutheran Church | https://thenalc.org/en-us/ | ??? | ???
+North American Old Roman Catholic Church (Archdiocese of New York) | https://www.naorcc.org/ | ??? | ???
+Old Catholic Church in America | /us-religion/history/timelines/interactive-display?tid=7 | ??? | ???
+Old Regular Baptists | https://oldregularbaptist.weebly.com/ | ??? | ???
+Orthodox Church in America, The | https://www.oca.org | ??? | ???
+Orthodox Church in America, The (1970 - Present) | https://www.oca.org | ??? | ???
+Orthodox Presbyterian Church | https://www.opc.org/ | ??? | ???
+Patriarchal Parishes of the Russian Orthodox Church in the U.S.A. | https://mospatusa.com/ | ??? | ???
+Pentecostal Assemblies of Jesus Christ Inc. | https://www.pajci.org/about-us | ??? | ???
+Pentecostal Assemblies of the World | https://www.pawinc.org/ | ??? | ???
+Pentecostal Church of God | https://www.pcg.org/ | ??? | ???
+Pentecostal Free Will Baptist Church, Inc. | https://www.pfwb.org/about | ??? | ???
+Pentecostal Free Will Baptist Church, Inc. | https://www.pfwb.org/ | ??? | ???
+Pillar of Fire | https://pillarministries.org/ | ??? | ???
+Polish National Catholic Church of America | http://www.pncc.org/ | ??? | ???
+Polish National Catholic Church of America | http://www.pncc.org/ | ??? | ???
+Presbyterian Church (U.S.A.) | https://www.pcusa.org | ??? | ???
+Presbyterian Church in America | https://www.pcanet.org/about | ??? | ???
+Presbyterian Church in the United States (1861 - 1983) | /us-religion/history/timelines/interactive-display?tid=9 | ??? | ???
+Primitive Baptists, Eastern District Association of | https://www.edapb.org/ | ??? | ???
+Primitive Methodist Church in the U.S.A. | http://www.primitivemethodistchurch.org/ | ??? | ???
+Progressive National Baptist Convention, Inc. | https://www.pnbc.org/ | ??? | ???
+Progressive National Baptist Convention, Inc. | https://www.pnbc.org/ | ??? | ???
+Protes'tant Conference, The | https://www.protestantconference.org/ | ??? | ???
+Protestant Reformed Churches in America | http://www.prca.org/ | ??? | ???
+Protestant Reformed Churches in America | http://www.prca.org/ | ??? | ???
+Reformed Church in America | https://www.rca.org/ | ??? | ???
+Reformed Church in the United States | http://www.rcus.org/ | ??? | ???
+Reformed Church in the United States (1934 - Present) | http://www.rcus.org/ | ??? | ???
+Reformed Episcopal Church | http://www.rechurch.org/ | ??? | ???
+Reformed Mennonite Church | http://www.reformedmennonite.org | ??? | ???
+Reformed Presbyterian Church General Assembly | https://www.rpcga.org/about | ??? | ???
+Reformed Presbyterian Church General Assembly (1991 - Present) | https://www.rpcga.org/ | ??? | ???
+Reformed Presbyterian Church Hanover Presbytery | https://rpchanover.org/ | ??? | ???
+Reformed Presbyterian Church Hanover Presbytery (1990 - Present) | https://rpchanover.org/ | ??? | ???
+Reformed Presbyterian Church in the United States | https://www.rpcus.com/ | ??? | ???
+Reformed Presbyterian Church in the United States (1985 - Present) | https://www.rpcus.com/ | ??? | ???
+Reformed Presbyterian Church of North America (Covenanters) | https://reformedpresbyterian.org/ | ??? | ???
+Reformed Zion Union Apostolic Church | http://rzua.org/ | ??? | ???
+Romanian Orthodox Episcopate of America | https://www.roea.org/about | ??? | ???
+Romanian Orthodox Metropolia of the Americas | https://www.mitropolia.us/index.php/en/ | ??? | ???
+Salvation Army | https://www.salvationarmyusa.org/usn/ | ??? | ???
+Schwenkfelder Church in America | https://www.centralschwenkfelder.com/about-us | ??? | ???
+Separate Baptists in Christ | http://www.separatebaptist.org/ | ??? | ???
+Separate Baptists in Christ | http://www.separatebaptist.org/ | ??? | ???
+Serbian Metropolitanate of New Gracanica | https://www.serborth.org | ??? | ???
+Serbian Metropolitanate of New Gracanica (1963 - 1998) | https://www.serborth.org | ??? | ???
+Serbian Orthodox Church in North and South America | https://www.serborth.org/ | ??? | ???
+Seventh Day Baptists (German) | https://germanseventhdaybaptist.com/ | ??? | ???
+Southern Baptist Convention | http://www.sbc.net/ | ??? | ???
+Southern Methodist Church | http://www.thesmc.org/ | ??? | ???
+USCCB | http://www.usccb.org/ | ??? | ???
+## Vietnam
+
+Baptist Convention of Vietnam | https://www.bcov.org | ??? | ???
+## 全球
+
+Presbyterian Reformed Church | https://presbyterianreformed.org/about-us | ??? | ???
+Reformed Catholic Church | http://www.reformedcatholic.org/ | ??? | ???
+Strict Baptists | https://www.gospelstandard.org.uk/ | ??? | ???
+Swedenborgian Church | https://swedenborg.org/ | ??? | ???
+Syriac-Greek Antiochian Orthodox Catholic Church | https://rbsocc.org/ | ??? | ???

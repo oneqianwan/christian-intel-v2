@@ -7,6 +7,10 @@ backend/.env
 backend/.venv/
 backend/__pycache__/
 backend/.tmp_*.py
+backend/*.db
+backend/*.db.*
+backend/_db_backups/
+backend/_write_test.tmp
 backend/agent/.agent_last_run
 backend/services/.last_api_run
 backend/runtime_logs/
@@ -15,5 +19,9 @@ backend/data/user_preferences.json
 
 frontend/node_modules/
 frontend/dist/
+
+.audit/
+logs/
+backups/
 
 *.pyc
