@@ -715,3 +715,12 @@
 - `backend\crawlers\website_deep_crawler.py`
 - `backend\crawlers\wiki_christian_collector.py`
 - `backend\crawlers\wiki_website_extractor.py`
+
+## 7. Recovery Baseline
+
+- Git 基线提交：`e480fc6`
+- Git 标签：`pre-agent-upgrade-20260630-2005`
+- Git 备份分支：`backup/pre-agent-upgrade-20260630-2005`
+- 数据库备份：`backups/pre-agent-upgrade-20260630-200319/cio_intelligence.db`
+- 项目 Zip 快照：`backups/pre-agent-upgrade-20260630-200319/project-code-snapshot.zip`
+- 用途：作为 Agent 升级前的安全回退点，代码回退与数据回退需成对使用

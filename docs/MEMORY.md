@@ -1,5 +1,14 @@
 # 项目记忆 — Christian Intel (FaithMate)
 
+## 升级前回退基线（2026-06-30）
+- 已建立 Agent 升级前的三重回退基线：Git 基线 + SQLite 物理备份 + 项目 Zip 快照
+- Git 基线提交：`e480fc6`（`backup: baseline before agent upgrade`）
+- Git 标签：`pre-agent-upgrade-20260630-2005`
+- Git 备份分支：`backup/pre-agent-upgrade-20260630-2005`
+- 数据库快照：`backups/pre-agent-upgrade-20260630-200319/cio_intelligence.db`
+- 项目快照：`backups/pre-agent-upgrade-20260630-200319/project-code-snapshot.zip`
+- 当前仓库状态：基线提交后工作区已清空，可作为后续 Agent 升级的安全起点
+
 ## 30天计划完成状态（2026-06-30）
 
 ### 已完成工作
@@ -69,6 +78,7 @@
 - Week 2 Dashboard 产品化：已完成首页结构升级，下一步进入国家维度/质量分布可视化增强
 - Week 3 Brain升级：下一步将复杂分析模式从模板驱动升级为真正的多Agent协同执行
 - Week 4 History Layer：Dashboard主路径、批处理脚本、深采更新链路均已接入，下一步转向 History 趋势与版本 Diff 展示
+- Agent 升级前回退基线已完成：当前可安全进入下一轮 Agent 升级与架构演进
 
 ## 技术栈
 - Backend: Python/FastAPI/SQLAlchemy/SQLite
@@ -80,11 +90,11 @@
 - 用户不是基督教徒，菲律宾无基督教资源
 - 目标是找投资者/收购方，不是SaaS订阅
 - 策略：停止横向加功能，纵向做数据
-- brain.py是核心编排器，目前未入Git（需修复）
+- `brain.py` 是核心编排器，虽已纳入 Git 基线，但仍属于高风险“上帝模块”
 
 ## 风险项
 1. brain.py职责过重（上帝模块），需拆分
-2. brain.py未入Git版本控制
+2. 当前回退基线已在本地建立，如需跨设备/远端双保险，仍应补推 tag/backup branch
 3. People覆盖率20.3%仍是最大缺口
 4. Pages_crawled只存URL索引，不存HTML内容
 5. People提取依赖Leadership页面原文HTML，但当前数据层缺少HTML落库/文件化存储机制

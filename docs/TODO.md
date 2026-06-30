@@ -19,7 +19,7 @@
 - [ ] 文本清洗规则加固（过滤 parked domain / Access Denied / 年份误识别电话）
 
 ## P1：Brain优化
-- [ ] brain.py纳入Git版本控制
+- [x] brain.py纳入Git版本控制（已纳入升级前基线）
 - [ ] brain.py职责拆分（意图识别/参数推断/工具调度/格式化/补采）
 - [x] Week 3 Planner复杂分析模式（country_deep / competitor / investment）
 - [ ] Agent多模块体系搭建
@@ -49,13 +49,12 @@
 
 ## P5：基础设施
 - [x] 建立 docs/ 防失忆文档系统 + 架构地图生成
-- [ ] Git仓库清理（核心模块入版本控制）
+- [x] Git仓库清理（核心模块入版本控制 + 升级前基线提交）
 - [ ] 自动化调度（Scheduler/Worker）
 - [ ] Postgres迁移（远期）
+- [ ] 将升级前 tag / backup branch 推送到远端（可选双保险）
 
 ## 技术债务
-- [ ] brain.py未入Git
-- [ ] Git仓库dirty状态清理
 - [ ] SQLite方言兼容已修复，但长期需迁移
 - [ ] `history_recorder` 在批量事务中需统一传递同一 DB session，避免 SQLite `database is locked`
 - [ ] Contact 轻量抓取黑名单扩展（过滤 `sentry-next.wixpress.com` 等监控/埋点邮箱）
