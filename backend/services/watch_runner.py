@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 
 from datetime import datetime, timedelta
@@ -8,7 +9,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from models.watch_alert import WatchRun, WatchTarget
-from services.signal_service import create_signals_for_changes, list_signals_for_watch_target
+from services.alert_engine import process_signals
+from services.alert_rule_service import notifications_enabled
+from services.signal_service import create_signal_records_for_changes, list_signals_for_watch_target
 from services.watch_change_detector import detect_watch_changes
 from services.watch_scheduler import (
     WATCH_RUN_DUPLICATE,
@@ -205,19 +208,35 @@ def _claim_pending_auto_run(
     return watch_run
 
 
-def _collect_execution_result(db: Session, watch_target: WatchTarget) -> tuple[dict, int, int, bool]:
+def _collect_execution_result(db: Session, watch_target: WatchTarget) -> tuple[dict, int, int, int, bool]:
     current_snapshot = build_watch_snapshot(db, watch_target)
     previous_run = _latest_successful_run(db, watch_target.id)
     previous_snapshot = _build_previous_snapshot(previous_run)
     changes = detect_watch_changes(previous_snapshot, current_snapshot)
-    signals_created = 0 if previous_snapshot is None else create_signals_for_changes(db, watch_target, current_snapshot, changes)
+    created_signals = [] if previous_snapshot is None else create_signal_records_for_changes(db, watch_target, current_snapshot, changes)
+    alerts_created = 0
+    if created_signals and notifications_enabled():
+        try:
+            alert_result = process_signals(db, [signal.id for signal in created_signals])
+            alerts_created = alert_result.created_count
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "event": "watch_alert_engine_batch_failed",
+                        "watch_target_id": watch_target.id,
+                        "error": str(exc)[:300],
+                    },
+                    ensure_ascii=False,
+                )
+            )
     items_found = (
         len(current_snapshot.get("intelligence_ids") or [])
         + len(current_snapshot.get("news_urls") or [])
         + len(current_snapshot.get("video_urls") or [])
         + len(current_snapshot.get("relation_keys") or [])
     )
-    return current_snapshot, items_found, signals_created, previous_snapshot is None
+    return current_snapshot, items_found, len(created_signals), alerts_created, previous_snapshot is None
 
 
 def _mark_run_success(
@@ -228,6 +247,7 @@ def _mark_run_success(
     current_snapshot: dict,
     items_found: int,
     signals_created: int,
+    alerts_created: int,
     baseline_created: bool,
     next_check_at: datetime | None,
     extra_summary: dict | None = None,
@@ -236,6 +256,7 @@ def _mark_run_success(
     run_summary = {
         "items_found": items_found,
         "signals_created": signals_created,
+        "alerts_created": alerts_created,
         "baseline_created": baseline_created,
     }
     if extra_summary:
@@ -245,7 +266,7 @@ def _mark_run_success(
     watch_run.finished_at = finished_at
     watch_run.items_found = items_found
     watch_run.signals_created = signals_created
-    watch_run.alerts_created = 0
+    watch_run.alerts_created = alerts_created
     watch_run.error_code = None
     watch_run.error_message = None
     watch_run.metadata_json = {
@@ -516,7 +537,7 @@ def _run_manual_watch_target(db: Session, watch_target_id: str, user_id: str) ->
     )
 
     try:
-        current_snapshot, items_found, signals_created, baseline_created = _collect_execution_result(db, watch_target)
+        current_snapshot, items_found, signals_created, alerts_created, baseline_created = _collect_execution_result(db, watch_target)
         return _mark_run_success(
             db,
             watch_run,
@@ -524,6 +545,7 @@ def _run_manual_watch_target(db: Session, watch_target_id: str, user_id: str) ->
             current_snapshot=current_snapshot,
             items_found=items_found,
             signals_created=signals_created,
+            alerts_created=alerts_created,
             baseline_created=baseline_created,
             next_check_at=watch_target.next_check_at,
         )
@@ -584,7 +606,7 @@ def _run_automatic_watch_target(
         )
 
     try:
-        current_snapshot, items_found, signals_created, baseline_created = _collect_execution_result(db, watch_target)
+        current_snapshot, items_found, signals_created, alerts_created, baseline_created = _collect_execution_result(db, watch_target)
         next_check_at = advance_next_check_at(
             frequency=watch_target.frequency,
             scheduled_at=scheduled_at,
@@ -597,6 +619,7 @@ def _run_automatic_watch_target(
             current_snapshot=current_snapshot,
             items_found=items_found,
             signals_created=signals_created,
+            alerts_created=alerts_created,
             baseline_created=baseline_created,
             next_check_at=next_check_at,
             extra_summary={

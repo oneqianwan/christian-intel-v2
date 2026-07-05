@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from models.database import init_db
 from routers import (
     agent,
+    alerts,
     bookmarks,
     chat,
     collection,
@@ -66,3 +67,4 @@ app.include_router(collection.router)
 app.include_router(dashboard.router)
 app.include_router(org_detail.router)
 app.include_router(watch_targets.router, prefix="/api", tags=["watch_targets"])
+app.include_router(alerts.router, prefix="/api", tags=["alerts"])

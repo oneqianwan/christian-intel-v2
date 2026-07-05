@@ -93,13 +93,13 @@ def _dedup_key(watch_target: WatchTarget, change: dict) -> str:
     return f"{watch_target.id}|{signal_type}|{field_name}|{normalized_value}"
 
 
-def create_signals_for_changes(
+def create_signal_records_for_changes(
     db: Session,
     watch_target: WatchTarget,
     current_snapshot: dict,
     changes: list[dict],
-) -> int:
-    created = 0
+) -> list[Signal]:
+    created_signals: list[Signal] = []
     for change in changes:
         dedup_key = _dedup_key(watch_target, change)
         title, summary = _title_and_summary(change)
@@ -126,10 +126,19 @@ def create_signals_for_changes(
             with db.begin_nested():
                 db.add(signal)
                 db.flush()
-                created += 1
+                created_signals.append(signal)
         except IntegrityError:
             continue
-    return created
+    return created_signals
+
+
+def create_signals_for_changes(
+    db: Session,
+    watch_target: WatchTarget,
+    current_snapshot: dict,
+    changes: list[dict],
+) -> int:
+    return len(create_signal_records_for_changes(db, watch_target, current_snapshot, changes))
 
 
 def list_signals_for_watch_target(

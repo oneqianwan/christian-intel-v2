@@ -21,6 +21,8 @@ SignalType = Literal[
 ]
 SignalSeverity = Literal["low", "medium", "high", "critical"]
 WatchRunStatus = Literal["pending", "running", "success", "failed", "skipped"]
+AlertStatus = Literal["unread", "read", "dismissed"]
+AlertSeverity = Literal["low", "medium", "high", "critical"]
 
 
 class ApiErrorResponse(BaseModel):
@@ -100,3 +102,34 @@ class SignalListResponse(BaseModel):
     page: int
     page_size: int
     total: int
+
+
+class AlertResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    watch_target_id: str
+    signal_id: str
+    title: str
+    summary: str | None = None
+    severity: AlertSeverity
+    status: AlertStatus
+    source_url: str | None = None
+    created_at: datetime
+    read_at: datetime | None = None
+    dismissed_at: datetime | None = None
+
+
+class AlertListResponse(BaseModel):
+    items: list[AlertResponse]
+    page: int
+    page_size: int
+    total: int
+
+
+class AlertUnreadCountResponse(BaseModel):
+    unread_count: int
+
+
+class AlertReadAllResponse(BaseModel):
+    updated_count: int
