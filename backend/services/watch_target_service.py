@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
@@ -37,6 +37,57 @@ class WatchTargetEntityNotFoundError(WatchTargetServiceError):
     status_code = 404
     error_code = "WATCH_TARGET_ENTITY_NOT_FOUND"
     message = "Target entity not found"
+
+
+def utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+def _schedule_interval(frequency: str) -> timedelta | None:
+    if frequency == "daily":
+        return timedelta(days=1)
+    if frequency == "weekly":
+        return timedelta(days=7)
+    return None
+
+
+def compute_next_check_at(frequency: str, *, now: datetime | None = None) -> datetime | None:
+    base_time = now or utcnow()
+    interval = _schedule_interval(frequency)
+    if interval is None:
+        return None
+    return base_time + interval
+
+
+def compute_next_check_at_for_state(
+    *,
+    status: str,
+    frequency: str,
+    now: datetime | None = None,
+) -> datetime | None:
+    if status != "active":
+        return None
+    return compute_next_check_at(frequency, now=now)
+
+
+def advance_next_check_at(
+    *,
+    frequency: str,
+    scheduled_at: datetime | None,
+    now: datetime | None = None,
+) -> datetime | None:
+    if frequency == "manual" or scheduled_at is None:
+        return None
+
+    interval = _schedule_interval(frequency)
+    if interval is None:
+        return None
+
+    current_time = now or utcnow()
+    candidate = scheduled_at + interval
+    while candidate <= current_time:
+        candidate += interval
+    return candidate
 
 
 def _entity_exists(db: Session, entity_id: str, entity_type: Literal["organization", "knowledge_entity"]) -> bool:
@@ -103,6 +154,10 @@ def create_watch_target(db: Session, user_id: str, payload: WatchTargetCreate) -
         entity_type=payload.entity_type,
         status="active",
         frequency=payload.frequency,
+        next_check_at=compute_next_check_at_for_state(
+            status="active",
+            frequency=payload.frequency,
+        ),
     )
     db.add(watch_target)
     try:
@@ -147,10 +202,19 @@ def list_watch_targets(
 
 def update_watch_target(db: Session, watch_target_id: str, user_id: str, payload: WatchTargetUpdate) -> WatchTarget:
     watch_target = get_owned_watch_target(db, watch_target_id, user_id)
+    next_status = payload.status if payload.status is not None else watch_target.status
+    next_frequency = payload.frequency if payload.frequency is not None else watch_target.frequency
+
     if payload.status is not None:
         watch_target.status = payload.status
     if payload.frequency is not None:
         watch_target.frequency = payload.frequency
+
+    if payload.status is not None or payload.frequency is not None:
+        watch_target.next_check_at = compute_next_check_at_for_state(
+            status=next_status,
+            frequency=next_frequency,
+        )
 
     try:
         db.commit()
@@ -163,8 +227,9 @@ def update_watch_target(db: Session, watch_target_id: str, user_id: str, payload
 
 def soft_delete_watch_target(db: Session, watch_target_id: str, user_id: str) -> None:
     watch_target = get_owned_watch_target(db, watch_target_id, user_id)
-    watch_target.deleted_at = datetime.utcnow()
+    watch_target.deleted_at = utcnow()
     watch_target.status = "disabled"
+    watch_target.next_check_at = None
     try:
         db.commit()
     except Exception:

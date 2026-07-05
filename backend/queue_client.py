@@ -11,6 +11,14 @@ DEFAULT_COLLECTION_PRIORITY = 5
 HIGH_COLLECTION_PRIORITY = 8
 
 
+def get_redis_connection():
+    return conn
+
+
+def get_collection_queue():
+    return collection_queue
+
+
 def enqueue_collection_mission(mission_id: str, priority: int = DEFAULT_COLLECTION_PRIORITY):
     return collection_queue.enqueue(
         run_mission,
