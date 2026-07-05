@@ -1,0 +1,361 @@
+{
+  "org_investors": {
+    "entity:70b19ca5-dae0-40bf-92de-f4eed1fbfefd": [
+      {
+        "name": "Life.Church",
+        "id": 67,
+        "amount": 5000000.0,
+        "lead_investor": true,
+        "round_id": 1,
+        "round_type": "grant"
+      },
+      {
+        "name": "Draper Associates",
+        "id": 22,
+        "amount": 10000000.0,
+        "lead_investor": true,
+        "round_id": 2,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Messiah Foundation",
+        "id": 5,
+        "amount": 5000000.0,
+        "lead_investor": false,
+        "round_id": 2,
+        "round_type": "series_a"
+      }
+    ],
+    "entity:b3564c08-a013-40d3-96ad-4736be81f501": [
+      {
+        "name": "Greylock Partners",
+        "id": 23,
+        "amount": 8000000.0,
+        "lead_investor": true,
+        "round_id": 3,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Faith Driven Investor Network",
+        "id": 20,
+        "amount": 3000000.0,
+        "lead_investor": false,
+        "round_id": 3,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Greylock Partners",
+        "id": 23,
+        "amount": 25000000.0,
+        "lead_investor": true,
+        "round_id": 4,
+        "round_type": "series_b"
+      },
+      {
+        "name": "Draper Associates",
+        "id": 22,
+        "amount": 15000000.0,
+        "lead_investor": false,
+        "round_id": 4,
+        "round_type": "series_b"
+      },
+      {
+        "name": "Messiah Foundation",
+        "id": 5,
+        "amount": 5000000.0,
+        "lead_investor": false,
+        "round_id": 4,
+        "round_type": "series_b"
+      }
+    ],
+    "entity:59464e6a-af59-4a9e-824b-9658750b8806": [
+      {
+        "name": "Templeton Religion Trust",
+        "id": 3,
+        "amount": 1500000.0,
+        "lead_investor": true,
+        "round_id": 5,
+        "round_type": "grant"
+      },
+      {
+        "name": "Maclellan Foundation",
+        "id": 1,
+        "amount": 500000.0,
+        "lead_investor": false,
+        "round_id": 5,
+        "round_type": "grant"
+      }
+    ],
+    "entity:37ead1a0-61c4-4310-807f-0b381f8dbdca": [
+      {
+        "name": "Faith Driven Investor Network",
+        "id": 20,
+        "amount": 5000000.0,
+        "lead_investor": true,
+        "round_id": 7,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Christian Angel Network",
+        "id": 31,
+        "amount": 3000000.0,
+        "lead_investor": false,
+        "round_id": 7,
+        "round_type": "series_a"
+      }
+    ],
+    "entity:be77b311-6750-4715-b39c-ea0bdf5476ed": [
+      {
+        "name": "Lightspeed Venture Partners",
+        "id": 25,
+        "amount": 6000000.0,
+        "lead_investor": true,
+        "round_id": 8,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Faith Driven Investor Network",
+        "id": 20,
+        "amount": 4000000.0,
+        "lead_investor": false,
+        "round_id": 8,
+        "round_type": "series_a"
+      }
+    ],
+    "entity:e0a8a62a-5ccb-4ad4-8761-c82d8ec0bf04": [
+      {
+        "name": "Bessemer Venture Partners",
+        "id": 26,
+        "amount": 50000000.0,
+        "lead_investor": true,
+        "round_id": 9,
+        "round_type": "ipo"
+      }
+    ],
+    "entity:ed496cc4-b238-43f6-a2cc-ea18f474d908": [
+      {
+        "name": "LifeWay Christian Resources",
+        "id": 49,
+        "amount": 120000000.0,
+        "lead_investor": true,
+        "round_id": 6,
+        "round_type": "acquisition"
+      }
+    ]
+  },
+  "investor_orgs": {
+    "67": [
+      {
+        "name": "YouVersion / Life.Church",
+        "id": "entity:70b19ca5-dae0-40bf-92de-f4eed1fbfefd",
+        "country": "美国",
+        "round_id": 1,
+        "round_type": "grant"
+      }
+    ],
+    "22": [
+      {
+        "name": "YouVersion / Life.Church",
+        "id": "entity:70b19ca5-dae0-40bf-92de-f4eed1fbfefd",
+        "country": "美国",
+        "round_id": 2,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Gloo",
+        "id": "entity:b3564c08-a013-40d3-96ad-4736be81f501",
+        "country": "美国",
+        "round_id": 4,
+        "round_type": "series_b"
+      }
+    ],
+    "5": [
+      {
+        "name": "YouVersion / Life.Church",
+        "id": "entity:70b19ca5-dae0-40bf-92de-f4eed1fbfefd",
+        "country": "美国",
+        "round_id": 2,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Gloo",
+        "id": "entity:b3564c08-a013-40d3-96ad-4736be81f501",
+        "country": "美国",
+        "round_id": 4,
+        "round_type": "series_b"
+      }
+    ],
+    "23": [
+      {
+        "name": "Gloo",
+        "id": "entity:b3564c08-a013-40d3-96ad-4736be81f501",
+        "country": "美国",
+        "round_id": 3,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Gloo",
+        "id": "entity:b3564c08-a013-40d3-96ad-4736be81f501",
+        "country": "美国",
+        "round_id": 4,
+        "round_type": "series_b"
+      }
+    ],
+    "20": [
+      {
+        "name": "Gloo",
+        "id": "entity:b3564c08-a013-40d3-96ad-4736be81f501",
+        "country": "美国",
+        "round_id": 3,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Subsplash",
+        "id": "entity:37ead1a0-61c4-4310-807f-0b381f8dbdca",
+        "country": "美国",
+        "round_id": 7,
+        "round_type": "series_a"
+      },
+      {
+        "name": "Tithe.ly",
+        "id": "entity:be77b311-6750-4715-b39c-ea0bdf5476ed",
+        "country": "美国",
+        "round_id": 8,
+        "round_type": "series_a"
+      }
+    ],
+    "3": [
+      {
+        "name": "BibleProject",
+        "id": "entity:59464e6a-af59-4a9e-824b-9658750b8806",
+        "country": "美国",
+        "round_id": 5,
+        "round_type": "grant"
+      }
+    ],
+    "1": [
+      {
+        "name": "BibleProject",
+        "id": "entity:59464e6a-af59-4a9e-824b-9658750b8806",
+        "country": "美国",
+        "round_id": 5,
+        "round_type": "grant"
+      }
+    ],
+    "31": [
+      {
+        "name": "Subsplash",
+        "id": "entity:37ead1a0-61c4-4310-807f-0b381f8dbdca",
+        "country": "美国",
+        "round_id": 7,
+        "round_type": "series_a"
+      }
+    ],
+    "25": [
+      {
+        "name": "Tithe.ly",
+        "id": "entity:be77b311-6750-4715-b39c-ea0bdf5476ed",
+        "country": "美国",
+        "round_id": 8,
+        "round_type": "series_a"
+      }
+    ],
+    "26": [
+      {
+        "name": "Pushpay",
+        "id": "entity:e0a8a62a-5ccb-4ad4-8761-c82d8ec0bf04",
+        "country": "美国",
+        "round_id": 9,
+        "round_type": "ipo"
+      }
+    ],
+    "49": [
+      {
+        "name": "RightNow Media",
+        "id": "entity:ed496cc4-b238-43f6-a2cc-ea18f474d908",
+        "country": "美国",
+        "round_id": 6,
+        "round_type": "acquisition"
+      }
+    ]
+  },
+  "co_investors": [
+    {
+      "investor_a": 5,
+      "investor_b": 22,
+      "investor_a_name": "Messiah Foundation",
+      "investor_b_name": "Draper Associates",
+      "shared_rounds": 2,
+      "shared_round_ids": [
+        2,
+        4
+      ]
+    },
+    {
+      "investor_a": 20,
+      "investor_b": 23,
+      "investor_a_name": "Faith Driven Investor Network",
+      "investor_b_name": "Greylock Partners",
+      "shared_rounds": 1,
+      "shared_round_ids": [
+        3
+      ]
+    },
+    {
+      "investor_a": 22,
+      "investor_b": 23,
+      "investor_a_name": "Draper Associates",
+      "investor_b_name": "Greylock Partners",
+      "shared_rounds": 1,
+      "shared_round_ids": [
+        4
+      ]
+    },
+    {
+      "investor_a": 5,
+      "investor_b": 23,
+      "investor_a_name": "Messiah Foundation",
+      "investor_b_name": "Greylock Partners",
+      "shared_rounds": 1,
+      "shared_round_ids": [
+        4
+      ]
+    },
+    {
+      "investor_a": 1,
+      "investor_b": 3,
+      "investor_a_name": "Maclellan Foundation",
+      "investor_b_name": "Templeton Religion Trust",
+      "shared_rounds": 1,
+      "shared_round_ids": [
+        5
+      ]
+    },
+    {
+      "investor_a": 20,
+      "investor_b": 31,
+      "investor_a_name": "Faith Driven Investor Network",
+      "investor_b_name": "Christian Angel Network",
+      "shared_rounds": 1,
+      "shared_round_ids": [
+        7
+      ]
+    },
+    {
+      "investor_a": 20,
+      "investor_b": 25,
+      "investor_a_name": "Faith Driven Investor Network",
+      "investor_b_name": "Lightspeed Venture Partners",
+      "shared_rounds": 1,
+      "shared_round_ids": [
+        8
+      ]
+    }
+  ],
+  "stats": {
+    "total_relations": 16,
+    "orgs_with_investors": 7,
+    "co_investor_pairs": 7,
+    "investor_nodes": 11
+  }
+}

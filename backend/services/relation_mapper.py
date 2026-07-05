@@ -1,0 +1,216 @@
+"""
+关系映射服务
+将 relation_edges 的 source/target 映射到 organization_profiles。
+"""
+
+import json
+from typing import Dict, List, Optional
+
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from models.database import KnowledgeEntity, OrganizationProfile, RelationEdge
+
+
+class RelationMapper:
+    ENTITY_ORG_ALIASES = {
+        "gloo": "Gloo",
+        "world vision": "World Vision International",
+        "compassion international": "Compassion International",
+        "samaritans purse": "Samaritan's Purse",
+        "samaritan's purse": "Samaritan's Purse",
+        "youversion / life.church": "Life.Church",
+        "youversion": "Life.Church",
+        "bibleproject": "BibleProject",
+        "subsplash": "Subsplash",
+        "tithe.ly": "Tithe.ly",
+        "pushpay": "Pushpay",
+        "rightnow media": "RightNow Media",
+    }
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def enrich_relation(self, edge: RelationEdge) -> Optional[Dict]:
+        source = self._resolve_side(edge.source_id)
+        target = self._resolve_side(edge.target_id)
+
+        if not source and not target:
+            return None
+
+        legacy = self._parse_legacy_properties(edge)
+        investment_amount = edge.investment_amount or legacy.get("amount")
+        investment_currency = edge.investment_currency or legacy.get("currency") or "USD"
+        investment_round = edge.investment_round or legacy.get("round")
+        evidence_date = edge.evidence_date
+        if not evidence_date and legacy.get("date"):
+            evidence_date = str(legacy.get("date")).split("T")[0]
+        evidence_source = edge.evidence_source or edge.source_type_detail or edge.source_item or legacy.get("source")
+        evidence_url = edge.evidence_url or legacy.get("url")
+        has_evidence = bool(evidence_url or evidence_date or evidence_source or edge.is_verified)
+
+        return {
+            "relation_id": edge.id,
+            "relation_type": edge.relation_type,
+            "source": source or self._unknown_stub(edge.source_id),
+            "target": target or self._unknown_stub(edge.target_id),
+            "investment": {
+                "amount": str(investment_amount),
+                "currency": investment_currency,
+                "round": investment_round,
+            }
+            if investment_amount is not None
+            else None,
+            "evidence": {
+                "url": evidence_url,
+                "date": evidence_date.isoformat() if hasattr(evidence_date, "isoformat") else evidence_date,
+                "source": evidence_source,
+                "verified": bool(edge.is_verified),
+            }
+            if has_evidence
+            else None,
+            "confidence": edge.confidence,
+            "created_at": edge.created_at.isoformat() if edge.created_at else None,
+            "source_item": edge.source_item,
+        }
+
+    def get_relations_for_org(self, org_id: str) -> List[Dict]:
+        org = self.db.query(OrganizationProfile).filter(OrganizationProfile.id == org_id).first()
+        if not org:
+            return []
+
+        related_side_ids = {org_id}
+        for entity in self._find_entities_for_org(org):
+            related_side_ids.add(entity.id)
+
+        edges = (
+            self.db.query(RelationEdge)
+            .filter(or_(RelationEdge.source_id.in_(related_side_ids), RelationEdge.target_id.in_(related_side_ids)))
+            .order_by(RelationEdge.created_at.desc())
+            .all()
+        )
+
+        results: List[Dict] = []
+        seen_relation_ids = set()
+        for edge in edges:
+            enriched = self.enrich_relation(edge)
+            if not enriched or edge.id in seen_relation_ids:
+                continue
+
+            source = enriched["source"]
+            target = enriched["target"]
+            source_matches = source.get("id") == org_id or source.get("mapped_org_id") == org_id
+            target_matches = target.get("id") == org_id or target.get("mapped_org_id") == org_id
+
+            if not source_matches and not target_matches:
+                continue
+
+            direction = "outgoing" if source_matches else "incoming"
+            other_org = target if direction == "outgoing" else source
+
+            enriched["direction"] = direction
+            enriched["other_org"] = {
+                "id": other_org.get("mapped_org_id") or other_org.get("id"),
+                "name": other_org.get("name") or "Unknown Organization",
+                "country": other_org.get("country"),
+            }
+            results.append(enriched)
+            seen_relation_ids.add(edge.id)
+
+        return results
+
+    def _resolve_side(self, side_id: str) -> Optional[Dict]:
+        org = self.db.query(OrganizationProfile).filter(OrganizationProfile.id == side_id).first()
+        if org:
+            return {
+                "id": org.id,
+                "name": org.name,
+                "country": org.country,
+                "type": "organization",
+            }
+
+        entity = self.db.query(KnowledgeEntity).filter(KnowledgeEntity.id == side_id).first()
+        if entity:
+            mapped_org = self._map_entity_to_org(entity)
+            if mapped_org:
+                return {
+                    "id": mapped_org.id,
+                    "name": mapped_org.name,
+                    "country": mapped_org.country,
+                    "type": "organization",
+                    "original_entity": entity.name,
+                    "mapped_org_id": mapped_org.id,
+                }
+            return {
+                "id": entity.id,
+                "name": entity.name,
+                "country": entity.country,
+                "type": "entity",
+            }
+
+        return None
+
+    def _map_entity_to_org(self, entity: KnowledgeEntity) -> Optional[OrganizationProfile]:
+        if not entity or not entity.name:
+            return None
+
+        entity_name = entity.name.strip()
+        alias_match = self.ENTITY_ORG_ALIASES.get(entity_name.lower())
+        if alias_match:
+            org = self._find_org_by_name(alias_match)
+            if org:
+                return org
+
+        return self._find_org_by_name(entity_name)
+
+    def _find_org_by_name(self, name: str) -> Optional[OrganizationProfile]:
+        return (
+            self.db.query(OrganizationProfile)
+            .filter(
+                or_(
+                    OrganizationProfile.name.ilike(f"%{name}%"),
+                    OrganizationProfile.english_name.ilike(f"%{name}%"),
+                    OrganizationProfile.short_name.ilike(f"%{name}%"),
+                    OrganizationProfile.official_name.ilike(f"%{name}%"),
+                )
+            )
+            .first()
+        )
+
+    def _find_entities_for_org(self, org: OrganizationProfile) -> List[KnowledgeEntity]:
+        candidates = []
+        for value in [org.name, org.english_name, org.short_name, org.official_name]:
+            if value and value.strip():
+                candidates.append(value.strip())
+
+        if not candidates:
+            return []
+
+        filters = [KnowledgeEntity.name.ilike(f"%{candidate}%") for candidate in candidates]
+        matched = self.db.query(KnowledgeEntity).filter(or_(*filters)).all()
+
+        results: List[KnowledgeEntity] = []
+        seen = set()
+        for entity in matched:
+            mapped = self._map_entity_to_org(entity)
+            if mapped and mapped.id == org.id and entity.id not in seen:
+                results.append(entity)
+                seen.add(entity.id)
+        return results
+
+    def _unknown_stub(self, unknown_id: str) -> Dict:
+        return {
+            "id": unknown_id,
+            "name": "Unknown Organization",
+            "country": None,
+            "type": "unknown",
+        }
+
+    def _parse_legacy_properties(self, edge: RelationEdge) -> Dict:
+        if not edge.properties_json:
+            return {}
+        try:
+            data = json.loads(edge.properties_json)
+            return data if isinstance(data, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}

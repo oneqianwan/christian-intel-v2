@@ -1,0 +1,2131 @@
+{
+  "meta": {
+    "title": "???????????????",
+    "generated_at": "2026-06-30",
+    "countries": 9,
+    "total_orgs": 150,
+    "total_investors": 11,
+    "total_investment_edges": 16
+  },
+  "countries": {
+    "United States": {
+      "org_count": 68,
+      "ai_coverage": 91.8,
+      "people_coverage": 27.9,
+      "investment_coverage": 10.3,
+      "organizations": [
+        {
+          "id": "4ae7d900-aeb5-456c-b1cf-a51fe0148f3e",
+          "name": "Christianity Today",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 2,
+          "people": "Russell Moore",
+          "website": "http://www.christianitytoday.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "395ca332-e4da-4a85-a996-72287de7920d",
+          "name": "Cru",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": "Luke Middendorf",
+          "website": "https://www.cru.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e097c9c6-e79c-4022-91dd-a616eb500189",
+          "name": "Biola University",
+          "type": null,
+          "ai_maturity": 2,
+          "digital_score": 2,
+          "people": "Academic Centers",
+          "website": "https://www.biola.edu/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "abdd315f-7b11-42b5-b47e-fcbb9a4ab6b3",
+          "name": "USCCB",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Not specified",
+          "website": "http://www.usccb.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "1e99e0f1-6f97-41b9-be4c-f95e12cb2b35",
+          "name": "Southwide Baptist Fellowship",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Scott Hooks",
+          "website": "https://southwidebaptist.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ce534923-4a0c-4ef2-abf9-4819162aedaa",
+          "name": "Southern Methodist Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "http://www.thesmc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "9e92e7ca-0e6f-4c61-9772-e053b3b7a87b",
+          "name": "Southern Baptist Convention",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "http://www.sbc.net/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "961b224a-e6fd-4b47-b934-2b12cfbc8d6c",
+          "name": "Seventh Day Baptists (German)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://germanseventhdaybaptist.com/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f6dbef0f-b685-4f84-a582-0dd76b5dab14",
+          "name": "Serbian Metropolitanate of New Gracanica (1963 - 1998)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.serborth.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "750cab1f-d2f8-4cb7-921e-00d8f52a8c29",
+          "name": "Serbian Orthodox Church in North and South America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.serborth.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "72bdf71a-abe2-4890-88a3-f730e967d7a5",
+          "name": "Separate Baptists in Christ",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.separatebaptist.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f9f53cab-fee1-4c41-bdc5-b6fecc9baeb4",
+          "name": "Schwenkfelder Church in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.centralschwenkfelder.com/about-us",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "57a0b636-0047-4b75-8ab7-c36c22473a68",
+          "name": "Salvation Army",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "https://www.salvationarmyusa.org/usn/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "35c974bb-09d1-410f-b0cd-320002bc2c22",
+          "name": "Romanian Orthodox Episcopate of America",
+          "type": null,
+          "ai_maturity": 2,
+          "digital_score": 0,
+          "people": "Bishop Nathaniel",
+          "website": "https://www.roea.org/about",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "05564f31-a1fb-4403-9542-8de41efc6648",
+          "name": "Romanian Orthodox Metropolia of the Americas",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.mitropolia.us/index.php/en/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ac06a1bf-19b1-4cb3-8d5f-489575916493",
+          "name": "Central Yearly Meeting of Friends",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "https://www.holinessmovement.org/central-yearly-meeting-of-friends/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fd7a016f-0086-4776-9dfb-531b054f190b",
+          "name": "Reformed Zion Union Apostolic Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://rzua.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "863dbfdd-d53e-4b68-90fb-9d0221d25e28",
+          "name": "Reformed Presbyterian Church of North America (Covenanters)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://reformedpresbyterian.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e8256b8a-e3bc-4d81-877f-f2afa3767e54",
+          "name": "Reformed Presbyterian Church in the United States",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.rpcus.com/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "8a0f386f-7aa4-45a6-a04e-208af55a36be",
+          "name": "Reformed Presbyterian Church Hanover Presbytery",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://rpchanover.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "0f7ffa70-d940-465b-888f-6c4bc7dcad26",
+          "name": "Reformed Presbyterian Church General Assembly",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.rpcga.org/about",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "d1958309-ab5a-4b64-a807-7821f19b7a08",
+          "name": "Reformed Mennonite Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.reformedmennonite.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "9e64e31d-a591-4139-bbfc-56a2bc6a4206",
+          "name": "Reformed Episcopal Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.rechurch.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "d6175ee3-2d10-4548-83fc-6ff442125359",
+          "name": "Reformed Church in the United States",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.rcus.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "dbb8f04d-2eca-47ad-aaaa-2ac0ec289397",
+          "name": "Reformed Church in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.rca.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "87b86960-bc06-486f-a379-08293a882a5b",
+          "name": "Romanian Orthodox Episcopate of America (Diocese of the Orthodox Church in America)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Archbishop Nathaniel",
+          "website": "https://www.roea.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c8038e58-08df-4422-bfe4-7eb096690651",
+          "name": "Protestant Reformed Churches in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "http://www.prca.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "29cd9c26-309d-4dce-b043-736c0a5181d0",
+          "name": "Protes'tant Conference, The",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.protestantconference.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "0481d182-98fa-4c59-9f14-f6937f205a74",
+          "name": "Progressive National Baptist Convention, Inc.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.pnbc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fb9fc464-91a9-4679-919f-efd1a14b6c7a",
+          "name": "Primitive Methodist Church in the U.S.A.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.primitivemethodistchurch.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6e1ec990-f17f-45f7-ad73-4da4ef915a3a",
+          "name": "Primitive Baptists, Eastern District Association of",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.edapb.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "bbd3c683-d132-4a46-8434-ef00f39cdad2",
+          "name": "Presbyterian Church in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.pcanet.org/about",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "1f5db2a7-bf1c-4467-8c59-7cdfd959d8af",
+          "name": "Presbyterian Church (U.S.A.)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "https://www.pcusa.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "b6f5267f-2b34-4206-aa40-c4b6f37a302e",
+          "name": "Polish National Catholic Church of America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Francis Hodur",
+          "website": "http://www.pncc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "73df2cf5-b07d-4e78-9d68-c1640c2acac2",
+          "name": "Pillar of Fire",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://pillarministries.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "54d82ab9-5198-4742-ab4b-e4eba73a2251",
+          "name": "Pentecostal Free Will Baptist Church, Inc.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.pfwb.org/about",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c8372862-ed67-440e-bddf-ec8fb908c6a3",
+          "name": "Pentecostal Church of God",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "https://www.pcg.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "441c4e1c-8f69-45ad-9086-4a711908329e",
+          "name": "Pentecostal Assemblies of the World",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.pawinc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6e66a789-3724-4e96-9d3d-26542b2b3aba",
+          "name": "Pentecostal Assemblies of Jesus Christ Inc.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Bishop Carl Angle",
+          "website": "https://www.pajci.org/about-us",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "948d04f4-80cf-4afd-9cc8-3c37438fbd5e",
+          "name": "Patriarchal Parishes of the Russian Orthodox Church in the U.S.A.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Bishop Matthew of Sourozh",
+          "website": "https://mospatusa.com/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "7344af2d-6429-4f27-8221-e0e677291996",
+          "name": "Orthodox Presbyterian Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.opc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "aac7975c-6dd3-4709-a6e6-0115c292a64f",
+          "name": "Bulgarian Diocese of the Orthodox Church in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": "Mike Schlaack",
+          "website": "http://www.bdoca.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6f0dfcb9-23c7-48ba-8304-3d13725291d5",
+          "name": "Albanian Orthodox Archdiocese of the Orthodox Church in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Bishop Nikodhim",
+          "website": "https://albanianarchdiocese.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "19dd400d-39d6-40e5-b8df-5fadcbb863d9",
+          "name": "Orthodox Church in America, The",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Metropolitan",
+          "website": "https://www.oca.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "64402a1f-cc41-48d1-bffc-ea26b906643f",
+          "name": "Old Regular Baptists",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Jeff Little",
+          "website": "https://oldregularbaptist.weebly.com/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f458bfda-4575-4dec-bdb9-1c08f3fade19",
+          "name": "Reformed Presbyterian Church in the United States (1985 - Present)",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.rpcus.com/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6834d54a-49e0-4671-a518-7abed6057985",
+          "name": "North American Old Roman Catholic Church (Archdiocese of New York)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Arnold Harris Mathew",
+          "website": "https://www.naorcc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c1a2afa3-10aa-4b6a-9bdf-da8d9013179d",
+          "name": "Reformed Presbyterian Church General Assembly (1991 - Present)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.rpcga.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6fbed6f7-f2f9-4d87-9fa6-5709c070ce62",
+          "name": "North American Lutheran Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://thenalc.org/en-us/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "53130732-04b5-424f-9fda-5154eee09cb2",
+          "name": "Reformed Church in the United States (1934 - Present)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.rcus.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "625d2da1-843e-445a-b1cc-3eff56b9cc19",
+          "name": "Serbian Metropolitanate of New Gracanica",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.serborth.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "9dff9ef7-f8d2-4d5e-8266-5f8d4cefc635",
+          "name": "Orthodox Church in America, The (1970 - Present)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Metropolitan",
+          "website": "https://www.oca.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e7407937-b02d-4088-8e5e-9d7dc6c00a10",
+          "name": "Reformed Presbyterian Church Hanover Presbytery (1990 - Present)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://rpchanover.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "a4936b98-b23e-412f-a5e9-396633695b85",
+          "name": "Separate Baptists in Christ",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.separatebaptist.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6429ce89-99b5-4dc5-91c2-61e86dd7a4a7",
+          "name": "Presbyterian Church in the United States (1861 - 1983)",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "/us-religion/history/timelines/interactive-display?tid=9",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "d1d5b15b-413b-4aa7-8805-a4a9f6dfd872",
+          "name": "Pentecostal Free Will Baptist Church, Inc.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.pfwb.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "429e9459-b81a-4255-b342-62414510b225",
+          "name": "Protestant Reformed Churches in America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "http://www.prca.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "80bdd77f-e8cc-4162-9581-92166ee68221",
+          "name": "Polish National Catholic Church of America",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Francis Hodur",
+          "website": "http://www.pncc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "384d478a-72ac-45bb-8691-f96952e186dd",
+          "name": "Progressive National Baptist Convention, Inc.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.pnbc.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c5106c51-4096-4dfd-bee2-2b54476f58df",
+          "name": "Old Catholic Church in America",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "/us-religion/history/timelines/interactive-display?tid=7",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "14931d34-3b08-432c-af2a-ee18cef24aea",
+          "name": "Old Regular Baptists",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://oldregularbaptist.weebly.com/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "entity:70b19ca5-dae0-40bf-92de-f4eed1fbfefd",
+          "name": "YouVersion / Life.Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "grant",
+              "amount": 5000000.0,
+              "investor": "Life.Church",
+              "investor_country": "美国",
+              "date": "2008-01-01T00:00:00"
+            },
+            {
+              "round": "series_a",
+              "amount": 10000000.0,
+              "investor": "Draper Associates",
+              "investor_country": "美国",
+              "date": "2015-06-01T00:00:00"
+            },
+            {
+              "round": "series_a",
+              "amount": 5000000.0,
+              "investor": "Messiah Foundation",
+              "investor_country": "美国",
+              "date": "2015-06-01T00:00:00"
+            }
+          ]
+        },
+        {
+          "id": "entity:b3564c08-a013-40d3-96ad-4736be81f501",
+          "name": "Gloo",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "series_a",
+              "amount": 8000000.0,
+              "investor": "Greylock Partners",
+              "investor_country": "美国",
+              "date": "2019-03-01T00:00:00"
+            },
+            {
+              "round": "series_a",
+              "amount": 3000000.0,
+              "investor": "Faith Driven Investor Network",
+              "investor_country": "美国",
+              "date": "2019-03-01T00:00:00"
+            },
+            {
+              "round": "series_b",
+              "amount": 25000000.0,
+              "investor": "Greylock Partners",
+              "investor_country": "美国",
+              "date": "2021-07-01T00:00:00"
+            },
+            {
+              "round": "series_b",
+              "amount": 15000000.0,
+              "investor": "Draper Associates",
+              "investor_country": "美国",
+              "date": "2021-07-01T00:00:00"
+            },
+            {
+              "round": "series_b",
+              "amount": 5000000.0,
+              "investor": "Messiah Foundation",
+              "investor_country": "美国",
+              "date": "2021-07-01T00:00:00"
+            }
+          ]
+        },
+        {
+          "id": "entity:59464e6a-af59-4a9e-824b-9658750b8806",
+          "name": "BibleProject",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "grant",
+              "amount": 1500000.0,
+              "investor": "Templeton Religion Trust",
+              "investor_country": "美国",
+              "date": "2016-01-01T00:00:00"
+            },
+            {
+              "round": "grant",
+              "amount": 500000.0,
+              "investor": "Maclellan Foundation",
+              "investor_country": "美国",
+              "date": "2016-01-01T00:00:00"
+            }
+          ]
+        },
+        {
+          "id": "entity:37ead1a0-61c4-4310-807f-0b381f8dbdca",
+          "name": "Subsplash",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "series_a",
+              "amount": 5000000.0,
+              "investor": "Faith Driven Investor Network",
+              "investor_country": "美国",
+              "date": "2018-09-01T00:00:00"
+            },
+            {
+              "round": "series_a",
+              "amount": 3000000.0,
+              "investor": "Christian Angel Network",
+              "investor_country": "美国",
+              "date": "2018-09-01T00:00:00"
+            }
+          ]
+        },
+        {
+          "id": "entity:be77b311-6750-4715-b39c-ea0bdf5476ed",
+          "name": "Tithe.ly",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "series_a",
+              "amount": 6000000.0,
+              "investor": "Lightspeed Venture Partners",
+              "investor_country": "美国",
+              "date": "2019-11-01T00:00:00"
+            },
+            {
+              "round": "series_a",
+              "amount": 4000000.0,
+              "investor": "Faith Driven Investor Network",
+              "investor_country": "美国",
+              "date": "2019-11-01T00:00:00"
+            }
+          ]
+        },
+        {
+          "id": "entity:e0a8a62a-5ccb-4ad4-8761-c82d8ec0bf04",
+          "name": "Pushpay",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "ipo",
+              "amount": 50000000.0,
+              "investor": "Bessemer Venture Partners",
+              "investor_country": "美国",
+              "date": "2020-08-01T00:00:00"
+            }
+          ]
+        },
+        {
+          "id": "entity:ed496cc4-b238-43f6-a2cc-ea18f474d908",
+          "name": "RightNow Media",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": true,
+          "funding_rounds": [
+            {
+              "round": "acquisition",
+              "amount": 120000000.0,
+              "investor": "LifeWay Christian Resources",
+              "investor_country": "美国",
+              "date": "2021-01-01T00:00:00"
+            }
+          ]
+        }
+      ]
+    },
+    "United Kingdom": {
+      "org_count": 22,
+      "ai_coverage": 45.5,
+      "people_coverage": 18.2,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "22ced835-621b-46c4-91c5-a7eb3f986e1c",
+          "name": "Gospel Standard",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.gospelstandard.org.uk/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "81fab757-0de7-4742-8b50-dfe2ccdf6355",
+          "name": "Gospel Standard Trust Publications",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.gospelstandard.org.uk/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "af6d9f64-7cf8-412c-91de-c8d1260bc0c0",
+          "name": "Albanian Orthodox Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://orthodoxalbania.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "a113a310-6b27-47fa-b7f3-b19cfb4f1bf4",
+          "name": "Asso. Presbyterian Churches",
+          "type": null,
+          "ai_maturity": 3,
+          "digital_score": 2,
+          "people": null,
+          "website": "https://www.ap.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c20957c3-e7bc-437d-a0c5-58502230b8ff",
+          "name": "Association of Baptist Churches in Ireland",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.ireland.anglican.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "84573c6f-0efc-4c1b-907b-4a6d5e01a5ea",
+          "name": "Baptist Union of Great Britain",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.bogb.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "1f6d4fcd-31c8-476c-bdf7-4982a1ddbb3c",
+          "name": "Baptist Union of Scotland",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "General Director",
+          "website": "http://scottishbaptist.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "d88ba4e5-90d2-49dd-8a66-607345ef9313",
+          "name": "Baptist Union of Wales",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.buw.org.uk/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "6157a0cb-4f93-4f2b-9401-2c072ec03ad9",
+          "name": "British Methodist Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.bm.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "cb7b0fda-c254-4ad8-8aea-951b7460d9ff",
+          "name": "British New Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.bn.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "2b3da009-d089-47bb-ac2f-a402a483a619",
+          "name": "British Orthodox Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Metropolitan Seraphim",
+          "website": "https://britishorthodox.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "79a5b5bf-1e37-49f8-9cb9-9882805efc4c",
+          "name": "Catholic Apostolic Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.ca.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f42c5fd9-94b0-4f86-ab06-c750d1dea6a0",
+          "name": "Catholic Church in Scotland",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "dde47229-8bcd-41d4-9ab4-65829c4a2da0",
+          "name": "Church of God",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "18fcb5f7-cd3f-4f10-aa37-1d6b172c8e1e",
+          "name": "Dormition Cathedral, London",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Bishop Matthew of Sourozh",
+          "website": "http://www.sourozh.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c667493b-1a5f-4827-8065-001a260ef809",
+          "name": "Fellowship of Independent Evangelical Churches",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "John Stevens",
+          "website": "https://fiec.org.uk/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e3d033ea-1638-47af-93d3-23f5b1c55071",
+          "name": "General Assembly of Unitarian and Free Christian Churches",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "c2ef0234-9c6a-482f-8336-a8bcefd8b335",
+          "name": "LDS Church in England",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.mormonnewsroom.org.uk/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "24a20625-4146-4671-81e6-df8585380825",
+          "name": "Moderator of the General Assembly of the Church of Scotland",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "http://www.churchofscotland.org.uk/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e49b8f5b-6b52-4d4a-ac89-21b44a5af809",
+          "name": "Russian Orthodox Diocese of Sourozh",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e06f48f4-8aee-4f4c-a24e-24bd3a3dcd1e",
+          "name": "Scottish Episcopal Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e43d8b6a-810c-4624-9671-71b31e7829ab",
+          "name": "Unitarian Christian Association",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "Australia": {
+      "org_count": 9,
+      "ai_coverage": 44.4,
+      "people_coverage": 22.2,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "ef16fbaa-855c-4c70-a583-293054f7665f",
+          "name": "All Saints Anglican Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.swananglicans.org.au/all-saints-church-c1n0c",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ca108dfc-b7b1-4f0c-a5ff-ad2061fef109",
+          "name": "Anglican Church of Australia",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://anglican.org.au",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "037b72f0-fc11-41b0-b1b6-cdeddbeeefd1",
+          "name": "Australian Christian Churches",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Joel Chelliah",
+          "website": "https://www.acc.org.au/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "16325dac-b080-4144-b745-10c27f3b603c",
+          "name": "Australian Inland Mission",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Adam Guillette",
+          "website": "https://www.aim.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ec0a8e2a-ae02-4f99-b538-a17caf784c69",
+          "name": "Baptist Union of Australia",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.boa.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "8299de2e-72ff-447d-aa9c-8439778be97f",
+          "name": "CRC Churches International",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.crces.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ca8ec0d5-cd25-44db-8f15-bbaa6b25d083",
+          "name": "Cathedral of St Andrew",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.cosa.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fb03a12e-21aa-48d0-a858-6d92e235f0e7",
+          "name": "National Church Life Survey",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fea37119-d17a-439e-9ab9-19b698818146",
+          "name": "National Council of Churches in Australia",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "Canada": {
+      "org_count": 21,
+      "ai_coverage": 33.3,
+      "people_coverage": 0.0,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "6a3e6d9b-f500-455c-bc33-f67f1c5d62bd",
+          "name": "American-Canadian Macedonian Orthodox Diocese",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.amod.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "399650c3-3241-4c92-b571-89396b5ce82e",
+          "name": "Anglican Church of Canada",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 1,
+          "people": null,
+          "website": "http://www.anglican.ca/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "01bbd4ad-87f3-4101-b3f6-b792c253991a",
+          "name": "Antiochian Orthodox Archdiocese, N.Am.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.aoan.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "46e8318c-0907-465f-b7dc-e6cee5d06f4e",
+          "name": "Apostolic Christian Church (Nazarene)",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.apostolicchristian.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "489109c2-3559-4e90-9510-de37ac3861cb",
+          "name": "Apostolic Church of Pentecost",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.acop.ca",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "4477cafc-03cc-4054-986e-9a769de2ab15",
+          "name": "Armenian Apostolic Diocese of Am.",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.aadoa.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "88fc5f30-548e-44df-8330-c62ac3045c85",
+          "name": "Associated Gospel Churches",
+          "type": null,
+          "ai_maturity": 2,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.agcofcanada.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f598dec8-5307-45bf-8055-dda890b7b15e",
+          "name": "Brethren in Christ Church of Canada",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.bicoc.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "396c485e-5eb3-4618-9cdd-321dcd164a83",
+          "name": "British Methodist Episcopal Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.bme.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fbdaf349-a223-4017-8844-e7303810297c",
+          "name": "Canadian Conference of Catholic Bishops",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "a109ac96-a9c3-444c-a337-28ec5c2c376b",
+          "name": "Canadian Conference of Mennonite Brethren Churches",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.ccomb.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "0b5e21b9-570f-4ec0-9d2f-16477628f080",
+          "name": "Canadian Council of Churches",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "bbe4812a-0f68-414f-84dc-fa03209538d1",
+          "name": "Canadian Mennonite Brethren Churches",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.cmb.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "9dba1917-1a6d-45b7-8d07-216eeaa8fba1",
+          "name": "Canadian and American Reformed Churches",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.caar.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "66c48ce5-4092-4c39-ae78-31f107a243de",
+          "name": "Catholic Church in Canada",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.catholicincanada.com",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "eb0eb1ee-0f6e-48e5-b373-085dce159c1a",
+          "name": "Christian Reformed Church in North America",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ebf14a1a-c402-4130-a000-7b81322e0ac0",
+          "name": "Evangelical Lutheran Church in Canada",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f170673f-32e8-4479-8bfd-d0823f139f93",
+          "name": "Lutheran Church–Canada",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fe26c46e-8f82-4ef1-aee6-c7b5fcf47542",
+          "name": "Presbyterian Church in Canada",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e654e3f1-fb81-41f4-bc22-d83e1bb62217",
+          "name": "Russian Orthodox Church Outside Russia",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ea20eeae-db68-47fa-b85d-61af290c00f9",
+          "name": "Yearbook of American and Canadian Churches",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "Germany": {
+      "org_count": 6,
+      "ai_coverage": 33.3,
+      "people_coverage": 33.3,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "7defecfa-0018-4294-a60f-72bdb6c3ce7f",
+          "name": "Assyrian Church of the East",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Papa bar Gaggai",
+          "website": "http://assyrianchurch.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "32c4f787-8bc1-477e-92b6-44b0f24871f3",
+          "name": "Baptist World Alliance",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Wissam Al-Saliby",
+          "website": "https://www.baptistworld.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e249e617-35b1-498e-9bf7-f2a3a6ddcd49",
+          "name": "Bulgarian Orthodox Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "8d6cf723-12e2-4fae-bfba-ce69fabd29fd",
+          "name": "Catholic Church in Germany",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.cig.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "eddf9f26-aa61-4c06-97db-3f9b620e80cb",
+          "name": "Church of Scientology",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e3880b93-2c68-4b8c-92cc-bd24d5dbb1d9",
+          "name": "Independent Evangelical-Lutheran Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "South Korea": {
+      "org_count": 14,
+      "ai_coverage": 28.6,
+      "people_coverage": 7.1,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "c7bc5831-8a85-4f3f-a73d-3be46806e3f4",
+          "name": "Anglican Church of Korea",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.skh.or.kr/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "a20d07bf-ae09-4d2f-9ae9-36a82bdf96f5",
+          "name": "Archdiocese of Seoul",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://aos.catholic.or.kr",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "dceeb542-a48d-43be-b06c-45d60a2bf469",
+          "name": "Church of the East",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "ef137333-4b57-42e1-8d43-040ab98f393b",
+          "name": "Conservative Reformed Presbyterian Church in Korea",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "1bf88a30-6477-43ca-b559-508022bb79e1",
+          "name": "Independent Reformed Church in Korea",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.irc.or.kr",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "da1ece47-c1f2-43ff-9c33-3b9292bc9b6f",
+          "name": "Lutheran Church in Korea",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.lck.or.kr",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "0dd748b2-61aa-470e-8d56-d94e6a8380bc",
+          "name": "National Council of Churches in Korea",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "박승렬",
+          "website": "http://www.kncc.or.kr",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "07ce31f8-d3fc-4436-b83e-1ba1913b5fe6",
+          "name": "Presbyterian Church in Korea (HapDong)",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.gapck.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "dd188f6c-6447-4650-affd-16b3a556b753",
+          "name": "Presbyterian Church in Korea (Koshin)",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fd2da02a-bc54-42de-aa5f-772985e17fd5",
+          "name": "Presbyterian Church in Korea (Tonghap)",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.pck.or.kr/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "b81e5dc0-bf17-4af5-920a-a417283c2f63",
+          "name": "Presbyterian Church in the Republic of Korea",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://www.prok.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f88c90a4-d3be-4da1-a17e-c7012e46072d",
+          "name": "Presbyterian Church of Korea",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "eb326ba7-be37-45d4-90da-510aa2c7259d",
+          "name": "Pyongyang Theological Seminary",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "f22db236-1a06-436d-b3b6-f6f6f33060e8",
+          "name": "Russian Orthodox Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.patriarchia.ru/",
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "Singapore": {
+      "org_count": 4,
+      "ai_coverage": 25.0,
+      "people_coverage": 0.0,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "ec530c22-8fe5-4be1-911a-67fe8f8eaa18",
+          "name": "Archdiocese",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.webdiocesi.chiesacattolica.it/triveneto/trento/00019580_TRENTO.html",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "799ae945-1152-4df9-85ba-2f715919d7e2",
+          "name": "Barker Road Methodist Church",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "http://brmc.org.sg",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "fcbf2567-220a-4ec4-bd5d-154ec2b7648d",
+          "name": "New Creation Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "dfced0d3-6c52-4fb7-bbfc-517de915a637",
+          "name": "Telok Ayer Chinese Methodist Church",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": null,
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "France": {
+      "org_count": 2,
+      "ai_coverage": 50.0,
+      "people_coverage": 50.0,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "5ed89618-ddfc-4aca-8bc0-d9b1d8281caa",
+          "name": "1905 French law on the Separation of the Churches and the State",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "http://www.legifrance.gouv.fr/affichTexte.do?cidTexte=JORFTEXT000000508749&amp;fastPos=1&amp;fastReqId=1194187241&amp;categorieLien=cid&amp;oldAction=rechTexte",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "22717024-e50a-4779-949f-86bf30c4f10f",
+          "name": "Catholic Church in France",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": "Tariye Gbadegesin",
+          "website": "https://www.cif.org",
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    },
+    "Japan": {
+      "org_count": 4,
+      "ai_coverage": 50.0,
+      "people_coverage": 0.0,
+      "investment_coverage": 0.0,
+      "organizations": [
+        {
+          "id": "4a36d203-225a-4b10-8ead-fc4a317508f5",
+          "name": "American Bible Society",
+          "type": null,
+          "ai_maturity": 2,
+          "digital_score": 3,
+          "people": null,
+          "website": "http://americanbible.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "e273eb15-6209-498c-a6a8-17d33148cc57",
+          "name": "American Presbyterian Mission",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.presbyterianmission.org",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "1c1a235f-0dfd-4739-843f-1a097701f99e",
+          "name": "Anglican Episcopal Church in Japan",
+          "type": null,
+          "ai_maturity": null,
+          "digital_score": null,
+          "people": null,
+          "website": "https://www.nskk.org/",
+          "has_investment": false,
+          "funding_rounds": []
+        },
+        {
+          "id": "791d107a-018c-40f1-a114-7accd006c5e8",
+          "name": "British and Foreign Bible Society",
+          "type": null,
+          "ai_maturity": 0,
+          "digital_score": 0,
+          "people": null,
+          "website": "https://www.bafbs.com",
+          "has_investment": false,
+          "funding_rounds": []
+        }
+      ]
+    }
+  },
+  "investors": {
+    "Life.Church": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "YouVersion / Life.Church",
+          "org_country": "United States",
+          "round": "grant",
+          "amount": 5000000.0
+        }
+      ]
+    },
+    "Draper Associates": {
+      "country": "美国",
+      "portfolio_size": 2,
+      "portfolio": [
+        {
+          "org_name": "YouVersion / Life.Church",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 10000000.0
+        },
+        {
+          "org_name": "Gloo",
+          "org_country": "United States",
+          "round": "series_b",
+          "amount": 15000000.0
+        }
+      ]
+    },
+    "Messiah Foundation": {
+      "country": "美国",
+      "portfolio_size": 2,
+      "portfolio": [
+        {
+          "org_name": "YouVersion / Life.Church",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 5000000.0
+        },
+        {
+          "org_name": "Gloo",
+          "org_country": "United States",
+          "round": "series_b",
+          "amount": 5000000.0
+        }
+      ]
+    },
+    "Greylock Partners": {
+      "country": "美国",
+      "portfolio_size": 2,
+      "portfolio": [
+        {
+          "org_name": "Gloo",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 8000000.0
+        },
+        {
+          "org_name": "Gloo",
+          "org_country": "United States",
+          "round": "series_b",
+          "amount": 25000000.0
+        }
+      ]
+    },
+    "Faith Driven Investor Network": {
+      "country": "美国",
+      "portfolio_size": 3,
+      "portfolio": [
+        {
+          "org_name": "Gloo",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 3000000.0
+        },
+        {
+          "org_name": "Subsplash",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 5000000.0
+        },
+        {
+          "org_name": "Tithe.ly",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 4000000.0
+        }
+      ]
+    },
+    "Templeton Religion Trust": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "BibleProject",
+          "org_country": "United States",
+          "round": "grant",
+          "amount": 1500000.0
+        }
+      ]
+    },
+    "Maclellan Foundation": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "BibleProject",
+          "org_country": "United States",
+          "round": "grant",
+          "amount": 500000.0
+        }
+      ]
+    },
+    "Christian Angel Network": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "Subsplash",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 3000000.0
+        }
+      ]
+    },
+    "Lightspeed Venture Partners": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "Tithe.ly",
+          "org_country": "United States",
+          "round": "series_a",
+          "amount": 6000000.0
+        }
+      ]
+    },
+    "Bessemer Venture Partners": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "Pushpay",
+          "org_country": "United States",
+          "round": "ipo",
+          "amount": 50000000.0
+        }
+      ]
+    },
+    "LifeWay Christian Resources": {
+      "country": "美国",
+      "portfolio_size": 1,
+      "portfolio": [
+        {
+          "org_name": "RightNow Media",
+          "org_country": "United States",
+          "round": "acquisition",
+          "amount": 120000000.0
+        }
+      ]
+    }
+  },
+  "relations": [
+    {
+      "source": "Life.Church",
+      "target": "YouVersion / Life.Church",
+      "type": "invested_in",
+      "amount": 5000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Draper Associates",
+      "target": "YouVersion / Life.Church",
+      "type": "invested_in",
+      "amount": 10000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Messiah Foundation",
+      "target": "YouVersion / Life.Church",
+      "type": "invested_in",
+      "amount": 5000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Greylock Partners",
+      "target": "Gloo",
+      "type": "invested_in",
+      "amount": 8000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Faith Driven Investor Network",
+      "target": "Gloo",
+      "type": "invested_in",
+      "amount": 3000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Greylock Partners",
+      "target": "Gloo",
+      "type": "invested_in",
+      "amount": 25000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Draper Associates",
+      "target": "Gloo",
+      "type": "invested_in",
+      "amount": 15000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Messiah Foundation",
+      "target": "Gloo",
+      "type": "invested_in",
+      "amount": 5000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Templeton Religion Trust",
+      "target": "BibleProject",
+      "type": "invested_in",
+      "amount": 1500000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Maclellan Foundation",
+      "target": "BibleProject",
+      "type": "invested_in",
+      "amount": 500000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Faith Driven Investor Network",
+      "target": "Subsplash",
+      "type": "invested_in",
+      "amount": 5000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Christian Angel Network",
+      "target": "Subsplash",
+      "type": "invested_in",
+      "amount": 3000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Lightspeed Venture Partners",
+      "target": "Tithe.ly",
+      "type": "invested_in",
+      "amount": 6000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Faith Driven Investor Network",
+      "target": "Tithe.ly",
+      "type": "invested_in",
+      "amount": 4000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "Bessemer Venture Partners",
+      "target": "Pushpay",
+      "type": "invested_in",
+      "amount": 50000000.0,
+      "country": "United States"
+    },
+    {
+      "source": "LifeWay Christian Resources",
+      "target": "RightNow Media",
+      "type": "invested_in",
+      "amount": 120000000.0,
+      "country": "United States"
+    }
+  ]
+}
