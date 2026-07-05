@@ -9,7 +9,12 @@ from config import settings
 from models.database import get_db
 from schemas.watch_alert import (
     ApiErrorResponse,
+    SignalListResponse,
+    SignalResponse,
+    SignalSeverity,
+    SignalType,
     WatchEntityType,
+    WatchRunResponse,
     WatchTargetCreate,
     WatchTargetListResponse,
     WatchTargetResponse,
@@ -25,6 +30,13 @@ from services.watch_target_service import (
     list_watch_targets,
     soft_delete_watch_target,
     update_watch_target,
+)
+from services.watch_runner import (
+    WatchRunAlreadyRunningError,
+    WatchRunError,
+    WatchTargetDisabledError,
+    list_watch_target_signals,
+    run_watch_target,
 )
 
 router = APIRouter(prefix="/watch-targets", tags=["watch_targets"])
@@ -131,3 +143,63 @@ def delete_watch_target_route(
     except WatchTargetNotFoundError as exc:
         _translate_service_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{watch_target_id}/run", response_model=WatchRunResponse)
+def run_watch_target_route(
+    watch_target_id: str,
+    _: None = Depends(require_watch_alert_enabled),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        watch_run = run_watch_target(db, watch_target_id, user_id)
+    except (
+        WatchTargetNotFoundError,
+        WatchTargetDisabledError,
+        WatchRunAlreadyRunningError,
+        WatchTargetEntityNotFoundError,
+        WatchRunError,
+    ) as exc:
+        _translate_service_error(exc)
+    return WatchRunResponse(
+        run_id=watch_run.id,
+        watch_target_id=watch_run.watch_target_id,
+        status=watch_run.status,
+        items_found=watch_run.items_found,
+        signals_created=watch_run.signals_created,
+        started_at=watch_run.started_at,
+        finished_at=watch_run.finished_at,
+    )
+
+
+@router.get("/{watch_target_id}/signals", response_model=SignalListResponse)
+def list_watch_target_signals_route(
+    watch_target_id: str,
+    _: None = Depends(require_watch_alert_enabled),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    signal_type: SignalType | None = Query(default=None),
+    severity: SignalSeverity | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+):
+    try:
+        items, total = list_watch_target_signals(
+            db,
+            watch_target_id,
+            user_id,
+            signal_type=signal_type,
+            severity=severity,
+            page=page,
+            page_size=page_size,
+        )
+    except WatchTargetNotFoundError as exc:
+        _translate_service_error(exc)
+
+    return SignalListResponse(
+        items=[SignalResponse.model_validate(item) for item in items],
+        page=page,
+        page_size=page_size,
+        total=total,
+    )
