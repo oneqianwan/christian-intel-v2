@@ -150,6 +150,14 @@ async function request<T>(
 }
 
 export const isWatchAlertUiEnabled = () => import.meta.env.VITE_WATCH_ALERT_UI_ENABLED === 'true'
+export const WATCH_ALERT_UNREAD_REFRESH_EVENT = 'watch-alerts:unread-refresh'
+
+export function dispatchWatchAlertUnreadRefresh() {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.dispatchEvent(new CustomEvent(WATCH_ALERT_UNREAD_REFRESH_EVENT))
+}
 
 export async function createWatchTarget(requestBody: CreateWatchTargetRequest): Promise<WatchTarget> {
   return request<WatchTarget>('/api/watch-targets', {

@@ -1,20 +1,24 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useConversationStore } from '../stores/conversationStore'
 import { fetchConversations, createConversation } from '../services/api'
 import type { Conversation } from '../stores/conversationStore'
 import { isWatchAlertUiEnabled } from '../api/watchAlerts'
+import { NotificationBell } from './NotificationBell'
 
 const API_BASE = 'http://localhost:8000/api'
 
 function Sidebar() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { conversations, currentId, setConversations, setCurrentId, addConversation } = useConversationStore()
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState<string | null>(null)
   const showWatchlistNav = isWatchAlertUiEnabled()
+  const watchlistActive = location.pathname.startsWith('/watchlist')
+  const alertsActive = location.pathname.startsWith('/alerts')
 
   const loadConversations = async () => {
     const list = await fetchConversations()
@@ -95,6 +99,18 @@ function Sidebar() {
     }
   }
 
+  const navButtonStyle = (active: boolean): React.CSSProperties => ({
+    width: '100%',
+    padding: '10px',
+    borderRadius: '8px',
+    border: '1px solid #d0d0d0',
+    background: active ? '#eef2ff' : '#f8fafc',
+    color: active ? '#4338ca' : '#0f172a',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: active ? 600 : 500,
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '16px', borderBottom: '1px solid #e0e0e0' }}>
@@ -108,22 +124,23 @@ function Sidebar() {
           + 新会话
         </button>
         {showWatchlistNav ? (
-          <button
-            type="button"
-            onClick={() => navigate('/watchlist')}
-            style={{
-              width: '100%',
-              marginTop: '10px',
-              padding: '10px',
-              borderRadius: '8px',
-              border: '1px solid #d0d0d0',
-              background: '#f8fafc',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
-            Watchlist
-          </button>
+          <div style={{ display: 'grid', gap: '10px', marginTop: '10px' }}>
+            <NotificationBell />
+            <button
+              type="button"
+              onClick={() => navigate('/watchlist')}
+              style={navButtonStyle(watchlistActive)}
+            >
+              Watchlist
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/alerts')}
+              style={navButtonStyle(alertsActive)}
+            >
+              Alerts
+            </button>
+          </div>
         ) : null}
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>

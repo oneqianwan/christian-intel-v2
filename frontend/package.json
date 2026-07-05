@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "check:watch-alert-contract": "node scripts/verify-watch-alert-contract.mjs",
     "check:watchlist-ui": "node scripts/verify-watchlist-ui.mjs",
+    "check:alerts-ui": "node scripts/verify-alerts-ui.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

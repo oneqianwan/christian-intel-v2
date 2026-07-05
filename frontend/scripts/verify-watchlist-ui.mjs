@@ -64,8 +64,8 @@ assertMatch(
   'SignalList external links must be safe',
 )
 assertMatch(
-  !/NotificationBell|AlertsPage/.test(watchButtonSource + signalListSource + watchlistPageSource + appSource + sidebarSource + orgDetailSource),
-  'R2 files must not reference NotificationBell or AlertsPage',
+  !/NotificationBell|AlertsPage/.test(watchButtonSource + signalListSource + watchlistPageSource + orgDetailSource),
+  'R2 core UI files must not reference NotificationBell or AlertsPage',
 )
 assertMatch(!/dangerouslySetInnerHTML/.test(watchButtonSource + signalListSource + watchlistPageSource), 'UI must not use dangerouslySetInnerHTML')
 assertMatch(packageSource.includes('check:watchlist-ui'), 'package.json must expose check:watchlist-ui')
@@ -79,8 +79,9 @@ const statusLines = gitStatus
 const disallowed = statusLines.filter((line) => {
   const filePath = line.slice(3)
   if (filePath.startsWith('backend/')) return true
-  if (filePath.includes('NotificationBell')) return true
-  if (filePath.includes('AlertsPage')) return true
+  if (filePath === 'frontend/src/pages/WatchlistPage.tsx') return true
+  if (filePath === 'frontend/src/components/WatchButton.tsx') return true
+  if (filePath === 'frontend/src/components/SignalList.tsx') return true
   return false
 })
 assertMatch(disallowed.length === 0, `Disallowed modified files detected: ${disallowed.join(', ')}`)
