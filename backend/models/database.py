@@ -1245,6 +1245,9 @@ class UserProfile(Base):
     )
 
 
+from models.watch_alert import Alert, AlertRule, Signal, WatchRun, WatchTarget  # noqa: E402,F401
+
+
 def get_db():
     db = SessionLocal()
     emit_db_runtime_debug(
