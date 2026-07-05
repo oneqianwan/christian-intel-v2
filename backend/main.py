@@ -21,6 +21,7 @@ from routers import (
     search,
     tasks,
     url_analysis,
+    watch_targets,
 )
 
 app = FastAPI(title="Christian Intel v2", version="0.1.0")
@@ -64,3 +65,4 @@ app.include_router(agent.router)
 app.include_router(collection.router)
 app.include_router(dashboard.router)
 app.include_router(org_detail.router)
+app.include_router(watch_targets.router, prefix="/api", tags=["watch_targets"])
