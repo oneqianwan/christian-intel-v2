@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useConversationStore } from '../stores/conversationStore'
 import { fetchConversations, createConversation } from '../services/api'
 import type { Conversation } from '../stores/conversationStore'
+import { isWatchAlertUiEnabled } from '../api/watchAlerts'
 
 const API_BASE = 'http://localhost:8000/api'
 
 function Sidebar() {
+  const navigate = useNavigate()
   const { conversations, currentId, setConversations, setCurrentId, addConversation } = useConversationStore()
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState<string | null>(null)
+  const showWatchlistNav = isWatchAlertUiEnabled()
 
   const loadConversations = async () => {
     const list = await fetchConversations()
@@ -103,6 +107,24 @@ function Sidebar() {
         >
           + 新会话
         </button>
+        {showWatchlistNav ? (
+          <button
+            type="button"
+            onClick={() => navigate('/watchlist')}
+            style={{
+              width: '100%',
+              marginTop: '10px',
+              padding: '10px',
+              borderRadius: '8px',
+              border: '1px solid #d0d0d0',
+              background: '#f8fafc',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            Watchlist
+          </button>
+        ) : null}
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
         {conversations.map((c) => (

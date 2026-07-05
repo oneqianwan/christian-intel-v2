@@ -8,6 +8,8 @@ import {
   RadarChart,
   ResponsiveContainer,
 } from 'recharts'
+import { isWatchAlertUiEnabled } from '../api/watchAlerts'
+import { WatchButton } from '../components/WatchButton'
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8000'
 
@@ -78,6 +80,7 @@ const cardStyle: React.CSSProperties = {
 export function OrgDetailPage() {
   const { orgId } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
+  const showWatchUi = isWatchAlertUiEnabled()
   const [org, setOrg] = useState<OrgDetail | null>(null)
   const [relations, setRelations] = useState<Relation[]>([])
   const [timeline, setTimeline] = useState<IntelItem[]>([])
@@ -156,20 +159,37 @@ export function OrgDetailPage() {
 
   return (
     <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 32px', background: '#f8fafc', minHeight: '100vh' }}>
-      <button
-        onClick={() => navigate('/dashboard')}
-        style={{
-          padding: '6px 16px',
-          marginBottom: 16,
-          border: '1px solid #ddd',
-          borderRadius: 6,
-          background: '#fff',
-          cursor: 'pointer',
-          fontSize: 13,
-        }}
-      >
-        ← Back to Dashboard
-      </button>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <button
+          onClick={() => navigate('/dashboard')}
+          style={{
+            padding: '6px 16px',
+            border: '1px solid #ddd',
+            borderRadius: 6,
+            background: '#fff',
+            cursor: 'pointer',
+            fontSize: 13,
+          }}
+        >
+          鈫?Back to Dashboard
+        </button>
+        {showWatchUi ? (
+          <button
+            type="button"
+            onClick={() => navigate('/watchlist')}
+            style={{
+              padding: '6px 16px',
+              border: '1px solid #ddd',
+              borderRadius: 6,
+              background: '#fff',
+              cursor: 'pointer',
+              fontSize: 13,
+            }}
+          >
+            Watchlist
+          </button>
+        ) : null}
+      </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 24, flexWrap: 'wrap' }}>
         {[
@@ -260,6 +280,12 @@ export function OrgDetailPage() {
           </div>
         </div>
       </div>
+
+      {showWatchUi ? (
+        <div style={{ marginBottom: 24 }}>
+          <WatchButton entityId={org.id} entityType="organization" />
+        </div>
+      ) : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <div>

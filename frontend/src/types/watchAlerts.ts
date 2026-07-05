@@ -57,11 +57,6 @@ export interface UpdateWatchTargetRequest {
 export interface WatchRunResult {
   run_id: string
   watch_target_id: string
-  status: WatchRunStatus
-  items_found: number
-  signals_created: number
-  started_at: string | null
-  finished_at: string | null
 }
 
 export interface WatchSignal {

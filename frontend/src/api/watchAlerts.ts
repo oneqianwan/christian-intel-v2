@@ -19,17 +19,18 @@ const DEFAULT_SESSION_ID = 'session-1'
 const SESSION_STORAGE_KEY = 'x-session-id'
 
 const ERROR_MESSAGES: Record<string, string> = {
-  ALERT_DISMISSED: 'This alert has already been dismissed and cannot be marked as read.',
-  ALERT_NOT_FOUND: 'The requested alert no longer exists.',
-  AUTH_REQUIRED: 'Your login session is invalid. Refresh the page and try again.',
-  WATCH_ALERT_NOTIFICATIONS_DISABLED: 'Watch / Alert notifications are currently disabled.',
-  WATCH_ALERT_V1_DISABLED: 'Watch / Alert features are currently disabled.',
-  WATCH_RUN_ALREADY_RUNNING: 'A watch run is already in progress for this target.',
-  WATCH_RUN_FAILED: 'The watch run failed. Try again in a moment.',
-  WATCH_TARGET_DISABLED: 'This watch target is disabled.',
-  WATCH_TARGET_ENTITY_NOT_FOUND: 'The requested entity could not be found.',
-  WATCH_TARGET_EXISTS: 'This entity is already on your watchlist.',
-  WATCH_TARGET_NOT_FOUND: 'The requested watch target no longer exists.',
+  ALERT_DISMISSED: '该提醒已被忽略，不能再标记为已读。',
+  ALERT_NOT_FOUND: '记录不存在或已被删除。',
+  AUTH_REQUIRED: '登录状态无效，请刷新页面后重试。',
+  WATCH_ALERT_NOTIFICATIONS_DISABLED: 'Watch / Alert 功能当前未启用。',
+  WATCH_ALERT_V1_DISABLED: 'Watch / Alert 功能当前未启用。',
+  WATCH_RUN_ALREADY_RUNNING: '监控任务正在运行，请稍后再试。',
+  WATCH_RUN_FAILED: '监控执行失败，请稍后重试。',
+  WATCH_TARGET_ALREADY_EXISTS: '该对象已在 Watchlist 中，无需重复添加。',
+  WATCH_TARGET_DISABLED: '该监控目标已被禁用。',
+  WATCH_TARGET_ENTITY_NOT_FOUND: '目标实体不存在。',
+  WATCH_TARGET_EXISTS: '该对象已在 Watchlist 中，无需重复添加。',
+  WATCH_TARGET_NOT_FOUND: '记录不存在或已被删除。',
 }
 
 function getSessionId(): string {
@@ -63,21 +64,21 @@ function getUserMessage(status: number, code: string, message: string) {
     return ERROR_MESSAGES[code]
   }
   if (status === 401) {
-    return 'Your login session is invalid. Refresh the page and try again.'
+    return '登录状态无效，请刷新页面后重试。'
   }
   if (status === 404) {
-    return 'The requested record no longer exists.'
+    return '记录不存在或已被删除。'
   }
   if (status === 409) {
-    return 'This action cannot be completed because the resource state has changed.'
+    return '操作冲突：可能是重复操作，或任务正在运行。'
   }
   if (status === 422) {
-    return 'The submitted request parameters are invalid.'
+    return '请求参数无效，请检查后重试。'
   }
   if (status === 503) {
-    return 'Watch / Alert features are currently disabled.'
+    return 'Watch / Alert 功能当前未启用。'
   }
-  return message || 'The request failed. Try again.'
+  return message || '请求失败，请稍后重试。'
 }
 
 async function parseApiError(response: Response): Promise<WatchAlertApiError> {
