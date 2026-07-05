@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -8,7 +9,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from models.database import FieldChangeHistory, LeaderCandidate, OrganizationProfile, get_db
+from models.database import (
+    FieldChangeHistory,
+    FundingRound,
+    Investment,
+    Investor,
+    KnowledgeEntity,
+    LeaderCandidate,
+    OrganizationProfile,
+    get_db,
+)
 from services.history_recorder import record_change
 from services.quality_scorer import ProfileQualityScorer, get_t1_quality_summary
 
@@ -122,6 +132,67 @@ def _parse_people_value(value: str) -> tuple[str, str]:
     if not leader_name:
         raise ValueError("Leader name is required")
     return leader_name, leader_title
+
+
+def _load_relation_graph() -> dict[str, Any]:
+    graph_path = os.path.join(os.path.dirname(__file__), "..", "data", "relation_graph.json")
+    if not os.path.exists(graph_path):
+        return {}
+    try:
+        with open(graph_path, "r", encoding="utf-8") as file_obj:
+            payload = json.load(file_obj)
+            return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _resolve_round_target(db: Session, funding_round: FundingRound) -> dict[str, Any]:
+    entity = db.query(KnowledgeEntity).filter(KnowledgeEntity.id == funding_round.entity_id).first()
+    if not entity:
+        return {
+            "target_id": f"entity:{funding_round.entity_id}",
+            "target_name": funding_round.entity_id,
+            "target_country": None,
+            "target_source": "unknown",
+        }
+
+    candidates = [entity.name] if entity.name else []
+    if entity.name and "/" in entity.name:
+        candidates.extend(part.strip() for part in entity.name.split("/") if part.strip())
+
+    for candidate in candidates:
+        query = db.query(OrganizationProfile).filter(
+            or_(
+                OrganizationProfile.name == candidate,
+                OrganizationProfile.english_name == candidate,
+                OrganizationProfile.official_name == candidate,
+                OrganizationProfile.short_name == candidate,
+            )
+        )
+        if entity.country:
+            org = query.filter(OrganizationProfile.country == entity.country).first()
+            if org:
+                return {
+                    "target_id": org.id,
+                    "target_name": org.name,
+                    "target_country": org.country,
+                    "target_source": "organization_profile",
+                }
+        org = query.first()
+        if org:
+            return {
+                "target_id": org.id,
+                "target_name": org.name,
+                "target_country": org.country,
+                "target_source": "organization_profile",
+            }
+
+    return {
+        "target_id": f"entity:{entity.id}",
+        "target_name": entity.name or funding_round.entity_id,
+        "target_country": entity.country,
+        "target_source": "knowledge_entity",
+    }
 
 
 def _resolve_inline_config(normalized_field: str) -> dict[str, Any] | None:
@@ -1281,6 +1352,162 @@ def get_country_stats(country: str | None = None, db: Session = Depends(get_db))
     }
 
 
+@router.get("/relations/network-overview")
+def get_network_overview(db: Session = Depends(get_db)):
+    """关系网络全局概览。"""
+    investor_count = db.query(Investor).count()
+    funding_count = db.query(FundingRound).count()
+    investment_count = db.query(Investment).count()
+    funded_entities = db.query(func.count(func.distinct(FundingRound.entity_id))).scalar() or 0
+
+    active_investors = (
+        db.query(
+            Investment.investor_id,
+            func.count().label("count"),
+        )
+        .group_by(Investment.investor_id)
+        .order_by(func.count().desc())
+        .limit(5)
+        .all()
+    )
+
+    top_investors = []
+    for investor_id, count in active_investors:
+        investor = db.query(Investor).filter(Investor.id == investor_id).first()
+        top_investors.append(
+            {
+                "id": investor_id,
+                "name": investor.name if investor else str(investor_id),
+                "investments": count,
+            }
+        )
+
+    return {
+        "network_stats": {
+            "investor_nodes": investor_count,
+            "funding_rounds": funding_count,
+            "investment_edges": investment_count,
+            "orgs_with_funding": funded_entities,
+        },
+        "top_investors": top_investors,
+        "density": round(investment_count / max(investor_count, 1), 2),
+    }
+
+
+@router.get("/relations/investor/{investor_id}")
+def get_investor_network(investor_id: int, db: Session = Depends(get_db)):
+    """获取投资方的投资组合。"""
+    investor = db.query(Investor).filter(Investor.id == investor_id).first()
+    if not investor:
+        raise HTTPException(status_code=404, detail="Investor not found")
+
+    investments = (
+        db.query(Investment)
+        .filter(Investment.investor_id == investor_id)
+        .order_by(Investment.id.desc())
+        .all()
+    )
+
+    portfolio = []
+    for investment in investments:
+        funding = db.query(FundingRound).filter(FundingRound.id == investment.funding_round_id).first()
+        if not funding:
+            continue
+        target = _resolve_round_target(db, funding)
+        portfolio.append(
+            {
+                "org_name": target["target_name"],
+                "org_id": target["target_id"],
+                "country": target["target_country"],
+                "round": funding.round_type,
+                "amount": investment.amount,
+                "lead_investor": bool(investment.lead_investor),
+                "announced_date": funding.announced_date.isoformat() if funding.announced_date else None,
+                "source_type": target["target_source"],
+            }
+        )
+
+    return {
+        "investor_name": investor.name,
+        "investor_id": investor_id,
+        "portfolio_size": len(portfolio),
+        "portfolio": portfolio,
+    }
+
+
+@router.get("/relations/{org_id}")
+def get_org_relations(org_id: str, db: Session = Depends(get_db)):
+    """获取机构的投资关系图谱。"""
+    org = db.query(OrganizationProfile).filter(OrganizationProfile.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    graph_data = _load_relation_graph()
+    result = {
+        "organization_id": org_id,
+        "organization_name": org.name,
+        "investors": [],
+        "co_investors": [],
+        "funding_history": [],
+    }
+
+    matching_rounds = []
+    funding_rounds = db.query(FundingRound).order_by(FundingRound.announced_date.desc().nullslast(), FundingRound.id.desc()).all()
+    for funding_round in funding_rounds:
+        target = _resolve_round_target(db, funding_round)
+        if target["target_id"] == org_id:
+            matching_rounds.append((funding_round, target))
+
+    for funding_round, target in matching_rounds:
+        investments = db.query(Investment).filter(Investment.funding_round_id == funding_round.id).all()
+        round_investors = []
+        for investment in investments:
+            investor = db.query(Investor).filter(Investor.id == investment.investor_id).first()
+            if investor:
+                round_investors.append(
+                    {
+                        "name": investor.name,
+                        "id": investor.id,
+                        "country": investor.country,
+                        "amount": investment.amount,
+                        "lead_investor": bool(investment.lead_investor),
+                    }
+                )
+
+        result["funding_history"].append(
+            {
+                "round_id": funding_round.id,
+                "round_name": funding_round.round_type,
+                "amount": funding_round.amount,
+                "date": funding_round.announced_date.isoformat() if funding_round.announced_date else None,
+                "investors": round_investors,
+                "source_type": target["target_source"],
+            }
+        )
+        result["investors"].extend(round_investors)
+
+    seen = set()
+    unique_investors = []
+    for investor in result["investors"]:
+        if investor["id"] in seen:
+            continue
+        seen.add(investor["id"])
+        unique_investors.append(investor)
+    result["investors"] = unique_investors
+
+    if graph_data:
+        current_investor_ids = {str(investor["id"]) for investor in result["investors"]}
+        co_investors = []
+        for pair in graph_data.get("co_investors", []):
+            investor_a = str(pair.get("investor_a"))
+            investor_b = str(pair.get("investor_b"))
+            if investor_a in current_investor_ids or investor_b in current_investor_ids:
+                co_investors.append(pair)
+        result["co_investors"] = co_investors
+
+    return result
+
+
 @router.get("/history/summary")
 def get_history_summary(db: Session = Depends(get_db)):
     """全局变更统计，展示 History Layer 当前价值。"""
@@ -1340,3 +1567,177 @@ def get_org_history(org_id: str, limit: int = 20, db: Session = Depends(get_db))
             for item in history
         ],
     }
+
+
+@router.get("/scores")
+def get_organization_scores(org_id: str = None, db: Session = Depends(get_db)):
+    """
+    返回机构的三个评分：People / Digital / Intel
+    如果 org_id 为空，返回全局评分统计。
+    """
+    if org_id:
+        org = db.query(OrganizationProfile).filter(OrganizationProfile.id == org_id).first()
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
+
+        people_total = org.people_score or 0
+        digital_total = org.digital_score or 0
+        intel_total = org.intel_score or 0
+        composite_total = people_total + digital_total + intel_total
+
+        return {
+            "organization": {
+                "id": org.id,
+                "name": org.name,
+                "country": org.country,
+            },
+            "people_score": {
+                "total": people_total,
+                "grade": org.people_score_grade or "F",
+                "dimensions": _safe_json_parse(org.people_score_dimensions),
+            },
+            "digital_score": {
+                "total": digital_total,
+                "grade": org.digital_score_grade or "F",
+                "dimensions": _safe_json_parse(org.digital_score_dimensions),
+            },
+            "intel_score": {
+                "total": intel_total,
+                "grade": org.intel_score_grade or "F",
+                "dimensions": _safe_json_parse(org.intel_score_dimensions),
+            },
+            "composite": {
+                "total": composite_total,
+                "grade": _composite_grade([people_total, digital_total, intel_total]),
+            },
+        }
+
+    total_orgs = db.query(func.count(OrganizationProfile.id)).scalar()
+
+    people_dist = (
+        db.query(OrganizationProfile.people_score_grade, func.count(OrganizationProfile.id))
+        .group_by(OrganizationProfile.people_score_grade)
+        .all()
+    )
+    digital_dist = (
+        db.query(OrganizationProfile.digital_score_grade, func.count(OrganizationProfile.id))
+        .group_by(OrganizationProfile.digital_score_grade)
+        .all()
+    )
+    intel_dist = (
+        db.query(OrganizationProfile.intel_score_grade, func.count(OrganizationProfile.id))
+        .group_by(OrganizationProfile.intel_score_grade)
+        .all()
+    )
+
+    avg_people = db.query(func.avg(OrganizationProfile.people_score)).scalar() or 0
+    avg_digital = db.query(func.avg(OrganizationProfile.digital_score)).scalar() or 0
+    avg_intel = db.query(func.avg(OrganizationProfile.intel_score)).scalar() or 0
+
+    return {
+        "total_organizations": total_orgs,
+        "scoring_coverage": {
+            "people": db.query(func.count(OrganizationProfile.id)).filter(OrganizationProfile.people_score > 0).scalar(),
+            "digital": db.query(func.count(OrganizationProfile.id)).filter(OrganizationProfile.digital_score > 0).scalar(),
+            "intel": db.query(func.count(OrganizationProfile.id)).filter(OrganizationProfile.intel_score > 0).scalar(),
+        },
+        "average_scores": {
+            "people": round(avg_people, 1),
+            "digital": round(avg_digital, 1),
+            "intel": round(avg_intel, 1),
+            "composite": round(avg_people + avg_digital + avg_intel, 1),
+        },
+        "grade_distribution": {
+            "people": {grade: count for grade, count in sorted(people_dist)},
+            "digital": {grade: count for grade, count in sorted(digital_dist)},
+            "intel": {grade: count for grade, count in sorted(intel_dist)},
+        },
+    }
+
+
+@router.get("/scores/top")
+def get_top_scored_organizations(
+    limit: int = 20,
+    country: str = None,
+    min_grade: str = None,
+    db: Session = Depends(get_db),
+):
+    """
+    评分排行榜：按三评分综合分排序
+    支持按国家筛选、最低等级筛选。
+    """
+    composite_total = (
+        func.coalesce(OrganizationProfile.people_score, 0)
+        + func.coalesce(OrganizationProfile.digital_score, 0)
+        + func.coalesce(OrganizationProfile.intel_score, 0)
+    )
+    composite_average = composite_total / 3.0
+
+    query = db.query(OrganizationProfile).filter(OrganizationProfile.people_score.isnot(None))
+
+    if country:
+        query = query.filter(OrganizationProfile.country == country)
+
+    if min_grade:
+        thresholds = {"A": 60, "B": 45, "C": 30, "D": 15, "F": 0}
+        query = query.filter(composite_average >= thresholds.get(min_grade.upper(), 0))
+
+    results = query.order_by(composite_total.desc(), OrganizationProfile.name.asc()).limit(limit).all()
+
+    return {
+        "total": len(results),
+        "organizations": [
+            {
+                "id": org.id,
+                "name": org.name,
+                "country": org.country,
+                "type": org.organization_type,
+                "scores": {
+                    "people": {"total": org.people_score or 0, "grade": org.people_score_grade or "F"},
+                    "digital": {"total": org.digital_score or 0, "grade": org.digital_score_grade or "F"},
+                    "intel": {"total": org.intel_score or 0, "grade": org.intel_score_grade or "F"},
+                },
+                "composite": {
+                    "total": (org.people_score or 0) + (org.digital_score or 0) + (org.intel_score or 0),
+                    "grade": _composite_grade([
+                        org.people_score or 0,
+                        org.digital_score or 0,
+                        org.intel_score or 0,
+                    ]),
+                },
+                "website": org.official_website,
+            }
+            for org in results
+        ],
+    }
+
+
+def _safe_json_parse(raw_value: str | None) -> dict:
+    """安全解析 JSON 字符串，同时兼容历史 str(dict) 格式。"""
+    if not raw_value:
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        try:
+            import ast
+
+            parsed = ast.literal_eval(raw_value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+
+def _composite_grade(scores: list[int]) -> str:
+    """三评分综合等级。"""
+    average_score = sum(scores) / max(len(scores), 1)
+    if average_score >= 60:
+        return "A"
+    if average_score >= 45:
+        return "B"
+    if average_score >= 30:
+        return "C"
+    if average_score >= 15:
+        return "D"
+    return "F"

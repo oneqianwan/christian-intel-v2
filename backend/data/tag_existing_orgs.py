@@ -111,6 +111,58 @@ CORE_ORGANIZATIONS = [
             {"tag_type": "organization_type", "tag_id": "media_outlet"},
         ],
     },
+    {
+        "match": "%FEBC%",
+        "label": "FEBC Philippines",
+        "defaults": {
+            "name": "FEBC Philippines",
+            "country": "菲律宾",
+            "official_website": "https://febc.ph/",
+            "denomination": "福音派跨宗派",
+            "source_name": "manual_seed",
+            "source_url": "https://febc.ph/",
+            "confidence": 0.9,
+        },
+        "tags": [
+            {"tag_type": "organization_type", "tag_id": "media_outlet"},
+            {"tag_type": "organization_type", "tag_id": "parachurch"},
+        ],
+    },
+    {
+        "match": "%Veritas%",
+        "label": "Veritas PH",
+        "defaults": {
+            "name": "Veritas PH",
+            "country": "菲律宾",
+            "official_website": "https://www.veritasph.net/",
+            "denomination": "天主教",
+            "source_name": "manual_seed",
+            "source_url": "https://www.veritasph.net/",
+            "confidence": 0.88,
+        },
+        "tags": [
+            {"tag_type": "organization_type", "tag_id": "media_outlet"},
+            {"tag_type": "theology", "tag_id": "catholic"},
+        ],
+    },
+    {
+        "match": "%Philippine Bible Society%",
+        "label": "Philippine Bible Society",
+        "defaults": {
+            "name": "Philippine Bible Society",
+            "country": "菲律宾",
+            "official_website": "https://bible.org.ph/",
+            "denomination": "跨宗派",
+            "source_name": "manual_seed",
+            "source_url": "https://bible.org.ph/",
+            "confidence": 0.9,
+        },
+        "tags": [
+            {"tag_type": "organization_type", "tag_id": "faithtech_bible"},
+            {"tag_type": "organization_type", "tag_id": "parachurch"},
+            {"tag_type": "theology", "tag_id": "interdenominational"},
+        ],
+    },
 ]
 
 

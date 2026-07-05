@@ -1,11 +1,24 @@
 import { useEffect, useState } from 'react'
 
+type MissionView = {
+  id: string
+  query: string
+  country: string
+  status: string
+  priority: number
+  target_entity: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 type TaskItem = {
   id: number
   title: string
   description?: string
-  priority: string
-  status: string
+  mission_id: string | null
+  mission: MissionView | null
+  priority?: string
+  status?: string
   created_at: string
 }
 
@@ -59,7 +72,28 @@ export function TaskPanel({ refreshToken = 0 }: TaskPanelProps) {
     }
   }
 
+  const isMissionTask = (task: TaskItem) => Boolean(task.mission_id && task.mission)
+
+  const getTaskStatus = (task: TaskItem) => {
+    if (isMissionTask(task)) return task.mission?.status || ''
+    return task.status || 'pending'
+  }
+
+  const getTaskPriority = (task: TaskItem) => {
+    if (!isMissionTask(task)) return task.priority || 'medium'
+
+    const missionPriority = task.mission?.priority
+    if (typeof missionPriority !== 'number') return ''
+    return `P${missionPriority}`
+  }
+
   const getPriorityColor = (priority: string) => {
+    if (/^P\d+$/i.test(priority)) {
+      const level = Number(priority.slice(1))
+      if (level <= 2) return { background: '#fee2e2', color: '#b91c1c' }
+      if (level <= 5) return { background: '#ffedd5', color: '#c2410c' }
+      return { background: '#f3f4f6', color: '#4b5563' }
+    }
     switch (priority) {
       case 'urgent':
         return { background: '#fee2e2', color: '#b91c1c' }
@@ -74,12 +108,19 @@ export function TaskPanel({ refreshToken = 0 }: TaskPanelProps) {
 
   const getStatusColor = (status: string) => {
     switch (status) {
+      case 'running':
+        return { background: '#e0f2fe', color: '#0369a1' }
       case 'completed':
+      case 'done':
         return { background: '#dcfce7', color: '#15803d' }
       case 'in_progress':
         return { background: '#fef3c7', color: '#a16207' }
       case 'pending':
+      case 'queued':
         return { background: '#f3f4f6', color: '#4b5563' }
+      case 'failed':
+      case 'cancelled':
+        return { background: '#fef2f2', color: '#dc2626' }
       default:
         return { background: '#f3f4f6', color: '#4b5563' }
     }
@@ -89,6 +130,11 @@ export function TaskPanel({ refreshToken = 0 }: TaskPanelProps) {
     if (status === 'pending') return '待跟进'
     if (status === 'in_progress') return '进行中'
     if (status === 'completed') return '已完成'
+    if (status === 'queued') return '排队中'
+    if (status === 'running') return '运行中'
+    if (status === 'done') return '已完成'
+    if (status === 'failed') return '失败'
+    if (status === 'cancelled') return '已取消'
     return status
   }
 
@@ -118,39 +164,53 @@ export function TaskPanel({ refreshToken = 0 }: TaskPanelProps) {
         <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
           {tasks.map((task) => (
             <div key={task.id} style={{ padding: '12px 14px', borderTop: '1px solid #f8fafc' }}>
+              {(() => {
+                const status = getTaskStatus(task)
+                const priority = getTaskPriority(task)
+                const missionTask = isMissionTask(task)
+
+                return (
+                  <>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
                 <div style={{ flex: 1, fontSize: '14px', color: '#111827', lineHeight: 1.5 }}>{task.title}</div>
-                <span
-                  style={{
-                    ...getPriorityColor(task.priority),
-                    padding: '3px 8px',
-                    borderRadius: '999px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {task.priority}
-                </span>
+                {priority && (
+                  <span
+                    style={{
+                      ...getPriorityColor(priority),
+                      padding: '3px 8px',
+                      borderRadius: '999px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {priority}
+                  </span>
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
                 <span
                   style={{
-                    ...getStatusColor(task.status),
+                    ...getStatusColor(status),
                     padding: '3px 8px',
                     borderRadius: '999px',
                     fontSize: '11px',
                     fontWeight: 700,
                   }}
                 >
-                  {translateStatus(task.status)}
+                  {translateStatus(status)}
                 </span>
+                {missionTask && task.mission?.id && (
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Mission: {task.mission.id.slice(0, 8)}
+                  </span>
+                )}
                 <span style={{ fontSize: '11px', color: '#9ca3af' }}>
                   {task.created_at ? new Date(task.created_at).toLocaleDateString() : ''}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', flexWrap: 'wrap' }}>
-                {task.status !== 'completed' && (
+                {!missionTask && status !== 'completed' && (
                   <button
                     onClick={() => void updateStatus(task.id, 'completed')}
                     style={{ border: 'none', borderRadius: '8px', padding: '4px 8px', fontSize: '12px', background: '#f0fdf4', color: '#16a34a', cursor: 'pointer' }}
@@ -158,7 +218,7 @@ export function TaskPanel({ refreshToken = 0 }: TaskPanelProps) {
                     ✓ 完成
                   </button>
                 )}
-                {task.status === 'pending' && (
+                {!missionTask && status === 'pending' && (
                   <button
                     onClick={() => void updateStatus(task.id, 'in_progress')}
                     style={{ border: 'none', borderRadius: '8px', padding: '4px 8px', fontSize: '12px', background: '#fefce8', color: '#ca8a04', cursor: 'pointer' }}
@@ -173,6 +233,9 @@ export function TaskPanel({ refreshToken = 0 }: TaskPanelProps) {
                   ✕ 删除
                 </button>
               </div>
+                  </>
+                )
+              })()}
             </div>
           ))}
         </div>

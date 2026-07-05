@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { flushSync } from 'react-dom'
 import { useConversationStore } from '../stores/conversationStore'
 import { useMessageStore } from '../stores/messageStore'
 import { sendChatStream, fetchMessages, createConversation } from '../services/api'
@@ -10,10 +11,16 @@ import { InvestorMatchCard, type InvestorMatch } from './InvestorMatchCard'
 import { TaskPanel } from './TaskPanel'
 import { IntelGraph } from './IntelGraph'
 
+void InvestorMatchCard
+void IntelGraph
+
 type ChatAreaProps = {
   showSettings: boolean
   onToggleSettings: () => void
 }
+
+const WELCOME_REPLY_TEXT = '你好！我是 CIO 情报助手。请问你想查询哪家机构的评分或投资关系？'
+const normalizeWelcomeText = (value: string) => value.replace(/\s+/g, '')
 
 type SearchResult = {
   id: string
@@ -51,6 +58,97 @@ type GraphPayload = {
   }>
 }
 
+type _KeepFrontendAnswerAuditTypes = MatchPayload | GraphPayload
+
+const md5 = (input: string): string => {
+  const text = unescape(encodeURIComponent(String(input || '')))
+  const words: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    words[i >> 2] |= text.charCodeAt(i) << ((i % 4) * 8)
+  }
+  words[text.length >> 2] |= 0x80 << ((text.length % 4) * 8)
+  words[(((text.length + 8) >> 6) + 1) * 16 - 2] = text.length * 8
+
+  const rotateLeft = (value: number, bits: number) => (value << bits) | (value >>> (32 - bits))
+  const add = (x: number, y: number) => (((x >>> 0) + (y >>> 0)) & 0xffffffff) >>> 0
+  const cmn = (q: number, a: number, b: number, x: number, s: number, t: number) => add(rotateLeft(add(add(a, q), add(x, t)), s), b)
+  const ff = (a: number, b: number, c: number, d: number, x: number, s: number, t: number) => cmn((b & c) | (~b & d), a, b, x, s, t)
+  const gg = (a: number, b: number, c: number, d: number, x: number, s: number, t: number) => cmn((b & d) | (c & ~d), a, b, x, s, t)
+  const hh = (a: number, b: number, c: number, d: number, x: number, s: number, t: number) => cmn(b ^ c ^ d, a, b, x, s, t)
+  const ii = (a: number, b: number, c: number, d: number, x: number, s: number, t: number) => cmn(c ^ (b | ~d), a, b, x, s, t)
+  const hex = (value: number) => {
+    let out = ''
+    for (let i = 0; i < 4; i++) {
+      out += (`0${((value >> (i * 8)) & 0xff).toString(16)}`).slice(-2)
+    }
+    return out
+  }
+
+  let a = 0x67452301
+  let b = 0xefcdab89
+  let c = 0x98badcfe
+  let d = 0x10325476
+
+  for (let i = 0; i < words.length; i += 16) {
+    const oa = a
+    const ob = b
+    const oc = c
+    const od = d
+
+    a = ff(a, b, c, d, words[i + 0] || 0, 7, 0xd76aa478); d = ff(d, a, b, c, words[i + 1] || 0, 12, 0xe8c7b756); c = ff(c, d, a, b, words[i + 2] || 0, 17, 0x242070db); b = ff(b, c, d, a, words[i + 3] || 0, 22, 0xc1bdceee)
+    a = ff(a, b, c, d, words[i + 4] || 0, 7, 0xf57c0faf); d = ff(d, a, b, c, words[i + 5] || 0, 12, 0x4787c62a); c = ff(c, d, a, b, words[i + 6] || 0, 17, 0xa8304613); b = ff(b, c, d, a, words[i + 7] || 0, 22, 0xfd469501)
+    a = ff(a, b, c, d, words[i + 8] || 0, 7, 0x698098d8); d = ff(d, a, b, c, words[i + 9] || 0, 12, 0x8b44f7af); c = ff(c, d, a, b, words[i + 10] || 0, 17, 0xffff5bb1); b = ff(b, c, d, a, words[i + 11] || 0, 22, 0x895cd7be)
+    a = ff(a, b, c, d, words[i + 12] || 0, 7, 0x6b901122); d = ff(d, a, b, c, words[i + 13] || 0, 12, 0xfd987193); c = ff(c, d, a, b, words[i + 14] || 0, 17, 0xa679438e); b = ff(b, c, d, a, words[i + 15] || 0, 22, 0x49b40821)
+    a = gg(a, b, c, d, words[i + 1] || 0, 5, 0xf61e2562); d = gg(d, a, b, c, words[i + 6] || 0, 9, 0xc040b340); c = gg(c, d, a, b, words[i + 11] || 0, 14, 0x265e5a51); b = gg(b, c, d, a, words[i + 0] || 0, 20, 0xe9b6c7aa)
+    a = gg(a, b, c, d, words[i + 5] || 0, 5, 0xd62f105d); d = gg(d, a, b, c, words[i + 10] || 0, 9, 0x02441453); c = gg(c, d, a, b, words[i + 15] || 0, 14, 0xd8a1e681); b = gg(b, c, d, a, words[i + 4] || 0, 20, 0xe7d3fbc8)
+    a = gg(a, b, c, d, words[i + 9] || 0, 5, 0x21e1cde6); d = gg(d, a, b, c, words[i + 14] || 0, 9, 0xc33707d6); c = gg(c, d, a, b, words[i + 3] || 0, 14, 0xf4d50d87); b = gg(b, c, d, a, words[i + 8] || 0, 20, 0x455a14ed)
+    a = gg(a, b, c, d, words[i + 13] || 0, 5, 0xa9e3e905); d = gg(d, a, b, c, words[i + 2] || 0, 9, 0xfcefa3f8); c = gg(c, d, a, b, words[i + 7] || 0, 14, 0x676f02d9); b = gg(b, c, d, a, words[i + 12] || 0, 20, 0x8d2a4c8a)
+    a = hh(a, b, c, d, words[i + 5] || 0, 4, 0xfffa3942); d = hh(d, a, b, c, words[i + 8] || 0, 11, 0x8771f681); c = hh(c, d, a, b, words[i + 11] || 0, 16, 0x6d9d6122); b = hh(b, c, d, a, words[i + 14] || 0, 23, 0xfde5380c)
+    a = hh(a, b, c, d, words[i + 1] || 0, 4, 0xa4beea44); d = hh(d, a, b, c, words[i + 4] || 0, 11, 0x4bdecfa9); c = hh(c, d, a, b, words[i + 7] || 0, 16, 0xf6bb4b60); b = hh(b, c, d, a, words[i + 10] || 0, 23, 0xbebfbc70)
+    a = hh(a, b, c, d, words[i + 13] || 0, 4, 0x289b7ec6); d = hh(d, a, b, c, words[i + 0] || 0, 11, 0xeaa127fa); c = hh(c, d, a, b, words[i + 3] || 0, 16, 0xd4ef3085); b = hh(b, c, d, a, words[i + 6] || 0, 23, 0x04881d05)
+    a = hh(a, b, c, d, words[i + 9] || 0, 4, 0xd9d4d039); d = hh(d, a, b, c, words[i + 12] || 0, 11, 0xe6db99e5); c = hh(c, d, a, b, words[i + 15] || 0, 16, 0x1fa27cf8); b = hh(b, c, d, a, words[i + 2] || 0, 23, 0xc4ac5665)
+    a = ii(a, b, c, d, words[i + 0] || 0, 6, 0xf4292244); d = ii(d, a, b, c, words[i + 7] || 0, 10, 0x432aff97); c = ii(c, d, a, b, words[i + 14] || 0, 15, 0xab9423a7); b = ii(b, c, d, a, words[i + 5] || 0, 21, 0xfc93a039)
+    a = ii(a, b, c, d, words[i + 12] || 0, 6, 0x655b59c3); d = ii(d, a, b, c, words[i + 3] || 0, 10, 0x8f0ccc92); c = ii(c, d, a, b, words[i + 10] || 0, 15, 0xffeff47d); b = ii(b, c, d, a, words[i + 1] || 0, 21, 0x85845dd1)
+    a = ii(a, b, c, d, words[i + 8] || 0, 6, 0x6fa87e4f); d = ii(d, a, b, c, words[i + 15] || 0, 10, 0xfe2ce6e0); c = ii(c, d, a, b, words[i + 6] || 0, 15, 0xa3014314); b = ii(b, c, d, a, words[i + 13] || 0, 21, 0x4e0811a1)
+    a = ii(a, b, c, d, words[i + 4] || 0, 6, 0xf7537e82); d = ii(d, a, b, c, words[i + 11] || 0, 10, 0xbd3af235); c = ii(c, d, a, b, words[i + 2] || 0, 15, 0x2ad7d2bb); b = ii(b, c, d, a, words[i + 9] || 0, 21, 0xeb86d391)
+
+    a = add(a, oa)
+    b = add(b, ob)
+    c = add(c, oc)
+    d = add(d, od)
+  }
+
+  return `${hex(a)}${hex(b)}${hex(c)}${hex(d)}`
+}
+
+const debugAnswerEvent = (stage: string, answer: string, extra: Record<string, unknown> = {}) => {
+  // #region debug-point B:frontend-answer-report
+  const text = String(answer || '')
+  const answerMd5 = md5(text)
+  fetch('http://127.0.0.1:7777/event', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sessionId: 'single-answer-source',
+      runId: 'pre',
+      hypothesisId: 'B',
+      location: 'ChatArea.tsx',
+      msg: `[DEBUG] ${stage}`,
+      data: {
+        stage,
+        answer_object_id: null,
+        answer_type: typeof text,
+        answer_length: text.length,
+        answer_md5: answerMd5,
+        answer_preview: text.slice(0, 200),
+        ...extra,
+      },
+      ts: Date.now(),
+    }),
+  }).catch(() => {})
+  // #endregion
+}
+
 const TOOL_LABELS: Record<string, string> = {
   query_ontology: '机构分类与教会网络',
   query_organization_profile: '机构画像',
@@ -84,6 +182,9 @@ const extractMetaPayload = <T,>(content: string, tagName: string): T | null => {
     return null
   }
 }
+
+void (0 as unknown as _KeepFrontendAnswerAuditTypes | null)
+void extractMetaPayload
 
 const stripMetaBlocks = (content: string): string =>
   content
@@ -452,9 +553,26 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   const forceScrollRef = useRef(false)
   const userScrolledRef = useRef(false)
   const streamContentRef = useRef('')
+  const isProcessingRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
 
   const messages = currentId ? getMessages(currentId) : []
+
+  useEffect(() => {
+    const lastWelcomeMessage = [...messages].reverse().find((msg) =>
+      msg.role === 'assistant' &&
+      normalizeWelcomeText(msg.content) === normalizeWelcomeText(WELCOME_REPLY_TEXT) &&
+      Boolean(msg.welcome_reply_uuid)
+    )
+    if (!lastWelcomeMessage) return
+    const frameId = window.requestAnimationFrame(() => {
+      const nodes = Array.from(document.querySelectorAll('.streaming-body'))
+      const matchedNode = [...nodes].reverse().find((node) => normalizeWelcomeText(node.textContent || '') === normalizeWelcomeText(WELCOME_REPLY_TEXT))
+      if (!matchedNode) return
+      console.log(`BROWSER_UUID=${lastWelcomeMessage.welcome_reply_uuid}`)
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [messages])
 
   const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
     messagesEndRef.current?.scrollIntoView({ behavior })
@@ -620,6 +738,12 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
     setInput(question)
     void handleSend(question)
   }
+
+  void renderIntelContent
+  void renderGlobalContent
+  void handleCreateInvestorTask
+  void renderFeedbackCard
+  void handleGenerateEmailFromMatch
 
   useEffect(() => {
     const hasNewMessage = messages.length > prevMessageCountRef.current
@@ -803,59 +927,63 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   const handleSend = async (overrideInput?: string) => {
     const trimmed = (overrideInput ?? input).trim()
     if (!trimmed) return
-    setLastQuery(trimmed)
+    if (isProcessingRef.current || isLoading || isThinking) return
+    isProcessingRef.current = true
 
-    const urlRegex = /^(https?:\/\/[^\s]+)$/
-    const isUrl = urlRegex.test(trimmed)
+    try {
+      setLastQuery(trimmed)
 
-    let convId = currentId
-    if (!convId) {
-      const conv = await createConversation(isUrl ? '链接分析' : trimmed.slice(0, 20))
-      convId = conv.id
-      addConversation(conv)
-    }
-    if (!convId) return
+      const urlRegex = /^(https?:\/\/[^\s]+)$/
+      const isUrl = urlRegex.test(trimmed)
 
-    const clientId = `local-user-${Date.now()}`
-    const userMsg = {
-      id: clientId,
-      role: 'user' as const,
-      content: trimmed,
-      sources: [],
-      delivery_type: 'text',
-      status: 'completed',
-      localOnly: true,
-    }
-    forceScrollRef.current = true
-    setUserScrolled(false)
-    userScrolledRef.current = false
-    addMessage(convId, userMsg)
-    setInput('')
+      let convId = currentId
+      if (!convId) {
+        const conv = await createConversation(isUrl ? '链接分析' : trimmed.slice(0, 20))
+        convId = conv.id
+        addConversation(conv)
+      }
+      if (!convId) return
 
-    if (isUrl) {
-      const msgId = `url-analysis-${Date.now()}`
-      setIsLoading(true)
-      forceScrollRef.current = true
-      addMessage(convId, {
-        id: msgId,
-        role: 'assistant' as const,
-        content: `🔍 正在分析链接：${trimmed}\n\n请稍候...`,
+      const clientId = `local-user-${Date.now()}`
+      const userMsg = {
+        id: clientId,
+        role: 'user' as const,
+        content: trimmed,
         sources: [],
-        delivery_type: 'url_analysis',
-        status: 'running',
-      })
+        delivery_type: 'text',
+        status: 'completed',
+        localOnly: true,
+      }
+      forceScrollRef.current = true
+      setUserScrolled(false)
+      userScrolledRef.current = false
+      addMessage(convId, userMsg)
+      setInput('')
 
-      try {
-        const r = await fetch('http://localhost:8000/api/analyze-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: trimmed }),
+      if (isUrl) {
+        const msgId = `url-analysis-${Date.now()}`
+        setIsLoading(true)
+        forceScrollRef.current = true
+        addMessage(convId, {
+          id: msgId,
+          role: 'assistant' as const,
+          content: `🔍 正在分析链接：${trimmed}\n\n请稍候...`,
+          sources: [],
+          delivery_type: 'url_analysis',
+          status: 'running',
         })
-        const result = await r.json()
 
-        let content = `## 🔗 链接分析报告\n\n`
-        content += `**平台**：${result.platform || '未知'}\n`
-        content += `**URL**：${result.url || trimmed}\n\n`
+        try {
+          const r = await fetch('http://localhost:8000/api/analyze-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: trimmed }),
+          })
+          const result = await r.json()
+
+          let content = `## 🔗 链接分析报告\n\n`
+          content += `**平台**：${result.platform || '未知'}\n`
+          content += `**URL**：${result.url || trimmed}\n\n`
 
         if (result.status === 'success') {
           content += `### 📊 基础信息\n`
@@ -898,127 +1026,145 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
           delivery_type: 'error_notification',
           status: 'completed',
         })
+        } finally {
+          setIsLoading(false)
+        }
+        return
+      }
+
+      setIsLoading(true)
+      streamContentRef.current = ''
+      setStreamingContent('')
+      setIsThinking(true)
+      setCurrentTool(null)
+      abortControllerRef.current?.abort()
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+
+      try {
+        await sendChatStream(userMsg.content, convId, (type, data) => {
+          if (type === 'thinking') {
+            setIsThinking(true)
+            setCurrentTool(null)
+            return
+          }
+
+          if (type === 'tool_call') {
+            setIsThinking(false)
+            setCurrentTool(data.name || '查询中...')
+            if (!userScrolledRef.current) {
+              forceScrollRef.current = true
+            }
+            return
+          }
+
+          if (type === 'content') {
+            setIsThinking(false)
+            setCurrentTool(null)
+            streamContentRef.current += data.content || ''
+            debugAnswerEvent('React Streaming Answer', streamContentRef.current, {
+              event_type: type,
+              message_id: data.message_id || null,
+            })
+            flushSync(() => {
+              setStreamingContent(streamContentRef.current)
+            })
+            if (!userScrolledRef.current) {
+              forceScrollRef.current = true
+            }
+            return
+          }
+
+          if (type === 'done') {
+            setIsThinking(false)
+            setCurrentTool(null)
+            const delivery = data.delivery || {}
+            const fullContent = data.full_content || delivery.content || streamContentRef.current
+            const welcomeReplyUuid = data.welcome_reply_uuid || delivery.welcome_reply_uuid || null
+            if (normalizeWelcomeText(fullContent) === normalizeWelcomeText(WELCOME_REPLY_TEXT) && welcomeReplyUuid) {
+              console.log(`REACT_UUID=${welcomeReplyUuid}`)
+            }
+            debugAnswerEvent('React Final Answer', fullContent, {
+              event_type: type,
+              message_id: data.message_id || null,
+            })
+            if (!userScrolledRef.current) {
+              forceScrollRef.current = true
+            }
+            addMessage(convId!, {
+              id: data.message_id || Date.now().toString(),
+              role: 'assistant' as const,
+              content: fullContent,
+              sources: delivery.sources || [],
+              delivery_type: delivery.delivery_type || 'text',
+              status: 'completed',
+              scope: delivery.scope || delivery.execution_summary?.scope,
+              welcome_reply_uuid: welcomeReplyUuid || undefined,
+            })
+            streamContentRef.current = ''
+            setStreamingContent('')
+            abortControllerRef.current = null
+            return
+          }
+
+          if (type === 'mission_created') {
+            const missionId = data.mission_id || 'N/A'
+            if (!userScrolledRef.current) {
+              forceScrollRef.current = true
+            }
+            const missionMsg = {
+              id: `mission-${missionId}`,
+              role: 'assistant' as const,
+              content: `🚀 ${data.message || '已启动采集任务'}\n\n任务ID: ${missionId}`,
+              sources: [],
+              delivery_type: 'mission_status',
+              status: 'running',
+            }
+            addMessage(convId!, missionMsg)
+            return
+          }
+
+          if (type === 'mission_progress') {
+            if (!userScrolledRef.current) {
+              forceScrollRef.current = true
+            }
+            const progressMsg = {
+              id: `mission-progress-${data.request_id || 'current'}`,
+              role: 'assistant' as const,
+              content: `⏳ 采集中... (${data.jobs_done || 0}/${data.jobs_total || 0} 来源已完成)\n\n任务状态: ${data.mission_status || 'running'}`,
+              sources: [],
+              delivery_type: 'mission_status',
+              status: 'running',
+            }
+            addMessage(convId!, progressMsg)
+            return
+          }
+
+          if (type === 'error') {
+            setIsThinking(false)
+            setCurrentTool(null)
+            streamContentRef.current = ''
+            setStreamingContent('抱歉，处理出现问题，请重试。')
+            if (!userScrolledRef.current) {
+              forceScrollRef.current = true
+            }
+          }
+        }, controller.signal)
+      } catch (error: any) {
+        setIsThinking(false)
+        setCurrentTool(null)
+        if (error?.name === 'AbortError') {
+          setStreamingContent('已中断')
+        } else {
+          setStreamingContent('网络错误，请重试。')
+        }
       } finally {
         setIsLoading(false)
-      }
-      return
-    }
-
-    setIsLoading(true)
-    streamContentRef.current = ''
-    setStreamingContent('')
-    setIsThinking(true)
-    setCurrentTool(null)
-    abortControllerRef.current?.abort()
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-
-    try {
-      await sendChatStream(userMsg.content, convId, (type, data) => {
-        if (type === 'thinking') {
-          setIsThinking(true)
-          setCurrentTool(null)
-          return
-        }
-
-        if (type === 'tool_call') {
-          setIsThinking(false)
-          setCurrentTool(data.name || '查询中...')
-          if (!userScrolledRef.current) {
-            forceScrollRef.current = true
-          }
-          return
-        }
-
-        if (type === 'content') {
-          setIsThinking(false)
-          setCurrentTool(null)
-          streamContentRef.current += data.content || ''
-          setStreamingContent(streamContentRef.current)
-          if (!userScrolledRef.current) {
-            forceScrollRef.current = true
-          }
-          return
-        }
-
-        if (type === 'done') {
-          setIsThinking(false)
-          setCurrentTool(null)
-          const delivery = data.delivery || {}
-          const fullContent = data.full_content || delivery.content || streamContentRef.current
-          if (!userScrolledRef.current) {
-            forceScrollRef.current = true
-          }
-          addMessage(convId!, {
-            id: data.message_id || Date.now().toString(),
-            role: 'assistant' as const,
-            content: fullContent,
-            sources: delivery.sources || [],
-            delivery_type: delivery.delivery_type || 'text',
-            status: 'completed',
-            scope: delivery.scope || delivery.execution_summary?.scope,
-          })
-          streamContentRef.current = ''
-          setStreamingContent('')
-          abortControllerRef.current = null
-          return
-        }
-
-        if (type === 'mission_created') {
-          const missionId = data.mission_id || 'N/A'
-          if (!userScrolledRef.current) {
-            forceScrollRef.current = true
-          }
-          const missionMsg = {
-            id: `mission-${missionId}`,
-            role: 'assistant' as const,
-            content: `🚀 ${data.message || '已启动采集任务'}\n\n任务ID: ${missionId}`,
-            sources: [],
-            delivery_type: 'mission_status',
-            status: 'running',
-          }
-          addMessage(convId!, missionMsg)
-          return
-        }
-
-        if (type === 'mission_progress') {
-          if (!userScrolledRef.current) {
-            forceScrollRef.current = true
-          }
-          const progressMsg = {
-            id: `mission-progress-${data.request_id || 'current'}`,
-            role: 'assistant' as const,
-            content: `⏳ 采集中... (${data.jobs_done || 0}/${data.jobs_total || 0} 来源已完成)\n\n任务状态: ${data.mission_status || 'running'}`,
-            sources: [],
-            delivery_type: 'mission_status',
-            status: 'running',
-          }
-          addMessage(convId!, progressMsg)
-          return
-        }
-
-        if (type === 'error') {
-          setIsThinking(false)
-          setCurrentTool(null)
-          streamContentRef.current = ''
-          setStreamingContent('抱歉，处理出现问题，请重试。')
-          if (!userScrolledRef.current) {
-            forceScrollRef.current = true
-          }
-        }
-      }, controller.signal)
-    } catch (error: any) {
-      setIsThinking(false)
-      setCurrentTool(null)
-      if (error?.name === 'AbortError') {
-        setStreamingContent('已中断')
-      } else {
-        setStreamingContent('网络错误，请重试。')
+        setIsThinking(false)
+        setCurrentTool(null)
       }
     } finally {
-      setIsLoading(false)
-      setIsThinking(false)
-      setCurrentTool(null)
+      isProcessingRef.current = false
     }
   }
 
@@ -1242,18 +1388,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
               </div>
             ) : (
             (() => {
-              const visibleContent = getDisplayContent(msg.content)
-              const isIntelBrief =
-                msg.role === 'assistant' &&
-                ['intelligence_brief', 'analysis_brief', 'contact_partial', 'contact_full', 'global_brief'].includes(msg.delivery_type || '')
-              const isGlobalBrief =
-                msg.role === 'assistant' &&
-                ((msg as any).scope === 'global' || msg.delivery_type === 'global_brief')
-              const matchPayload = extractMetaPayload<MatchPayload>(msg.content, 'MATCH_DATA')
-              const graphPayload = extractMetaPayload<GraphPayload>(msg.content, 'GRAPH_DATA')
-              const hasMatchCard = msg.role === 'assistant' && !!matchPayload?.matches?.length
-              const hasGraphCard = msg.role === 'assistant' && !!graphPayload?.relations?.length
-              const cleanContent = getDisplayContent(msg.content)
+              const visibleContent = msg.content
               return (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '86%' }}>
               {msg.role === 'assistant' && renderAssistantAvatar(60, 56, '#eef4ff')}
@@ -1269,58 +1404,9 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 whiteSpace: 'pre-wrap',
               }}>
                 {msg.role === 'assistant'
-                  ? (msg.delivery_type === 'no_data'
-                      ? renderFeedbackCard('当前数据不足', stripMarkdown(visibleContent), 'warning')
-                      : msg.delivery_type === 'clarify'
-                      ? renderFeedbackCard('需要你补充一点信息', stripMarkdown(visibleContent), 'info')
-                      : msg.delivery_type === 'error_notification'
-                      ? renderFeedbackCard('处理失败', stripMarkdown(visibleContent), 'error')
-                      : msg.delivery_type === 'mission_status'
-                      ? renderFeedbackCard('后台任务更新', stripMarkdown(visibleContent), 'success')
-                      : isGlobalBrief
-                      ? renderGlobalContent(msg)
-                      : hasMatchCard
-                      ? (
-                          <div style={{ display: 'grid', gap: '12px' }}>
-                            <InvestorMatchCard
-                              matches={matchPayload?.matches || []}
-                              projectDescription={matchPayload?.project_description}
-                              onCreateTask={handleCreateInvestorTask}
-                              onGenerateEmail={handleGenerateEmailFromMatch}
-                            />
-                            {cleanContent && (
-                              <div
-                                className="markdown-body"
-                                dangerouslySetInnerHTML={{ __html: renderMarkdown(cleanContent) }}
-                              />
-                            )}
-                          </div>
-                        )
-                      : hasGraphCard
-                      ? (
-                          <div style={{ display: 'grid', gap: '12px' }}>
-                            <IntelGraph
-                              centerEntity={graphPayload?.center_entity || ''}
-                              relations={graphPayload?.relations || []}
-                              width={580}
-                              height={380}
-                            />
-                            {cleanContent && (
-                              <div
-                                className="markdown-body"
-                                dangerouslySetInnerHTML={{ __html: renderMarkdown(cleanContent) }}
-                              />
-                            )}
-                          </div>
-                        )
-                      : isIntelBrief
-                      ? renderIntelContent(visibleContent, msg.sources.length, msg.delivery_type)
-                      : (
-                          <div
-                            className="markdown-body"
-                            dangerouslySetInnerHTML={{ __html: renderMarkdown(cleanContent) }}
-                          />
-                        ))
+                  ? (
+                      <div className="streaming-body">{msg.content}</div>
+                    )
                   : getDisplayContent(msg.content)}
                 {msg.role === 'assistant' && ['intelligence_brief', 'analysis_brief', 'contact_full'].includes(msg.delivery_type || '') && parseBriefItems(visibleContent).length > 0 && (
                   <div style={{ marginTop: '12px', display: 'grid', gap: '10px' }}>
@@ -1439,7 +1525,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                   <div style={{ flex: 1 }}>
                     <div style={{ marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: '#4f46e5' }}>实时生成中</div>
                     <div className="streaming-body">
-                      {stripMarkdown(streamingContent)}
+                      {streamingContent}
                       {isLoading && <span style={{ display: 'inline-block', width: '8px', height: '16px', background: '#6366f1', marginLeft: '6px', verticalAlign: 'middle' }} />}
                     </div>
                     <button

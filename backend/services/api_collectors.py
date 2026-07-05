@@ -433,36 +433,19 @@ def run_all_api_collectors(force: bool = False) -> int:
         print("[API] 冷却中，跳过本轮 API 采集")
         return 0
 
-    print(f"=== API采集 {datetime.utcnow().strftime('%H:%M')} ===")
-    total = 0
-    db = SessionLocal()
-    try:
-        try:
-            collector = NewsAPICollector(db)
-            count = collector.collect()
-            print(f"NewsAPI: +{count}")
-            total += count
-        except Exception as exc:
-            print(f"NewsAPI error: {exc}")
+    from services.mission_service import create_collection_mission
 
-        try:
-            collector = ScrapingBeeCollector(db)
-            count = collector.collect()
-            print(f"ScrapingBee: +{count}")
-            total += count
-        except Exception as exc:
-            print(f"ScrapingBee error: {exc}")
-
-        try:
-            collector = YouTubeCollector(db)
-            count = collector.collect()
-            print(f"YouTube: +{count}")
-            total += count
-        except Exception as exc:
-            print(f"YouTube error: {exc}")
-    finally:
-        db.close()
-
-    _mark_api_run()
-    print(f"=== 完成 +{total} ===")
-    return total
+    mission = create_collection_mission(
+        query="Global API Collectors",
+        country="全球",
+        source="global_api_collectors",
+        keywords=["newsapi", "scrapingbee", "youtube"],
+        limit_per_keyword=3,
+        metadata={"entry": "services.api_collectors.run_all_api_collectors"},
+    )
+    mission_id = mission.id if mission else None
+    if not mission_id:
+        print("=== API采集Mission未创建，跳过本轮提交 ===")
+        return 0
+    print(f"=== API采集已改为 Mission 提交: {mission_id} ===")
+    return 1

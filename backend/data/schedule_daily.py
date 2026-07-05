@@ -17,7 +17,7 @@ cd /d {BACKEND_ROOT}
 
 if not exist ..\logs mkdir ..\logs
 
-python -c "from services.rss_collector import collect_rss; collect_rss()" >> ..\logs\rss_%date:~-4,4%%date:~-10,2%%date:~-7,2%.log 2>&1
+python -c "from services.mission_service import create_collection_mission; mission = create_collection_mission(query='Daily RSS Collection', country='全球', source='rss', keywords=['daily-rss'], limit_per_keyword=30, metadata={'entry':'schedule_daily.py'}); print(mission.id if mission else None)" >> ..\logs\rss_%date:~-4,4%%date:~-10,2%%date:~-7,2%.log 2>&1
 python data\batch_collect.py --source newsapi --delay 5 >> ..\logs\batch_%date:~-4,4%%date:~-10,2%%date:~-7,2%.log 2>&1
 
 echo [%date% %time%] 采集完成

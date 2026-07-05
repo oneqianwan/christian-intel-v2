@@ -11,7 +11,7 @@ cd /d c:\Users\baiwan\christian-intel-v2\backend
 if not exist ..\logs mkdir ..\logs
 
 echo [%date% %time%] Starting RSS collection...
-python -c "from services.rss_collector import collect_rss; collect_rss()" 1>> ..\logs\rss_%TODAY%.log 2>&1
+python -c "from services.mission_service import create_collection_mission; mission = create_collection_mission(query='Daily RSS Collection', country='全球', source='rss', keywords=['daily-rss'], limit_per_keyword=30, metadata={'entry':'daily_run.bat'}); print(mission.id if mission else None)" 1>> ..\logs\rss_%TODAY%.log 2>&1
 echo [%date% %time%] RSS collection finished
 
 echo [%date% %time%] Starting NewsAPI batch collection...

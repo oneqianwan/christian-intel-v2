@@ -9,6 +9,7 @@ interface Message {
   status: string
   scope?: string
   localOnly?: boolean
+  welcome_reply_uuid?: string
 }
 
 interface MessageStore {
@@ -33,6 +34,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         existing.status === msg.status &&
         existing.scope === msg.scope &&
         existing.localOnly === msg.localOnly &&
+        existing.welcome_reply_uuid === msg.welcome_reply_uuid &&
         JSON.stringify(existing.sources) === JSON.stringify(msg.sources)
 
       if (unchanged) {

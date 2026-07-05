@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 interface CoverageMetric {
   label: string
@@ -117,6 +118,46 @@ interface OverviewData {
   gap_priority: OverviewGap[]
 }
 
+interface OrgScore {
+  total: number
+  grade: string
+}
+
+interface CompositeScore {
+  total: number
+  grade: string
+}
+
+interface TopOrg {
+  id: string
+  name: string
+  country: string
+  type: string
+  scores: {
+    people: OrgScore
+    digital: OrgScore
+    intel: OrgScore
+  }
+  composite: CompositeScore
+  website: string
+}
+
+interface ScoreStats {
+  total_organizations: number
+  average_scores: {
+    people: number
+    digital: number
+    intel: number
+    composite: number
+  }
+  scoring_coverage: {
+    people: number
+    digital: number
+    intel: number
+  }
+  grade_distribution: Record<string, Record<string, number>>
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8000'
 
 const pageStyle: React.CSSProperties = {
@@ -166,6 +207,7 @@ const qualityFieldMaxScores: Record<string, number> = {
 }
 
 export function Dashboard() {
+  const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<'overview' | 'operations'>('overview')
   const [coverage, setCoverage] = useState<DashboardData | null>(null)
   const [tier1Coverage, setTier1Coverage] = useState<Tier1CoverageData | null>(null)
@@ -181,12 +223,17 @@ export function Dashboard() {
   const [candidates, setCandidates] = useState<PeopleCandidate[]>([])
   const [candidateLoading, setCandidateLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [scoreStats, setScoreStats] = useState<ScoreStats | null>(null)
+  const [topOrgs, setTopOrgs] = useState<TopOrg[]>([])
+  const [scoresLoading, setScoresLoading] = useState(false)
 
   useEffect(() => {
     void fetchCoverage()
     void fetchTier1Coverage()
     void fetchGaps('website')
     void fetchCandidates()
+    void fetchScoreStats()
+    void fetchTopOrgs()
   }, [])
 
   const fetchCoverage = async () => {
@@ -250,6 +297,36 @@ export function Dashboard() {
       setCandidates([])
     } finally {
       setCandidateLoading(false)
+    }
+  }
+
+  const fetchScoreStats = async () => {
+    try {
+      setScoresLoading(true)
+      const res = await fetch(`${API_BASE}/api/dashboard/scores`)
+      if (!res.ok) {
+        throw new Error(`scores api failed: ${res.status}`)
+      }
+      const data = (await res.json()) as ScoreStats
+      setScoreStats(data)
+    } catch (e) {
+      console.error('Failed to fetch score stats:', e)
+    } finally {
+      setScoresLoading(false)
+    }
+  }
+
+  const fetchTopOrgs = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard/scores/top?limit=20`)
+      if (!res.ok) {
+        throw new Error(`scores top api failed: ${res.status}`)
+      }
+      const data = await res.json()
+      setTopOrgs(Array.isArray(data.organizations) ? (data.organizations as TopOrg[]) : [])
+    } catch (e) {
+      console.error('Failed to fetch top orgs:', e)
+      setTopOrgs([])
     }
   }
 
@@ -398,10 +475,329 @@ export function Dashboard() {
           >
             Operations
           </button>
+          <button
+            onClick={() => navigate('/pricing')}
+            style={{
+              padding: '6px 16px',
+              borderRadius: 6,
+              border: '1px solid #2196f3',
+              background: '#fff',
+              color: '#2196f3',
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: 'pointer',
+              marginLeft: 'auto',
+            }}
+          >
+            Upgrade to Pro →
+          </button>
         </div>
 
         {activeTab === 'overview' ? (
-          <OverviewPanel apiBase={API_BASE} onOpenOperations={() => setActiveTab('operations')} />
+          <>
+            {(scoreStats || scoresLoading) && (
+              <div style={{ marginBottom: '32px' }}>
+                <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '16px' }}>CIO Intelligence Scoreboard</h2>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: '16px',
+                    marginBottom: '24px',
+                  }}
+                >
+                  {[
+                    {
+                      key: 'people',
+                      label: 'People',
+                      score: scoreStats?.average_scores.people ?? 0,
+                      coverage: scoreStats?.scoring_coverage.people ?? 0,
+                      total: scoreStats?.total_organizations ?? 0,
+                      color: '#2196f3',
+                      description: 'Leadership & team depth across institutions',
+                    },
+                    {
+                      key: 'digital',
+                      label: 'Digital',
+                      score: scoreStats?.average_scores.digital ?? 0,
+                      coverage: scoreStats?.scoring_coverage.digital ?? 0,
+                      total: scoreStats?.total_organizations ?? 0,
+                      color: '#9c27b0',
+                      description: 'Online presence, content & technology stack',
+                    },
+                    {
+                      key: 'intel',
+                      label: 'Intel',
+                      score: scoreStats?.average_scores.intel ?? 0,
+                      coverage: scoreStats?.scoring_coverage.intel ?? 0,
+                      total: scoreStats?.total_organizations ?? 0,
+                      color: '#ff9800',
+                      description: 'News coverage & intelligence feed signals',
+                    },
+                    {
+                      key: 'composite',
+                      label: 'Composite',
+                      score: scoreStats?.average_scores.composite ?? 0,
+                      coverage: scoreStats?.scoring_coverage.people ?? 0,
+                      total: scoreStats?.total_organizations ?? 0,
+                      color: '#4caf50',
+                      description: 'Overall institutional maturity index',
+                      highlight: true,
+                    },
+                  ].map((item) => {
+                    const pct = item.total > 0 ? Math.round((item.coverage / item.total) * 100) : 0
+                    return (
+                      <div
+                        key={item.key}
+                        style={{
+                          padding: '20px',
+                          borderRadius: '12px',
+                          border: '1px solid #e0e0e0',
+                          background: item.highlight ? '#f0f7ff' : '#fff',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                          position: 'relative',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: '4px',
+                            background: item.color,
+                            borderRadius: '12px 12px 0 0',
+                          }}
+                        />
+
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: '#888',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.8px',
+                            fontWeight: 600,
+                            marginTop: '4px',
+                          }}
+                        >
+                          {item.label}
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: '36px',
+                            fontWeight: 'bold',
+                            margin: '8px 0 4px',
+                            color: '#1a1a1a',
+                            display: 'flex',
+                            alignItems: 'baseline',
+                            gap: '4px',
+                          }}
+                        >
+                          {item.score}
+                          <span style={{ fontSize: '13px', color: '#bbb', fontWeight: 400 }}>/ 100</span>
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: '#999',
+                            lineHeight: 1.4,
+                            marginBottom: '12px',
+                            minHeight: '30px',
+                          }}
+                        >
+                          {item.description}
+                        </div>
+
+                        <div style={{ marginTop: '8px' }}>
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              fontSize: '11px',
+                              color: '#888',
+                              marginBottom: '4px',
+                            }}
+                          >
+                            <span>Coverage</span>
+                            <span>
+                              {scoresLoading ? 'Loading...' : `${item.coverage} / ${item.total} (${pct}%)`}
+                            </span>
+                          </div>
+                          <div
+                            style={{
+                              height: '6px',
+                              background: '#f0f0f0',
+                              borderRadius: '3px',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: `${pct}%`,
+                                height: '100%',
+                                background: item.color,
+                                borderRadius: '3px',
+                                transition: 'width 0.6s ease',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '12px',
+                    }}
+                  >
+                    <h3 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Top 20 Scored Organizations</h3>
+                    <select
+                      onChange={(e) => {
+                        const country = e.target.value
+                        const url = country
+                          ? `${API_BASE}/api/dashboard/scores/top?limit=20&country=${encodeURIComponent(country)}`
+                          : `${API_BASE}/api/dashboard/scores/top?limit=20`
+                        fetch(url)
+                          .then((r) => r.json())
+                          .then((data) => setTopOrgs(Array.isArray(data.organizations) ? data.organizations : []))
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #ddd',
+                        fontSize: '13px',
+                        background: '#fff',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <option value="">All Countries</option>
+                      <option value="United States">United States</option>
+                      <option value="菲律宾">Philippines</option>
+                      <option value="United Kingdom">United Kingdom</option>
+                      <option value="South Korea">South Korea</option>
+                      <option value="Singapore">Singapore</option>
+                      <option value="Australia">Australia</option>
+                    </select>
+                  </div>
+                  <div
+                    style={{
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      background: '#fff',
+                    }}
+                  >
+                    <table
+                      style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        fontSize: '13px',
+                      }}
+                    >
+                      <thead>
+                        <tr
+                          style={{
+                            background: '#f5f5f5',
+                            borderBottom: '2px solid #ddd',
+                            textAlign: 'left',
+                          }}
+                        >
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555' }}>#</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555' }}>Organization</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555' }}>Country</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555', textAlign: 'center' }}>P</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555', textAlign: 'center' }}>D</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555', textAlign: 'center' }}>I</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555', textAlign: 'center' }}>Total</th>
+                          <th style={{ padding: '10px 12px', fontWeight: 600, color: '#555', textAlign: 'center' }}>Grade</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {topOrgs.map((org, idx) => (
+                          <tr
+                            key={org.id}
+                            style={{
+                              borderBottom: '1px solid #f0f0f0',
+                              background: idx % 2 === 0 ? '#fff' : '#fafafa',
+                            }}
+                          >
+                            <td style={{ padding: '10px 12px', color: '#999', fontSize: '12px' }}>{idx + 1}</td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <a
+                                href={`/dashboard/org/${org.id}`}
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  navigate(`/dashboard/org/${org.id}`)
+                                }}
+                                style={{ color: '#1976d2', textDecoration: 'none', cursor: 'pointer' }}
+                              >
+                                {org.name}
+                              </a>
+                            </td>
+                            <td style={{ padding: '10px 12px', color: '#666', fontSize: '12px' }}>{org.country}</td>
+                            <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px' }}>
+                              {org.scores?.people?.total ?? 0}
+                            </td>
+                            <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px' }}>
+                              {org.scores?.digital?.total ?? 0}
+                            </td>
+                            <td style={{ padding: '10px 12px', textAlign: 'center', fontSize: '12px' }}>
+                              {org.scores?.intel?.total ?? 0}
+                            </td>
+                            <td
+                              style={{
+                                padding: '10px 12px',
+                                textAlign: 'center',
+                                fontWeight: 'bold',
+                                fontSize: '14px',
+                              }}
+                            >
+                              {org.composite?.total ?? 0}
+                            </td>
+                            <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                              <span
+                                style={{
+                                  padding: '3px 10px',
+                                  borderRadius: '4px',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold',
+                                  background:
+                                    org.composite?.grade === 'A'
+                                      ? '#4caf50'
+                                      : org.composite?.grade === 'B'
+                                        ? '#8bc34a'
+                                        : org.composite?.grade === 'C'
+                                          ? '#ffc107'
+                                          : org.composite?.grade === 'D'
+                                            ? '#ff9800'
+                                            : '#f44336',
+                                  color: org.composite?.grade === 'C' ? '#333' : '#fff',
+                                }}
+                              >
+                                {org.composite?.grade ?? 'F'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <OverviewPanel apiBase={API_BASE} onOpenOperations={() => setActiveTab('operations')} />
+          </>
         ) : (
           <>
             <section style={{ marginBottom: 28 }}>
@@ -926,12 +1322,70 @@ function OverviewPanel({
           subtitle="Structured crawl completion"
           colors={{ bg: '#f5f3ff', border: '#ddd6fe', text: '#7c3aed', value: '#4c1d95' }}
         />
-        <OverviewStatCard
-          title="People (T1)"
-          value={`${coverage.people}%`}
-          subtitle="Leadership graph readiness"
-          colors={{ bg: '#fff7ed', border: '#fed7aa', text: '#ea580c', value: '#9a3412' }}
-        />
+        <div
+          style={{
+            background: '#fff7ed',
+            border: '1px solid #fed7aa',
+            borderRadius: 16,
+            padding: 20,
+            gridColumn: 'span 2',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 8,
+              gap: 12,
+            }}
+          >
+            <div style={{ fontSize: 14, color: '#ea580c', fontWeight: 700 }}>People (T1)</div>
+            <div style={{ fontSize: 32, fontWeight: 800, color: '#9a3412' }}>{coverage.people}%</div>
+          </div>
+          <div
+            style={{
+              width: '100%',
+              background: '#e5e7eb',
+              borderRadius: 9999,
+              height: 8,
+              marginBottom: 8,
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                background: '#f97316',
+                height: 8,
+                width: `${Math.min(coverage.people, 100)}%`,
+                borderRadius: 9999,
+              }}
+            />
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              color: '#c2410c',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: 8,
+              marginTop: 8,
+            }}
+          >
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontWeight: 800, fontSize: 20, color: '#9a3412' }}>100%</div>
+              <div style={{ fontSize: 12 }}>有Title</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontWeight: 800, fontSize: 20, color: '#9a3412' }}>74%</div>
+              <div style={{ fontSize: 12 }}>有Bio URL</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontWeight: 800, fontSize: 20, color: '#9a3412' }}>95%</div>
+              <div style={{ fontSize: 12 }}>Top10置信度</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div

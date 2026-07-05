@@ -271,4 +271,5 @@ def collect_pew_research():
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     collect_pew_research()

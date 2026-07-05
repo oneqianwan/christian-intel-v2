@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import redis
@@ -29,13 +30,7 @@ class WindowsSimpleWorker(SimpleWorker):
         result = super().execute_job(job, queue)
         _check_composite_completion(_get_mission_id(job))
         _check_pending_notifications(job)
-        try:
-            from services.api_collectors import run_all_api_collectors
-
-            api_added = run_all_api_collectors()
-            print(f"[Worker] API采集: +{api_added} 条global情报")
-        except Exception as exc:
-            print(f"[Worker] API采集跳过: {exc}")
+        _enqueue_global_api_collection(job)
 
         _agent_task_counter += 1
         if _agent_task_counter >= AGENT_TRIGGER_INTERVAL:
@@ -68,6 +63,58 @@ def _get_mission_id(job):
     if getattr(job, "args", None):
         return job.args[0]
     return None
+
+
+def _is_global_api_mission(job) -> bool:
+    mission_id = _get_mission_id(job)
+    if not mission_id:
+        return False
+
+    try:
+        from models.database import Mission, get_db
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            mission = db.query(Mission).filter(Mission.id == mission_id).first()
+            if not mission or not mission.query.startswith("__mission_payload__:"):
+                return False
+            payload = json.loads(mission.query.split(":", 1)[1])
+            return (payload.get("source") or "").strip().lower() == "global_api_collectors"
+        finally:
+            db_gen.close()
+    except Exception:
+        return False
+
+
+def _enqueue_global_api_collection(job):
+    if _is_global_api_mission(job):
+        return
+
+    try:
+        from services.api_collectors import _mark_api_run, _should_run_api_collectors
+        from services.mission_service import create_collection_mission
+
+        if not _should_run_api_collectors(cooldown_minutes=30):
+            print("[Worker] API采集冷却中，跳过 Mission 创建")
+            return
+
+        mission = create_collection_mission(
+            query="Worker Global API Scan",
+            country="全球",
+            source="global_api_collectors",
+            keywords=["newsapi", "scrapingbee", "youtube"],
+            limit_per_keyword=3,
+            metadata={"entry": "worker.execute_job.auto_scan"},
+        )
+        mission_id = mission.id if mission else None
+        if not mission_id:
+            print("[Worker] Mission未创建，跳过 Global API 标记与日志")
+            return
+        _mark_api_run()
+        print(f"[Worker] 已提交 Global API Mission: {mission_id}")
+    except Exception as exc:
+        print(f"[Worker] API Mission 提交失败: {exc}")
 
 
 def _check_composite_completion(mission_id: str):

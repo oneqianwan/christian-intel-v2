@@ -359,6 +359,7 @@ def batch_extract_websites(batch_size: int = 100, country_filter: str = None):
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     print("测试：菲律宾机构官网URL提取")
     print("=" * 60)
     batch_extract_websites(batch_size=30, country_filter="Philippines")

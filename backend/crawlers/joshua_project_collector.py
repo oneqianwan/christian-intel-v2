@@ -250,4 +250,5 @@ def collect_joshua_project(api_key: Optional[str] = None):
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     collect_joshua_project()

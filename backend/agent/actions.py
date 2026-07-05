@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from agent.planner import ActionPlan
 from models.database import Mission, get_db
+from services.mission_service import create_collection_mission
 
 
 class ActionExecutor:
@@ -107,25 +108,23 @@ class ActionExecutor:
         for src in sources:
             try:
                 name, url, src_type = src
-                mission_id = str(uuid.uuid4())
-                mission = Mission(
-                    id=mission_id,
+                mission = create_collection_mission(
+                    query=f"{reason} | source={name} | type={src_type or 'rss'} | url={url or ''}",
+                    country=country,
+                    priority=plan.priority,
+                    target_entity=name,
                     composite_task_id=composite_id,
                     composite_status="pending",
-                    country=country,
-                    query=f"{reason} | source={name} | type={src_type or 'rss'} | url={url or ''}",
-                    target_entity=name,
-                    status="queued",
-                    priority=plan.priority,
-                    created_at=datetime.utcnow(),
+                    db=self.db,
                 )
-                self.db.add(mission)
+                mission_id = mission.id if mission else None
+                if not mission_id:
+                    print(f"  Mission未创建，跳过该来源: source={name}")
+                    continue
                 mission_ids.append(mission_id)
                 created += 1
             except Exception as exc:
                 print(f"  Mission创建失败: {exc}")
-
-        self.db.commit()
         should_create_default_notification = (
             created > 0
             and plan.action != "auto_collect_and_notify"

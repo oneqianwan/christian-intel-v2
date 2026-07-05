@@ -515,6 +515,7 @@ def run_batch_crawl(batch_size: int = 10, source_filter: Optional[str] = None) -
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     print("测试：官网深度采集（第一批5家）")
     print("=" * 60)
     init_db()

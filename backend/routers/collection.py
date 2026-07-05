@@ -1,28 +1,21 @@
-"""
-采集控制接口 — 一键启动采集任务，查询进度
-"""
+"""采集控制接口。"""
 
-import asyncio
+import json
 import threading
-import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 try:
     from backend.services.agent import get_agent
-    from backend.services.auto_extractor import batch_extract_from_intelligence_items
-    from backend.services.api_collectors import NewsAPICollector
-    from backend.services.rss_collector import collect_rss
-    from backend.models.database import IntelligenceItem, SessionLocal
+    from backend.models.database import JobRun, Mission, SessionLocal
+    from backend.services.mission_service import MISSION_PAYLOAD_PREFIX, create_collection_mission
 except ImportError:
     from services.agent import get_agent
-    from services.auto_extractor import batch_extract_from_intelligence_items
-    from services.api_collectors import NewsAPICollector
-    from services.rss_collector import collect_rss
-    from models.database import IntelligenceItem, SessionLocal
+    from models.database import JobRun, Mission, SessionLocal
+    from services.mission_service import MISSION_PAYLOAD_PREFIX, create_collection_mission
 
 router = APIRouter(prefix="/api/collection", tags=["collection"])
 
@@ -31,20 +24,9 @@ _collection_tasks_lock = threading.Lock()
 
 
 class CollectionTask(BaseModel):
-    id: str
-    status: str  # pending, running, completed, failed
-    task_type: str  # newsapi, rss, webpage
-    keywords: List[str]
-    country: Optional[str] = None
-    source: str
-    total_expected: int = 0
-    collected: int = 0
-    failed: int = 0
-    deduped: int = 0
+    task_id: str
+    mission_id: str
     created_at: str = ""
-    started_at: Optional[str] = None
-    finished_at: Optional[str] = None
-    error_message: Optional[str] = None
 
 
 class StartCollectionRequest(BaseModel):
@@ -71,21 +53,140 @@ def _task_to_dict(task: CollectionTask) -> dict:
     return task.dict()
 
 
-def _get_recent_task_dicts(limit: int = 10) -> List[dict]:
+def _build_collection_adapter(
+    *,
+    task_id: str,
+    mission_id: str,
+    created_at: Optional[str] = None,
+) -> CollectionTask:
+    return CollectionTask(
+        task_id=task_id,
+        mission_id=mission_id,
+        created_at=created_at or datetime.utcnow().isoformat(),
+    )
+
+
+def _parse_collection_payload(mission: Mission) -> dict:
+    query = mission.query or ""
+    if not query.startswith(MISSION_PAYLOAD_PREFIX):
+        return {}
+    try:
+        payload = json.loads(query[len(MISSION_PAYLOAD_PREFIX):])
+    except Exception:
+        return {}
+    metadata = payload.get("metadata") or {}
+    entry = (metadata.get("entry") or "").strip()
+    if not entry.startswith("api.collection"):
+        return {}
+    return payload
+
+
+def _status_from_mission(mission_status: str) -> str:
+    return {
+        "queued": "pending",
+        "running": "running",
+        "done": "completed",
+        "failed": "failed",
+        "cancelled": "failed",
+    }.get(mission_status, "pending")
+
+
+def _build_task_from_mission(mission: Mission, adapter: Optional[CollectionTask] = None) -> Optional[dict]:
+    payload = _parse_collection_payload(mission)
+    if not payload:
+        return None
+
+    keywords = list(payload.get("keywords") or [])
+    source = (payload.get("source") or "").strip().lower() or "newsapi"
+    limit_per_keyword = max(1, min(int(payload.get("limit_per_keyword") or 30), 100))
+    db = SessionLocal()
+    try:
+        jobs = db.query(JobRun).filter(JobRun.mission_id == mission.id).all()
+    finally:
+        db.close()
+
+    collected = sum(max(job.result_count or 0, 0) for job in jobs)
+    failed = sum(1 for job in jobs if job.status == "failed")
+    error_message = next((job.error_message for job in jobs if job.error_message), None)
+
+    started_at = None
+    if mission.status != "queued":
+        started_at = mission.updated_at.isoformat() if mission.updated_at else mission.created_at.isoformat()
+    finished_at = None
+    if mission.status in {"done", "failed", "cancelled"}:
+        finished_at = mission.updated_at.isoformat() if mission.updated_at else mission.created_at.isoformat()
+
+    return {
+        "id": adapter.task_id if adapter else mission.id,
+        "status": _status_from_mission(mission.status),
+        "task_type": source,
+        "keywords": keywords,
+        "country": mission.country,
+        "source": source,
+        "total_expected": len(keywords) * limit_per_keyword,
+        "collected": collected,
+        "failed": failed,
+        "deduped": max(len(keywords) * limit_per_keyword - collected - failed, 0),
+        "created_at": adapter.created_at if adapter else (mission.created_at.isoformat() if mission.created_at else datetime.utcnow().isoformat()),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "error_message": error_message,
+        "mission_id": mission.id,
+    }
+
+
+def _get_collection_mission(task_id: str) -> tuple[Optional[Mission], Optional[CollectionTask]]:
+    adapter = None
     with _collection_tasks_lock:
-        recent = sorted(
-            _collection_tasks.values(),
-            key=lambda item: item.created_at,
-            reverse=True,
-        )[:limit]
-        return [_task_to_dict(task) for task in recent]
+        adapter = _collection_tasks.get(task_id)
+    mission_id = adapter.mission_id if adapter else task_id
+    db = SessionLocal()
+    try:
+        mission = db.query(Mission).filter(Mission.id == mission_id).first()
+        if not mission or not _parse_collection_payload(mission):
+            return None, adapter
+        return mission, adapter
+    finally:
+        db.close()
+
+
+def _get_recent_task_dicts(limit: int = 10) -> List[dict]:
+    db = SessionLocal()
+    try:
+        missions = (
+            db.query(Mission)
+            .order_by(Mission.created_at.desc())
+            .limit(max(limit * 5, 20))
+            .all()
+        )
+    finally:
+        db.close()
+
+    tasks: List[dict] = []
+    with _collection_tasks_lock:
+        adapters = {adapter.mission_id: adapter for adapter in _collection_tasks.values()}
+    for mission in missions:
+        adapter = adapters.get(mission.id)
+        task = _build_task_from_mission(mission, adapter)
+        if not task:
+            continue
+        tasks.append(task)
+        if len(tasks) >= limit:
+            break
+    return tasks
+
+
+def _count_recent_collection_missions() -> int:
+    db = SessionLocal()
+    try:
+        missions = db.query(Mission).order_by(Mission.created_at.desc()).limit(500).all()
+    finally:
+        db.close()
+    return sum(1 for mission in missions if _parse_collection_payload(mission))
 
 
 @router.post("/start", response_model=StartCollectionResponse)
-async def start_collection(
-    request: StartCollectionRequest,
-    background_tasks: BackgroundTasks,
-):
+async def start_collection(request: StartCollectionRequest):
     """启动采集任务"""
     keywords = [(item or "").strip() for item in request.keywords if (item or "").strip()]
     if not keywords:
@@ -96,34 +197,35 @@ async def start_collection(
         raise HTTPException(status_code=400, detail="unsupported source")
 
     limit_per_keyword = max(1, min(int(request.limit_per_keyword or 30), 100))
-    task_id = f"coll-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
-
-    task = CollectionTask(
-        id=task_id,
-        status="pending",
-        task_type=source,
-        keywords=keywords,
-        country=request.country,
+    mission = create_collection_mission(
+        query=f"Collection Start | {source} | {', '.join(keywords)}",
+        country=request.country or "全球",
         source=source,
-        total_expected=len(keywords) * limit_per_keyword,
-        created_at=datetime.utcnow().isoformat(),
+        keywords=keywords,
+        limit_per_keyword=limit_per_keyword,
+        metadata={
+            "entry": "api.collection.start",
+            "task_type": source,
+        },
+    )
+    mission_id = mission.id if mission else None
+    if not mission_id:
+        raise HTTPException(status_code=409, detail="Mission creation skipped")
+
+    adapter = _build_collection_adapter(
+        task_id=mission_id,
+        mission_id=mission_id,
     )
 
     with _collection_tasks_lock:
-        _collection_tasks[task_id] = task
+        _collection_tasks[mission_id] = adapter
 
-    background_tasks.add_task(
-        _execute_collection,
-        task_id=task_id,
-        keywords=keywords,
-        country=request.country,
-        source=source,
-        limit_per_keyword=limit_per_keyword,
-    )
+    mission, adapter = _get_collection_mission(mission_id)
+    task = _build_task_from_mission(mission, adapter) if mission else None
 
     return StartCollectionResponse(
-        task_id=task_id,
-        status="pending",
+        task_id=mission_id,
+        status=(task or {}).get("status", "pending"),
         message=f"已启动{source}采集任务，关键词: {', '.join(keywords)}",
     )
 
@@ -131,14 +233,15 @@ async def start_collection(
 @router.get("/status/{task_id}", response_model=TaskStatusResponse)
 async def get_collection_status(task_id: str):
     """查询采集任务状态"""
-    with _collection_tasks_lock:
-        task = _collection_tasks.get(task_id)
-
+    mission, adapter = _get_collection_mission(task_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task = _build_task_from_mission(mission, adapter)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
     return TaskStatusResponse(
-        task=_task_to_dict(task),
+        task=task,
         recent_tasks=_get_recent_task_dicts(limit=10),
     )
 
@@ -146,11 +249,12 @@ async def get_collection_status(task_id: str):
 @router.get("/recent")
 async def get_recent_tasks(limit: int = 10):
     """获取最近任务列表"""
-    tasks = _get_recent_task_dicts(limit=max(1, min(limit, 50)))
+    limit = max(1, min(limit, 50))
+    tasks = _get_recent_task_dicts(limit=limit)
     agent = get_agent()
     return {
         "tasks": tasks,
-        "total": len(_collection_tasks),
+        "total": _count_recent_collection_missions(),
         "agent": agent.get_stats(),
     }
 
@@ -176,11 +280,6 @@ async def get_presets():
     }
 
 
-def _update_task(task: CollectionTask, **kwargs) -> None:
-    for key, value in kwargs.items():
-        setattr(task, key, value)
-
-
 def _execute_collection(
     task_id: str,
     keywords: List[str],
@@ -188,119 +287,26 @@ def _execute_collection(
     source: str,
     limit_per_keyword: int,
 ):
-    """在后台线程执行采集"""
-    with _collection_tasks_lock:
-        task = _collection_tasks.get(task_id)
-    if not task:
-        return
-
-    _update_task(
-        task,
-        status="running",
-        started_at=datetime.utcnow().isoformat(),
-        error_message=None,
+    """兼容保留：只创建 Mission，并登记一个 CollectionTask 适配记录。"""
+    mission = create_collection_mission(
+        query=f"Collection Compat | {source} | {', '.join(keywords)}",
+        country=country or "全球",
+        source=source,
+        keywords=keywords,
+        limit_per_keyword=limit_per_keyword,
+        metadata={
+            "entry": "api.collection.compat_execute",
+            "legacy_task_id": task_id,
+        },
     )
-
-    db = SessionLocal()
-    try:
-        total_collected = 0
-        total_failed = 0
-        total_deduped = 0
-
-        if source == "newsapi":
-            collector = NewsAPICollector(db)
-            if not collector.api_key:
-                raise RuntimeError("NEWSAPI_KEY 未配置，无法执行 NewsAPI 采集")
-
-            for keyword in keywords:
-                try:
-                    count = collector._collect_keyword(
-                        keyword,
-                        label=keyword,
-                        limit_per_keyword=limit_per_keyword,
-                    )
-                    total_collected += count
-                    total_deduped += max(limit_per_keyword - count, 0)
-                    _update_task(
-                        task,
-                        collected=total_collected,
-                        failed=total_failed,
-                        deduped=total_deduped,
-                    )
-                except Exception as exc:
-                    total_failed += 1
-                    _update_task(task, failed=total_failed)
-                    print(f"[Collection] 关键词 '{keyword}' 采集失败: {exc}")
-
-        elif source == "rss":
-            before_count = db.query(IntelligenceItem).count()
-            collect_rss(limit_per_source=limit_per_keyword)
-            db.expire_all()
-            after_count = db.query(IntelligenceItem).count()
-            total_collected = max(after_count - before_count, 0)
-            total_deduped = max(task.total_expected - total_collected, 0)
-            _update_task(
-                task,
-                collected=total_collected,
-                failed=0,
-                deduped=total_deduped,
-            )
-
-        elif source == "webpage":
-            try:
-                from backend.crawlers.dynamic_crawler import DynamicCrawler
-            except ImportError:
-                from crawlers.dynamic_crawler import DynamicCrawler
-
-            async def run_crawler() -> tuple[int, int]:
-                crawler = DynamicCrawler()
-                collected = 0
-                failed = 0
-                try:
-                    await crawler.start()
-                    for keyword in keywords:
-                        search_url = f"https://www.google.com/search?q={keyword.replace(' ', '+')}"
-                        try:
-                            result = await crawler.fetch_page(search_url)
-                            if result.get("success"):
-                                collected += 1
-                            else:
-                                failed += 1
-                        except Exception as exc:
-                            failed += 1
-                            print(f"[Collection] 网页采集 '{keyword}' 失败: {exc}")
-                        _update_task(task, collected=collected, failed=failed)
-                finally:
-                    await crawler.stop()
-                return collected, failed
-
-            total_collected, total_failed = asyncio.run(run_crawler())
-            total_deduped = max(task.total_expected - total_collected - total_failed, 0)
-
-        final_status = "completed" if total_failed < len(keywords) else "failed"
-
-        if final_status == "completed":
-            try:
-                print("[Collection] 任务完成，自动提取机构信息...")
-                extract_stats = batch_extract_from_intelligence_items(limit=100)
-                print(f"[Collection] 自动提取完成: {extract_stats}")
-            except Exception as exc:
-                print(f"[Collection] 自动提取失败: {exc}")
-
-        _update_task(
-            task,
-            status=final_status,
-            collected=total_collected,
-            failed=total_failed,
-            deduped=total_deduped,
-            finished_at=datetime.utcnow().isoformat(),
-        )
-    except Exception as exc:
-        _update_task(
-            task,
-            status="failed",
-            error_message=str(exc),
-            finished_at=datetime.utcnow().isoformat(),
-        )
-    finally:
-        db.close()
+    mission_id = mission.id if mission else None
+    if not mission_id:
+        print(f"[Collection] Mission未创建，跳过兼容登记: task_id={task_id}")
+        return
+    adapter = _build_collection_adapter(
+        task_id=task_id,
+        mission_id=mission_id,
+    )
+    with _collection_tasks_lock:
+        _collection_tasks[task_id] = adapter
+    print(f"[Collection] 兼容入口已委托给 Mission: task_id={task_id}, mission_id={mission_id}")

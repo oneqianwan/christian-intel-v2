@@ -1,9 +1,8 @@
-import uuid
-from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from models.database import get_db, Mission, JobRun, IntelligenceItem, Source
-from queue_client import DEFAULT_COLLECTION_PRIORITY, HIGH_COLLECTION_PRIORITY, enqueue_collection_mission
+from queue_client import DEFAULT_COLLECTION_PRIORITY, HIGH_COLLECTION_PRIORITY
+from services.mission_service import create_collection_mission
 
 router = APIRouter()
 
@@ -15,23 +14,16 @@ def create_mission(
     priority: int = HIGH_COLLECTION_PRIORITY,
     db: Session = Depends(get_db),
 ):
-    mission = Mission(
-        id=str(uuid.uuid4()),
+    mission = create_collection_mission(
         query=query,
         country=country,
-        status="queued",
         priority=priority or DEFAULT_COLLECTION_PRIORITY,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        db=db,
     )
-    db.add(mission)
-    db.commit()
-    db.refresh(mission)
-
-    # 把采集任务放入队列
-    enqueue_collection_mission(mission.id, mission.priority)
-
-    return {"mission_id": mission.id, "status": "queued", "priority": mission.priority}
+    mission_id = mission.id if mission else None
+    if not mission_id:
+        return {"mission_id": None, "status": "skipped", "priority": priority or DEFAULT_COLLECTION_PRIORITY}
+    return {"mission_id": mission_id, "status": "queued", "priority": priority or DEFAULT_COLLECTION_PRIORITY}
 
 
 @router.get("/missions/{mission_id}")

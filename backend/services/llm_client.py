@@ -226,12 +226,25 @@ class LLMClient:
 llm = LLMClient()
 
 
-def call_llm(prompt: str, max_tokens: int = 1500, temperature: float = 0.1) -> str:
-    """同步兼容入口，返回原始文本。"""
+def call_llm(
+    prompt: Optional[str] = None,
+    max_tokens: int = 1500,
+    temperature: float = 0.1,
+    messages: Optional[List[Dict[str, str]]] = None,
+    model: Optional[str] = None,
+) -> str:
+    """同步兼容入口，支持 prompt 或 messages 两种调用方式。"""
     if not llm.enabled:
         raise RuntimeError("LLM API key 未配置")
 
+    if not prompt and not messages:
+        raise ValueError("prompt 和 messages 不能同时为空")
+
     async def _call() -> str:
+        request_messages = messages or [
+            {"role": "system", "content": "你是信息提取器，只输出用户要求的结果。"},
+            {"role": "user", "content": prompt or ""},
+        ]
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{llm.base_url}/chat/completions",
@@ -240,11 +253,8 @@ def call_llm(prompt: str, max_tokens: int = 1500, temperature: float = 0.1) -> s
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": llm.model,
-                    "messages": [
-                        {"role": "system", "content": "你是信息提取器，只输出用户要求的结果。"},
-                        {"role": "user", "content": prompt},
-                    ],
+                    "model": model or llm.model,
+                    "messages": request_messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 },

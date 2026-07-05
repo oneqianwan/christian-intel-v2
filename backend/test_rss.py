@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from models.database import get_db, Source, IntelligenceItem
 from services.rss_scanner import fetch_rss
 
+# Development/Test entry. Not production collection path.
 db = next(get_db())
 
 # 获取Christianity Today RSS源

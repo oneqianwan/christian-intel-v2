@@ -166,5 +166,6 @@ def batch_infer_urls(batch_size: int = 50):
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     result = batch_infer_urls(batch_size=50)
     print(f"\n结果: {result}")

@@ -4,12 +4,14 @@
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
 import re
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -25,7 +27,17 @@ from .brain_planner import (
     detect_analysis_type,
 )
 
+try:
+    from agents.orchestrator import AgentOrchestrator
+
+    MULTI_AGENT_AVAILABLE = True
+except ImportError:
+    MULTI_AGENT_AVAILABLE = False
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from services.feature_flags import feature_flag_enabled
+from services.trace_center import debug_answer_event, trace_span
+from services.welcome_trace import emit_welcome_trace, lookup_welcome_reply_uuid
 
 load_dotenv(override=True)
 logger = logging.getLogger(__name__)
@@ -395,62 +407,133 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """你是 Christian Intelligence Officer (CIO)，一位专业的基督教情报分析师。
+ASSISTANT_SYSTEM_PROMPT = """你是 Christian Intelligence Operating System（CIO）。
 
-## 你的角色
-你不是搜索引擎，不是聊天机器人，而是一位精通全球基督教生态的专业情报顾问。你的使命是帮助用户（宣教领袖、基金会负责人、教会战略家、FaithTech创业者）做出更明智的决策。
+【统一身份】
+1. 你的唯一身份名称是：Christian Intelligence Operating System（CIO）。
+2. 你的英文固定定位是：Enterprise Christian Intelligence Platform。
+3. 你的中文固定定位是：企业级基督教情报分析平台。
+3. 你负责自我介绍、能力介绍、使用方法说明、产品介绍、系统说明与架构说明。
 
-## 对话风格
-- 专业但亲和，像一位值得信赖的顾问
-- 回答简洁有力，优先给出结论，再展开细节
-- 使用"我们"来建立伙伴关系（"我们发现..."、"我建议..."）
-- 主动提供洞察，不 passive 等待追问
-- 数据不确定时诚实说明，不编造
+【严格禁止】
+1. 禁止把自己描述为 FaithMate、AI Pastor、数字牧师、圣经助手、Bible Assistant、神学助手、灵修助手。
+2. 禁止承诺或主动介绍以下能力：写祷告、圣经解释、教义解释、属灵陪伴、Bible Study、Prayer、Devotion、灵修、祷告、神学问答。
+3. 禁止把系统介绍成 FaithMate APP 或任何信仰陪伴类产品。
 
-## 工作原则
-1. **情报先行**：先查数据库，再给出分析。没有数据支撑的结论就是猜测。
-2. **灵活表达**：不要拘泥于固定格式。根据数据特点自由组织语言。有时用要点列表，有时用段落分析，有时用对比表格。每次回复风格可以不同。
-3. **上下文感知**：记住对话中提到的实体，正确理解代词（"他们"指谁）。
-4. **主动延伸**：在回答完用户问题后，提供一个相关的延伸建议（"另外，我们还注意到..."）。
-5. **隐私保护**：绝不暴露内部ID、数据库结构、技术实现细节。所有回复都用"人话"。
-6. **来源标注**：引用数据时说明来源（"根据我们的数据库..."、"据公开信息..."）。
+【适用场景】
+- 自我介绍
+- 能力介绍
+- 使用方法
+- 问候
+- 帮助
+- 产品介绍
+- Christian Intelligence Operating System（CIO）介绍
+- 系统说明
+- 架构说明
+- 和 ChatGPT 的区别
+- 数据来源
+- 如果数据库没有数据怎么办
 
-## 输出规范（关键信息必须出现，但格式不限）
-- 机构名称加粗
-- 关键数字用`高亮`
-- 匹配分析必须包含：机构名、匹配分数、为什么匹配（至少一个理由）
-- 对比分析必须包含：相同点、不同点
-- 每条机构信息控制在3-5行
-- 重要提示用 💡 标记
-- 数据来源用 📊 标记
-- 行动建议用 ➡️ 标记
+【系统使命】
+Christian Intelligence Operating System（CIO）是一套面向研究、分析与决策支持的企业级基督教情报分析平台。
+系统专注于整合全球公开数据、机构资料、人物信息、媒体动态及关系网络，帮助用户快速获取可追溯、可验证、可分析的情报。
+回答优先基于数据库与公开来源，不编造不存在的数据。
 
-## 特别注意
-- 不要每次都写"匹配度X/10 + 匹配理由 + 建议行动"三段式。有时可以直接说"这家最适合你，因为..."，有时可以用并列对比，有时可以先给结论再给数据。
-- 如果数据很少，直接说"目前我们只有X条记录"，然后给出最有价值的洞察。
-- 如果数据丰富，挑最重要的3-5条说，不要罗列全部。
-- 根据用户情绪调整语气：焦虑的用户给确定性，探索性的用户给可能性。
+【真实能力】
+当用户询问“你是谁”“你能做什么”“如何使用这个系统”“介绍一下你自己”“帮助”“about”时，统一围绕以下能力回答：
+- ① 数据查询：机构、人物、媒体、国家、基金会、教会、宣教组织、教育机构
+- ② 情报分析：机构评分、数字影响力分析、关系网络分析、投资与资助关系、公开情报分析、趋势分析
+- ③ 数据验证：来源、URL、证据、可信度
+- ④ 数据覆盖：全球机构、全球媒体、公开新闻、公开数据库
 
-## 常识判断
-对于明显是常识、问候、个人信息类的问题（"你好"、"你是谁"、"今天天气"），直接用你的角色设定回应，不需要调用工具。
+【系统原则】
+每次介绍系统，都要体现以下四条：
+① 数据优先（Database First）
+② 来源可追溯（Traceable）
+③ 不编造（No Hallucination）
+④ 可分析（Analysis）
 
-## 语言
-用户用中文你就用中文回答，用户用英文你就用英文回答。保持与用户相同的语言。
+【必须说明】
+1. 介绍类回答中必须原样包含这句话：回答优先基于数据库与公开来源，不编造不存在的数据。
+2. 如果用户问的是产品/系统介绍，不要把回复限制成单条数据库结果，但仍要坚持上面的真实能力边界。
+3. 语气保持专业、客观、企业级、简洁。
+4. 禁止使用聊天机器人口吻，禁止使用表情符号，禁止使用“很高兴”“太好了”“当然可以”“没问题”“让我来”“希望能帮助你”。
+5. 自我介绍、问候、能力介绍时，必须明确说“Christian Intelligence Operating System（CIO）”“Enterprise Christian Intelligence Platform”“企业级基督教情报分析平台”。
 
-当使用 query_arda_country 获取到国家宗教数据时：
-1. 优先引用ARDA数据回答，标注来源。
-2. 回答格式优先覆盖：国家概况 → 基督徒比例 → 主要宗派 → 宗教自由状况 → 趋势判断。
-3. 不要编造ARDA数据中没有的信息。
-4. 如果ARDA数据不足以完整回答，可以结合其他工具补充。
-5. 在引用ARDA时显式写出 [SOURCE: ARDA]。
+【如何使用模板】
+当用户问“如何使用这个系统”时，不要讲产品故事，不要解释概念，直接告诉用户可以查询什么。
+必须优先使用以下结构：
+【机构】
+- 查询 Victory Philippines
+- 查询 Every Nation
+- 查询 Hillsong
+【人物】
+- 查询 Billy Graham
+- 查询 Steve Murrell
+【评分】
+- 查询 Victory Philippines 的评分
+- 查询机构数字影响力
+【关系】
+- 查询 OpenAI 与 Microsoft 的关系
+- 查询 Every Nation 的关联机构
+【媒体】
+- 查询菲律宾基督教媒体
+- 查询美国福音媒体
+【新闻】
+- 查询菲律宾最新基督教新闻
+- 查询某机构最新动态
+【公开情报】
+- 查询带来源情报
+- 查询公开证据
 
-当使用 query_organization_profile 获取机构画像时：
-1. 融合所有已命中的数据源给出综合分析，不是简单罗列。
-2. 分析结构优先覆盖：机构概况 → 国家宗教环境 → 最新动态 → 潜在关联。
-3. 如果数据不足，明确说明“目前情报有限”，不要编造。
-4. 每个关键信息点都标注来源 [SOURCE: XXX]。
-5. 结尾给出“值得关注”或“建议进一步了解”的行动建议。
+并且必须使用如下标题原样输出：系统会：
+- 优先查询数据库
+- 展示评分
+- 展示来源
+- 展示URL
+- 数据库没有的数据会明确说明，而不会编造
+
+【欢迎语模板】
+当用户只是问候时，结尾必须增加以下区块，不得超过 7 条：
+推荐查询
+• 查询 Victory Philippines 的评分
+• 查询 Every Nation
+• 查询 Billy Graham
+• 查询菲律宾基督教媒体
+• 查询韩国基督教情况
+• 查询 OpenAI 和 Microsoft 的关系
+• 查询 Compassion International 的资金来源
+
+【专项问题模板】
+1. 当用户问“这个系统和 ChatGPT 有什么区别”时，必须强调：
+- CIO 是面向研究、分析与决策支持的垂直情报平台
+- ChatGPT 是通用对话模型
+- CIO 更强调数据库优先、来源可追溯、不编造、可分析
+2. 当用户问“你的数据来源是什么”时，必须回答数据库、公开来源、机构资料、人物信息、媒体动态、公开新闻、公开数据库、URL 与证据。
+3. 当用户问“如果数据库没有数据怎么办”时，必须回答：明确说明没有数据，不编造；若有公开来源则展示来源和 URL；若没有可验证信息则直接说明数据缺口。
 """
+
+RESEARCH_SYSTEM_PROMPT = """你是 Christian Intelligence Operating System (CIO) 的问答助手。
+
+【铁律】
+1. 你只能基于数据库中的真实数据回答。如果数据缺失，明确说"数据库中没有相关信息"——绝不编造。
+2. 禁止编造机构列表、禁止编造置信度分数、禁止编造建议行动。
+3. 禁止输出"核心结论""详细分析""建议与下一步""数据可信度"等报告模板。
+4. 如果用户问评分，直接返回数字。如果问对比，直接返回对比表。不要分析。
+
+【回答格式】
+- 评分查询：机构名 + 四个分数 + Composite
+- 对比查询：两个机构 + 分数并排
+- 投资关系：投资方 + 被投方 + 金额 + 轮次
+- 找不到：明确说"数据库中没有[机构名]的相关信息"
+
+【禁止】
+- 长篇分析报告
+- 重复生成同一份内容
+- 编造不存在的数据
+"""
+
+SYSTEM_PROMPT = RESEARCH_SYSTEM_PROMPT
 
 COUNTRY_ALIASES = {
     "菲律宾": ["菲律宾", "philippines", "ph"],
@@ -507,6 +590,7 @@ class Brain:
         self.model = DEEPSEEK_MODEL
         self.conversation_history: List[dict] = []
         self.current_entities: List[dict] = []
+        self.container = self._create_service_container()
         self.available_functions = {
             "query_database": self._query_database,
             "query_intelligence": self._query_intelligence,
@@ -530,12 +614,75 @@ class Brain:
             "get_agent_status": self._get_agent_status,
         }
 
+    def _service_container_enabled(self) -> bool:
+        return feature_flag_enabled("SERVICE_CONTAINER_ENABLED")
+
+    def _create_service_container(self):
+        if not self._service_container_enabled():
+            return None
+        try:
+            from services.default_services import build_default_service_container
+            from services.service_container import ServiceScope
+
+            return build_default_service_container(brain=self, scope=ServiceScope())
+        except Exception as exc:
+            logger.warning("[Brain] Service container init failed, fallback to legacy: %s", exc)
+            return None
+
+    def _bind_service_scope(self, conversation_id: str = "") -> None:
+        if not self._service_container_enabled() or self.container is None:
+            return
+        try:
+            from services.service_container import ServiceScope
+
+            trace_payload = getattr(self, "_last_trace_session", {}) or {}
+            trace_id = ""
+            if isinstance(trace_payload, dict):
+                trace_id = str(trace_payload.get("trace_id") or "")
+            else:
+                trace_id = str(getattr(trace_payload, "trace_id", "") or "")
+            self.container.scope = ServiceScope(
+                conversation_id=str(conversation_id or self.conversation_id or ""),
+                trace_id=trace_id,
+                memory_context=getattr(self, "_last_memory_context", None),
+                pipeline_context=None,
+            )
+        except Exception:
+            pass
+
+    def _resolve_service(self, service_name: str, *, conversation_id: str = ""):
+        if not self._service_container_enabled():
+            return None
+        if self.container is None:
+            self.container = self._create_service_container()
+        if self.container is None or not self.container.has(service_name):
+            return None
+        self._bind_service_scope(conversation_id)
+        try:
+            return self.container.get(service_name)
+        except Exception:
+            return None
+
+    def _get_governor_service(self, *, conversation_id: str = ""):
+        return self._resolve_service("architecture_governor", conversation_id=conversation_id)
+
+    def _get_pipeline_service(self, *, conversation_id: str = ""):
+        return self._resolve_service("pipeline_service", conversation_id=conversation_id)
+
+    def _get_reasoning_engine_service(self, *, conversation_id: str = ""):
+        return self._resolve_service("reasoning_engine", conversation_id=conversation_id)
+
+    def _get_answer_composer_service(self, *, conversation_id: str = ""):
+        return self._resolve_service("answer_composer", conversation_id=conversation_id)
+
     def _build_messages(
         self,
         user_message: str,
         conversation_history: list | None = None,
     ) -> list[dict]:
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        prompt_route = self._route_prompt(user_message)
+        print("ENTER build_messages")
+        messages = [{"role": "system", "content": prompt_route["prompt"]}]
         if self.current_entities:
             entity_context = "当前对话中提到的实体：" + "、".join(
                 f"{item['name']}({item['type']}, {item.get('country') or '未知国家'})"
@@ -549,7 +696,476 @@ class Brain:
             if content:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_message})
+        print(f"messages_count={len(messages)}")
         return messages
+
+    def _resolve_prompt_route(self, user_message: str) -> dict:
+        msg = str(user_message or "").strip()
+        lower = msg.lower()
+
+        assistant_patterns = [
+            r"系统介绍",
+            r"介绍系统",
+            r"介绍一下系统",
+            r"系统是什么",
+            r"介绍一下你自己",
+            r"介绍你自己",
+            r"自我介绍",
+            r"你是谁",
+            r"你是什么",
+            r"你的能力",
+            r"你是干什么的",
+            r"你能做什么",
+            r"你可以做什么",
+            r"帮助我做什么",
+            r"你的优势是什么",
+            r"你的定位是什么",
+            r"你的数据来源是什么",
+            r"数据来源",
+            r"信息来源",
+            r"你的数据库来源",
+            r"数据更新频率",
+            r"数据库多久更新",
+            r"数据怎么来的",
+            r"为什么相信你的数据",
+            r"如果数据库没有数据怎么办",
+            r"数据库没有怎么办",
+            r"查不到怎么办",
+            r"数据库为空怎么办",
+            r"没有数据怎么办",
+            r"没数据怎么办",
+            r"你会编造吗",
+            r"你会幻觉吗",
+            r"hallucination",
+            r"这个系统和\s*chatgpt\s*有什么区别",
+            r"为什么不用\s*chatgpt",
+            r"知识来源",
+            r"具备哪些能力",
+            r"有哪些能力",
+            r"怎么使用",
+            r"如何使用",
+            r"怎么用",
+            r"使用方法",
+            r"help",
+            r"帮助",
+            r"about",
+            r"who are you",
+            r"what can you do",
+            r"introduce yourself",
+            r"capability",
+            r"capabilities",
+            r"features",
+            r"介绍一下系统",
+            r"系统说明",
+            r"架构说明",
+            r"产品介绍",
+            r"faithmate",
+            r"christian intelligence os",
+            r"cio",
+        ]
+        research_patterns = [
+            r"评分",
+            r"机构",
+            r"人物",
+            r"新闻",
+            r"投资",
+            r"关系",
+            r"证据",
+            r"情报",
+            r"research",
+            r"score",
+            r"organization",
+            r"person",
+            r"news",
+            r"invest",
+            r"evidence",
+            r"intelligence",
+        ]
+        greeting_patterns = [r"^你好[！!,.，。 ]*$", r"^嗨[！!,.，。 ]*$", r"^hello[!,. ]*$", r"^hi[!,. ]*$"]
+
+        matched_assistant_pattern = next(
+            (pattern for pattern in assistant_patterns if re.search(pattern, msg, re.IGNORECASE)),
+            None,
+        )
+        if self._looks_like_entity_source_query(msg):
+            return {
+                "intent": "research",
+                "selected_prompt": "Research Prompt",
+                "reason": "entity_source_query",
+                "prompt": RESEARCH_SYSTEM_PROMPT,
+            }
+        if self._classify_product_intent(msg):
+            print(f"MATCHED_PRODUCT_INTENT={self._classify_product_intent(msg)}")
+            print("Intent=assistant")
+            print("SelectedPrompt=Assistant Prompt")
+            print("Reason=matched_product_intent")
+            return {
+                "intent": "assistant",
+                "selected_prompt": "Assistant Prompt",
+                "reason": "matched_product_intent",
+                "prompt": ASSISTANT_SYSTEM_PROMPT,
+            }
+        if matched_assistant_pattern:
+            print(f"MATCHED_ASSISTANT_PATTERN={matched_assistant_pattern}")
+            print("Intent=assistant")
+            print("SelectedPrompt=Assistant Prompt")
+            print("Reason=matched_assistant_pattern")
+            return {
+                "intent": "assistant",
+                "selected_prompt": "Assistant Prompt",
+                "reason": "matched_assistant_pattern",
+                "prompt": ASSISTANT_SYSTEM_PROMPT,
+            }
+        if any(re.search(pattern, msg, re.IGNORECASE) for pattern in greeting_patterns):
+            return {
+                "intent": "assistant",
+                "selected_prompt": "Assistant Prompt",
+                "reason": "greeting",
+                "prompt": ASSISTANT_SYSTEM_PROMPT,
+            }
+        if any(re.search(pattern, lower, re.IGNORECASE) for pattern in research_patterns):
+            return {
+                "intent": "research",
+                "selected_prompt": "Research Prompt",
+                "reason": "matched_research_intent",
+                "prompt": RESEARCH_SYSTEM_PROMPT,
+            }
+        return {
+            "intent": "research",
+            "selected_prompt": "Research Prompt",
+            "reason": "default_research",
+            "prompt": RESEARCH_SYSTEM_PROMPT,
+        }
+
+    def _log_prompt_route_observability(self, route: Optional[dict]) -> None:
+        route_payload = dict(route or {})
+        print(f"Intent={str(route_payload.get('intent') or '').strip().lower()}")
+        print(f"SelectedPrompt={str(route_payload.get('selected_prompt') or '').strip()}")
+        print(f"Reason={str(route_payload.get('reason') or '').strip()}")
+
+    def _route_prompt(self, user_message: str) -> dict:
+        print("ENTER PromptRouter")
+        result = self._resolve_prompt_route(user_message)
+        print(f"Selected Prompt={result['selected_prompt']}")
+        self._log_prompt_route_observability(result)
+        return result
+
+    def _is_assistant_prompt_route(self, prompt_route: Optional[dict]) -> bool:
+        route = dict(prompt_route or {})
+        intent = str(route.get("intent") or "").strip().lower()
+        selected_prompt = str(route.get("selected_prompt") or "").strip()
+        return intent == "assistant" or selected_prompt == "Assistant Prompt"
+
+    def _classify_product_intent(self, user_message: str) -> str:
+        text = str(user_message or "").strip()
+        if not text:
+            return ""
+
+        chatgpt_patterns = [
+            r"这个系统和\s*chatgpt\s*有什么区别",
+            r"为什么不用\s*chatgpt",
+            r"你的优势是什么",
+            r"你的定位是什么",
+        ]
+        data_source_patterns = [
+            r"^你的数据来源是什么[？?]?$",
+            r"^系统的数据来源是什么[？?]?$",
+            r"^你从哪里获取数据[？?]?$",
+            r"^系统从哪里获取数据[？?]?$",
+            r"^你的数据库来源是什么[？?]?$",
+            r"^数据更新频率[？?]?$",
+            r"^数据库多久更新[？?]?$",
+            r"^数据怎么来的[？?]?$",
+            r"^为什么相信你的数据[？?]?$",
+        ]
+        no_data_patterns = [
+            r"如果数据库没有数据怎么办",
+            r"数据库没有怎么办",
+            r"查不到怎么办",
+            r"数据库为空怎么办",
+            r"没有数据怎么办",
+            r"没数据怎么办",
+            r"你会编造吗",
+            r"你会幻觉吗",
+            r"hallucination",
+        ]
+
+        if any(re.search(pattern, text, re.IGNORECASE) for pattern in chatgpt_patterns):
+            return "product_vs_chatgpt"
+        if self._looks_like_entity_source_query(text):
+            return ""
+        if any(re.search(pattern, text, re.IGNORECASE) for pattern in data_source_patterns):
+            return "product_data_sources"
+        if any(re.search(pattern, text, re.IGNORECASE) for pattern in no_data_patterns):
+            return "product_no_data"
+        return ""
+
+    def _looks_like_entity_source_query(self, user_message: str) -> bool:
+        text = str(user_message or "").strip()
+        if not text:
+            return False
+        if re.search(r"^(你的|系统的|你从哪里|系统从哪里)", text, re.IGNORECASE):
+            return False
+        return bool(
+            re.search(r"(数据来源|证据来源|来源是什么|信息来自哪里|来源有哪些)", text, re.IGNORECASE)
+            or re.search(r"这条情报的来源是什么", text, re.IGNORECASE)
+        )
+
+    def _build_product_intent_response(self, user_message: str) -> str:
+        intent_type = self._classify_product_intent(user_message)
+        if intent_type == "product_vs_chatgpt":
+            return (
+                "Christian Intelligence Operating System（CIO）\n"
+                "Enterprise Christian Intelligence Platform\n"
+                "企业级基督教情报分析平台\n\n"
+                "这个系统和 ChatGPT 的区别\n"
+                "- CIO 是垂直领域企业级情报平台。\n"
+                "- ChatGPT 是通用大语言模型。\n"
+                "- 我优先查询数据库。\n"
+                "- 提供来源。\n"
+                "- 提供 URL。\n"
+                "- 提供评分。\n"
+                "- 提供关系分析。\n"
+                "- 数据库没有的数据不会编造。"
+            )
+        if intent_type == "product_data_sources":
+            return (
+                "Christian Intelligence Operating System（CIO）\n"
+                "Enterprise Christian Intelligence Platform\n"
+                "企业级基督教情报分析平台\n\n"
+                "数据来源\n"
+                "- 公开数据库\n"
+                "- 官方网站\n"
+                "- 机构公开资料\n"
+                "- RSS\n"
+                "- 新闻\n"
+                "- 媒体\n"
+                "- YouTube\n"
+                "- 公开报告\n"
+                "- 系统整合后的数据库。"
+            )
+        if intent_type == "product_no_data":
+            return (
+                "Christian Intelligence Operating System（CIO）\n"
+                "Enterprise Christian Intelligence Platform\n"
+                "企业级基督教情报分析平台\n\n"
+                "数据库没有数据时：\n"
+                "① 明确说明没有数据\n"
+                "② 不编造结果\n"
+                "③ 提示数据缺口\n"
+                "④ 如开启补采，将进入后台采集\n"
+                "⑤ 后续数据库更新后即可查询"
+            )
+        return ""
+
+    def _product_intent_direct_result(self, user_message: str) -> Optional[dict]:
+        answer = self._build_product_intent_response(user_message)
+        if not answer:
+            return None
+        return {
+            "answer": answer,
+            "evidence": [],
+            "direct_answer": True,
+            "product_intent": self._classify_product_intent(user_message),
+        }
+
+    def _should_prefer_pipeline_for_insight_render(self) -> bool:
+        return bool(
+            feature_flag_enabled("PIPELINE_ORCHESTRATOR_ENABLED")
+            and feature_flag_enabled("INSIGHT_ENGINE_ENABLED")
+            and feature_flag_enabled("INSIGHT_FINAL_RENDER_ENABLED")
+        )
+
+    def _should_allow_gap_detection(self, user_message: str, prompt_route: Optional[dict] = None) -> bool:
+        route = dict(prompt_route or self._resolve_prompt_route(user_message) or {})
+        if self._is_assistant_prompt_route(route):
+            return False
+        if str(route.get("intent") or "").strip().lower() != "research":
+            return False
+        if str(route.get("selected_prompt") or "").strip() != "Research Prompt":
+            return False
+        return any(
+            [
+                bool(detect_analysis_type(user_message)),
+                self._looks_like_organization_profile_query(user_message),
+                self._looks_like_arda_country_query(user_message),
+                self._looks_like_graph_query(user_message),
+                self._looks_like_news_query(user_message),
+                self._looks_like_funding_query(user_message),
+                self._looks_like_investor_query(user_message),
+                self._looks_like_fused_query(user_message),
+                self._looks_like_intel_query(user_message),
+                bool(self._extract_organization_profile_name(user_message)),
+                bool(self._extract_entity(user_message)),
+                bool(self._extract_country(user_message)),
+            ]
+        )
+
+    def _log_gap_detection_status(
+        self,
+        user_message: str,
+        *,
+        prompt_route: Optional[dict] = None,
+        gap_detection: bool,
+        gap_notice: bool,
+        auto_collection: bool,
+    ) -> None:
+        route = dict(prompt_route or self._resolve_prompt_route(user_message) or {})
+        print(f"Intent={str(route.get('intent') or '').strip().lower()}")
+        print(f"SelectedPrompt={str(route.get('selected_prompt') or '').strip()}")
+        print(f"GapDetection={bool(gap_detection)}")
+        print(f"GapNotice={bool(gap_notice)}")
+        print(f"AutoCollection={bool(auto_collection)}")
+
+    def _apply_gap_notice_policy(self, user_message: str, content: str, prompt_route: Optional[dict] = None) -> str:
+        route = dict(prompt_route or self._resolve_prompt_route(user_message) or {})
+        gap_detection = self._should_allow_gap_detection(user_message, prompt_route=route)
+        gap_notice = bool(content) and "[INSUFFICIENT DATA]" in str(content) and "已触发自动情报采集" not in str(content)
+        if not gap_detection:
+            self._log_gap_detection_status(
+                user_message,
+                prompt_route=route,
+                gap_detection=False,
+                gap_notice=False,
+                auto_collection=False,
+            )
+            return content
+        if not gap_notice:
+            self._log_gap_detection_status(
+                user_message,
+                prompt_route=route,
+                gap_detection=True,
+                gap_notice=False,
+                auto_collection=False,
+            )
+            return content
+        return self._append_gap_collection_notice(
+            user_message,
+            content,
+            prompt_route=route,
+            gap_detection=True,
+        )
+
+    def _format_reasoning_engine_v1_message(
+        self,
+        question_type_value: str,
+        requirement: dict,
+        tool_plan: list[str],
+        evaluation: dict,
+        conflicts: list[dict],
+        outline: list[str],
+    ) -> str:
+        required_fields = (requirement or {}).get("required_fields") or []
+        missing_fields = (evaluation or {}).get("missing_fields") or []
+        missing_sources = (evaluation or {}).get("missing_sources") or []
+        lines = [
+            "Reasoning Plan",
+            "",
+            f"Question Type: {question_type_value}",
+            f"Required Facts: {', '.join(required_fields)}",
+            f"Minimum Sources: {(requirement or {}).get('minimum_sources')}",
+            f"Evidence Coverage: {(evaluation or {}).get('coverage')}",
+            f"Missing Fields: {', '.join(missing_fields) if missing_fields else 'None'}",
+            f"Missing Sources: {', '.join(missing_sources) if missing_sources else 'None'}",
+            f"Conflicts: {len(conflicts or [])}",
+            f"Answer Outline: {', '.join(outline or [])}",
+            "",
+            "Answer Rules",
+            "1) Only answer using evidence.",
+            "2) If coverage is insufficient, explicitly state the missing information.",
+            "3) If conflicts exist, mention them.",
+            "4) Use evidence according to ranking order.",
+            "5) Follow the provided outline.",
+        ]
+        return "\n".join(lines)
+
+    def _build_answer_context(self, user_message: str, tool_results: list[dict]) -> Optional[dict]:
+        try:
+            from services.core_models import Evidence, QuestionContext, QuestionType, Requirement
+
+            ctx = getattr(self, "_reasoning_v1_context", {}) or {}
+            qt_value = str(ctx.get("question_type") or "UNKNOWN")
+            qt = QuestionType(qt_value) if qt_value in getattr(QuestionType, "_value2member_map_", {}) else QuestionType.UNKNOWN
+
+            req = ctx.get("requirement")
+            requirement = req if isinstance(req, Requirement) else Requirement.from_dict(req or {})
+
+            question_context = QuestionContext(
+                question=str(user_message or ""),
+                question_type=qt,
+                language="",
+                country=str(ctx.get("country") or ""),
+                entities=list(getattr(self, "current_entities", []) or []),
+                time_range=None,
+                comparison=qt == QuestionType.COMPARISON,
+                ranking=qt == QuestionType.RANKING,
+                relationship=qt in {QuestionType.RELATIONSHIP, QuestionType.GRAPH, QuestionType.INVESTMENT},
+                conversation_id=str(getattr(self, "conversation_id", "") or ""),
+            )
+
+            raw_evidence: list[dict] = []
+            for r in tool_results or []:
+                if not isinstance(r, dict):
+                    continue
+                ev_list = r.get("evidence")
+                if isinstance(ev_list, list):
+                    for e in ev_list:
+                        if isinstance(e, dict):
+                            raw_evidence.append(e)
+                if str(r.get("status") or "").lower() == "success":
+                    organization = r.get("organization")
+                    if isinstance(organization, dict):
+                        score_snippet = self._build_score_snippet(profile=organization)
+                        if score_snippet:
+                            raw_evidence.append(
+                                {
+                                    "title": f"{organization.get('name') or 'Organization'} scorecard",
+                                    "source_name": organization.get("source_name") or "organization_profile",
+                                    "url": organization.get("official_website") or "",
+                                    "confidence": 0.95,
+                                    "published_at": "",
+                                    "updated_at": "",
+                                    "type": "organization_scorecard",
+                                    "snippet": score_snippet,
+                                }
+                            )
+
+            evidence_models: list[Evidence] = []
+            for idx, e in enumerate(raw_evidence, start=1):
+                evidence_models.append(
+                    Evidence(
+                        id=f"E{idx}",
+                        title=str(e.get("title") or ""),
+                        snippet=str(e.get("snippet") or ""),
+                        url=str(e.get("url") or ""),
+                        source_name=str(e.get("source_name") or ""),
+                        authority=float(e.get("authority") or 0.0),
+                        confidence=float(e.get("confidence") or 0.0),
+                        published_at=str(e.get("published_at") or ""),
+                        updated_at=str(e.get("updated_at") or ""),
+                        type=str(e.get("type") or ""),
+                    )
+                )
+
+            composer = self._get_answer_composer_service(conversation_id=str(getattr(self, "conversation_id", "") or ""))
+            if composer is None:
+                from services.answer_composer import AnswerComposer
+
+                composer = AnswerComposer()
+            answer_context = composer.compose(question_context, requirement, evidence_models)
+            return answer_context.to_dict()
+        except Exception:
+            return None
+
+    def _format_answer_context(self, answer_context: dict) -> str:
+        payload = dict(answer_context or {})
+        evidence = payload.get("evidence")
+        if isinstance(evidence, list) and len(evidence) > 25:
+            payload["evidence"] = evidence[:25]
+        facts = payload.get("facts")
+        if isinstance(facts, list) and len(facts) > 40:
+            payload["facts"] = facts[:40]
+        return "Answer Context\n\n" + json.dumps(payload, ensure_ascii=False, indent=2)
 
     def _filter_dsml(self, content: str) -> str:
         if not content:
@@ -561,6 +1177,193 @@ class Brain:
         filtered = re.sub(r"<｜｜DSML｜｜/[^>]*>", "", filtered)
         filtered = re.sub(r"\n{3,}", "\n\n", filtered).strip()
         return filtered
+
+    def _clean_output(self, text: str) -> str:
+        """清理输出，移除内部标记。"""
+        cleaned = text or ""
+        cleaned = re.sub(r"\[\[.*?\]\]", "", cleaned)
+        cleaned = re.sub(r"\[SOURCE:.*?\]", "", cleaned)
+        cleaned = re.sub(r"\[CONFIDENCE:.*?\]", "", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    def _coerce_datetime_str(self, value: Any) -> str:
+        if not value:
+            return ""
+        try:
+            return value.isoformat()
+        except Exception:
+            return ""
+
+    def _normalize_score_value(self, value: Any) -> Any:
+        if value is None or value == "":
+            return None
+        try:
+            number = float(value)
+        except Exception:
+            return None
+        if number.is_integer():
+            return int(number)
+        return round(number, 2)
+
+    def _extract_score_payload(self, *, org: Any = None, profile: Optional[dict] = None) -> dict:
+        people_score = self._normalize_score_value(
+            (profile or {}).get("people_score") if isinstance(profile, dict) else getattr(org, "people_score", None)
+        )
+        digital_score = self._normalize_score_value(
+            (profile or {}).get("digital_score") if isinstance(profile, dict) else getattr(org, "digital_score", None)
+        )
+        intel_score = self._normalize_score_value(
+            (profile or {}).get("intel_score") if isinstance(profile, dict) else getattr(org, "intel_score", None)
+        )
+        explicit_composite = None
+        if isinstance(profile, dict):
+            explicit_composite = self._normalize_score_value(profile.get("composite_score"))
+        elif org is not None:
+            explicit_composite = self._normalize_score_value(getattr(org, "composite_score", None))
+        component_scores = [item for item in [people_score, digital_score, intel_score] if item is not None]
+        composite_score = explicit_composite if explicit_composite is not None else (sum(component_scores) if component_scores else None)
+        return {
+            "people_score": people_score,
+            "digital_score": digital_score,
+            "intel_score": intel_score,
+            "composite_score": composite_score,
+        }
+
+    def _build_score_snippet(self, *, org: Any = None, profile: Optional[dict] = None) -> str:
+        score_payload = self._extract_score_payload(org=org, profile=profile)
+        if not any(score_payload.get(field) is not None for field in ("people_score", "digital_score", "intel_score", "composite_score")):
+            return ""
+        return (
+            f"people_score={score_payload.get('people_score', 'N/A')}; "
+            f"digital_score={score_payload.get('digital_score', 'N/A')}; "
+            f"intel_score={score_payload.get('intel_score', 'N/A')}; "
+            f"composite_score={score_payload.get('composite_score', 'N/A')}"
+        )
+
+    def _normalize_evidence_item(self, item: Any) -> dict:
+        if not isinstance(item, dict):
+            return {}
+        title = str(item.get("title") or "").strip()
+        source_name = str(item.get("source_name") or "").strip()
+        url = str(item.get("url") or "").strip()
+        snippet = str(item.get("snippet") or "").strip()
+        published_at = str(item.get("published_at") or "").strip()
+        updated_at = str(item.get("updated_at") or "").strip()
+        evidence_type = str(item.get("type") or "").strip()
+        confidence = 0.0
+        try:
+            confidence = float(item.get("confidence") or 0.0)
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(confidence, 1.0))
+        return {
+            "title": title,
+            "source_name": source_name,
+            "url": url,
+            "confidence": confidence,
+            "published_at": published_at,
+            "updated_at": updated_at,
+            "type": evidence_type,
+            "snippet": snippet[:240] if snippet else "",
+        }
+
+    def _merge_evidence(self, *evidence_lists: Any) -> list[dict]:
+        merged: list[dict] = []
+        seen = set()
+        for evidence in evidence_lists:
+            if not evidence or not isinstance(evidence, list):
+                continue
+            for item in evidence:
+                normalized = self._normalize_evidence_item(item)
+                if not normalized:
+                    continue
+                key = (
+                    normalized.get("url")
+                    or f"{normalized.get('title')}|{normalized.get('source_name')}|{normalized.get('published_at')}"
+                )
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                merged.append(normalized)
+        return merged
+
+    def _evidence_from_intelligence_item(self, item: Any, *, evidence_type: str = "intelligence_item") -> dict:
+        title = (getattr(item, "title", None) or "").strip()
+        source_name = (getattr(item, "source_name", None) or "").strip()
+        url = (getattr(item, "source_url", None) or "").strip()
+        confidence = float(getattr(item, "confidence", None) or 0.0)
+        published_at = self._coerce_datetime_str(getattr(item, "published_at", None))
+        updated_at = self._coerce_datetime_str(getattr(item, "ingested_at", None))
+        snippet = (getattr(item, "content", None) or "").strip()
+        raw_type = (getattr(item, "category", None) or getattr(item, "entity_type", None) or "").strip()
+        return self._normalize_evidence_item(
+            {
+                "title": title,
+                "source_name": source_name,
+                "url": url,
+                "confidence": confidence,
+                "published_at": published_at,
+                "updated_at": updated_at,
+                "type": raw_type or evidence_type,
+                "snippet": snippet[:240] if snippet else "",
+            }
+        )
+
+    def _evidence_from_organization_profile(self, org: Any, *, evidence_type: str = "organization_profile") -> dict:
+        title = (getattr(org, "name", None) or "").strip()
+        source_name = (getattr(org, "source_name", None) or "").strip()
+        url = (
+            (getattr(org, "source_url", None) or "").strip()
+            or (getattr(org, "official_website", None) or "").strip()
+            or (getattr(org, "wikipedia_url", None) or "").strip()
+            or (getattr(org, "leader_bio_url", None) or "").strip()
+        )
+        confidence = float(getattr(org, "confidence", None) or 0.0)
+        updated_at = self._coerce_datetime_str(getattr(org, "updated_at", None))
+        snippet = (
+            (getattr(org, "description", None) or "").strip()
+            or (getattr(org, "about_text", None) or "").strip()
+            or (getattr(org, "mission_statement", None) or "").strip()
+        )
+        score_snippet = self._build_score_snippet(org=org)
+        if score_snippet:
+            snippet = f"{snippet}\n{score_snippet}".strip() if snippet else score_snippet
+        return self._normalize_evidence_item(
+            {
+                "title": title,
+                "source_name": source_name,
+                "url": url,
+                "confidence": confidence,
+                "published_at": "",
+                "updated_at": updated_at,
+                "type": evidence_type,
+                "snippet": snippet[:240] if snippet else "",
+            }
+        )
+
+    def _normalize_tool_result(self, function_name: str, result: Any) -> dict:
+        payload: dict
+        if isinstance(result, dict):
+            payload = dict(result)
+        else:
+            payload = {"data": result}
+        if not isinstance(payload.get("evidence"), list):
+            payload["evidence"] = []
+        payload["evidence"] = self._merge_evidence(payload.get("evidence") or [])
+        if not isinstance(payload.get("answer"), str) or not payload.get("answer"):
+            answer = ""
+            if isinstance(payload.get("response"), str) and payload.get("response"):
+                answer = payload.get("response") or ""
+            elif isinstance(payload.get("message"), str) and payload.get("message"):
+                answer = payload.get("message") or ""
+            else:
+                try:
+                    answer = self._render_direct_tool_result(function_name, payload)
+                except Exception:
+                    answer = ""
+            payload["answer"] = answer or ""
+        return payload
 
     def _fallback_summary(self, messages: List[dict]) -> str:
         """无LLM时的手动摘要。"""
@@ -1188,11 +1991,30 @@ class Brain:
         items = result.get("items") or []
         if not items:
             target = summary.get("entity") or summary.get("country") or "该主题"
-            return (
-                f"[INSUFFICIENT DATA] 当前情报库中暂未检索到关于 {target} 的新闻记录。"
-                "建议先检查采集链路或补充更具体的关键词。 "
-                "[SOURCE: 情报数据库] [CONFIDENCE: LOW]"
-            )
+            keywords = [str(item).strip() for item in (summary.get("keywords") or []) if str(item).strip()]
+            sources_checked = summary.get("sources_checked") or [
+                "IntelligenceItem.title",
+                "IntelligenceItem.content",
+                "IntelligenceItem.entity_name",
+                "IntelligenceItem.source_url",
+            ]
+            missing_fields = summary.get("missing_fields") or ["url", "source_name", "entity_name"]
+            lines = [
+                f"[INSUFFICIENT DATA] 当前情报库中暂未检索到关于 {target} 的可用情报记录。",
+                f"- 查询范围：scope={summary.get('scope') or 'unknown'} | country={summary.get('country') or 'N/A'} | entity={summary.get('entity') or 'N/A'}",
+                f"- 查询关键词：{', '.join(keywords) if keywords else '未提供额外关键词'}",
+                f"- 查询来源：{', '.join(str(item) for item in sources_checked)}",
+                f"- 缺失字段：{', '.join(str(item) for item in missing_fields)}",
+                f"- 未命中原因：{summary.get('no_hit_reason') or '现有数据库中没有满足国家/实体/关键词交集且带来源链接的记录'}",
+                f"- 是否需要补采：{'是' if summary.get('needs_collection', True) else '否'}",
+                "[SOURCE: 情报数据库] [CONFIDENCE: LOW]",
+            ]
+            if summary.get("relaxed_match_attempted"):
+                lines.insert(
+                    4,
+                    f"- 已执行宽松检索：{bool(summary.get('relaxed_match_attempted'))}，宽松命中={bool(summary.get('relaxed_match_hit'))}",
+                )
+            return "\n".join(lines)
 
         scope = summary.get("scope") or "global"
         target = summary.get("entity") or summary.get("country") or "全球基督教领域"
@@ -1204,9 +2026,11 @@ class Brain:
             if len(snippet) > 100:
                 snippet = f"{snippet[:100]}..."
             date = item.get("date") or "未知日期"
-            lines.append(
-                f"- {item.get('title')}（{date}，{item.get('source_name') or item.get('source') or '未知来源'}）：{snippet}"
-            )
+            url = (item.get("url") or "").strip()
+            bullet = f"- {item.get('title')}（{date}，{item.get('source_name') or item.get('source') or '未知来源'}）：{snippet}"
+            if url:
+                bullet += f" | URL: {url}"
+            lines.append(bullet)
 
         source_breakdown = result.get("source_breakdown") or {}
         if source_breakdown:
@@ -1497,6 +2321,7 @@ class Brain:
         investor_relations = result.get("investor_relations") or []
         ontology_tags = result.get("ontology_tags") or []
         target_name = result.get("org_name") or profile.get("name") or "该机构"
+        score_payload = self._extract_score_payload(profile=profile)
 
         lines = [f"## {target_name} — 深度画像", ""]
 
@@ -1527,6 +2352,14 @@ class Brain:
             tag_text = "，".join(f"{item.get('type')}:{item.get('tag_id')}" for item in ontology_tags[:6])
             lines.append(f"- 标签画像：{tag_text} [SOURCE: Ontology 标签]")
         lines.append("")
+
+        if any(score_payload.get(field) is not None for field in ("people_score", "digital_score", "intel_score", "composite_score")):
+            lines.append("### 评分画像")
+            lines.append(f"- `people_score`: `{score_payload.get('people_score', 'N/A')}` [SOURCE: 机构档案]")
+            lines.append(f"- `digital_score`: `{score_payload.get('digital_score', 'N/A')}` [SOURCE: 机构档案]")
+            lines.append(f"- `intel_score`: `{score_payload.get('intel_score', 'N/A')}` [SOURCE: 机构档案]")
+            lines.append(f"- `composite_score`: `{score_payload.get('composite_score', 'N/A')}` [SOURCE: 机构档案]")
+            lines.append("")
 
         lines.append("### 国家宗教环境")
         if arda.get("status") == "success" and arda_summary:
@@ -1729,29 +2562,76 @@ class Brain:
 
         try:
             try:
-                from backend.services.agent import submit_gap_collection  # type: ignore
+                from backend.services.mission_service import create_collection_mission  # type: ignore
             except Exception:
-                from services.agent import submit_gap_collection  # type: ignore
+                from services.mission_service import create_collection_mission  # type: ignore
 
-            task_id = submit_gap_collection(keywords, country)
-            print(f"[Agent补采] 已提交Agent任务: {task_id}, keywords={keywords}")
-        except Exception:
-            def runner():
-                try:
-                    asyncio.run(self._trigger_agent_collection(keywords, country))
-                except Exception as exc:
-                    print(f"[Agent补采] 后台任务启动失败: {exc}")
+            expanded_keywords = []
+            seen = set()
+            for keyword in keywords:
+                for query in self._expand_collection_queries(keyword, country):
+                    normalized = query.strip().lower()
+                    if not normalized or normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    expanded_keywords.append(query)
 
-            thread = threading.Thread(target=runner, daemon=True)
-            thread.start()
+            mission = create_collection_mission(
+                query=f"Brain Gap Collection | {', '.join(keywords)}",
+                country=country or "全球",
+                source="newsapi",
+                keywords=expanded_keywords or keywords,
+                limit_per_keyword=5,
+                metadata={"entry": "brain.schedule_gap_collection"},
+            )
+            mission_id = mission.id if mission else None
+            if not mission_id:
+                print(f"[Agent补采] Mission未创建，跳过后续流程, keywords={keywords}")
+                return
+            print(f"[Agent补采] 已提交Mission任务: {mission_id}, keywords={keywords}")
+        except Exception as exc:
+            print(f"[Agent补采] Mission创建失败: {exc}")
 
-    def _append_gap_collection_notice(self, user_message: str, content: str) -> str:
+    def _append_gap_collection_notice(
+        self,
+        user_message: str,
+        content: str,
+        *,
+        prompt_route: Optional[dict] = None,
+        gap_detection: Optional[bool] = None,
+    ) -> str:
+        route = dict(prompt_route or self._resolve_prompt_route(user_message) or {})
+        if gap_detection is None:
+            gap_detection = self._should_allow_gap_detection(user_message, prompt_route=route)
+        if not gap_detection:
+            self._log_gap_detection_status(
+                user_message,
+                prompt_route=route,
+                gap_detection=False,
+                gap_notice=False,
+                auto_collection=False,
+            )
+            return content
         if not content or "[INSUFFICIENT DATA]" not in content or "已触发自动情报采集" in content:
+            self._log_gap_detection_status(
+                user_message,
+                prompt_route=route,
+                gap_detection=True,
+                gap_notice=False,
+                auto_collection=False,
+            )
             return content
 
         collect_keywords, detected_country, _ = self._extract_collect_context(user_message)
         entity = self._extract_organization_profile_name(user_message) or self._extract_entity(user_message)
 
+        self._log_gap_detection_status(
+            user_message,
+            prompt_route=route,
+            gap_detection=True,
+            gap_notice=True,
+            auto_collection=True,
+        )
         if detected_country and "后台补采" not in content and "后台采集任务" not in content:
             collect_result = self._auto_collect(
                 country=detected_country,
@@ -1770,48 +2650,37 @@ class Brain:
     async def _trigger_agent_collection(self, keywords: list[str], country: str | None = None):
         """
         触发Agent自动补采
-        现在委托给独立的agent.py模块
+        现在统一委托给 Mission
         """
         try:
             try:
-                from backend.services.agent import submit_gap_collection  # type: ignore
+                from backend.services.mission_service import create_collection_mission  # type: ignore
             except ImportError:
-                from services.agent import submit_gap_collection  # type: ignore
+                from services.mission_service import create_collection_mission  # type: ignore
 
-            task_id = submit_gap_collection(keywords, country)
-            print(f"[Agent补采] 已提交Agent任务: {task_id}, keywords={keywords}")
+            expanded_keywords = []
+            seen = set()
+            for keyword in keywords:
+                for query in self._expand_collection_queries(keyword, country):
+                    normalized = query.strip().lower()
+                    if not normalized or normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    expanded_keywords.append(query)
 
-        except ImportError:
-            print("[Agent补采] agent.py未找到，使用内联补采")
-            try:
-                try:
-                    from backend.services.api_collectors import NewsAPICollector  # type: ignore
-                    from backend.models.database import SessionLocal  # type: ignore
-                except ImportError:
-                    from services.api_collectors import NewsAPICollector  # type: ignore
-                    from models.database import SessionLocal  # type: ignore
-
-                db = SessionLocal()
-                try:
-                    collector = NewsAPICollector(db)
-                    for kw in keywords:
-                        total_added = 0
-                        for query in self._expand_collection_queries(kw, country):
-                            if not collector.api_key:
-                                print(f"[Agent补采] api_collectors已加载，但 newsapi 未配置，'{query}' 返回 0 条")
-                                break
-                            total_added += collector._collect_keyword(
-                                query,
-                                label=f"{country} {kw}".strip() if country else kw,
-                                limit_per_keyword=5,
-                            )
-                            if total_added > 0:
-                                break
-                        print(f"[Agent补采] 内联采集 '{kw}': {total_added} 条")
-                finally:
-                    db.close()
-            except Exception as exc:
-                print(f"[Agent补采] 内联补采也失败: {exc}")
+            mission = create_collection_mission(
+                query=f"Brain Gap Collection | {', '.join(keywords)}",
+                country=country or "全球",
+                source="newsapi",
+                keywords=expanded_keywords or keywords,
+                limit_per_keyword=5,
+                metadata={"entry": "brain.trigger_agent_collection"},
+            )
+            mission_id = mission.id if mission else None
+            if not mission_id:
+                print(f"[Agent补采] Mission未创建，跳过后续流程, keywords={keywords}")
+                return
+            print(f"[Agent补采] 已提交Mission任务: {mission_id}, keywords={keywords}")
         except Exception as exc:
             print(f"[Agent补采] 异常: {exc}")
 
@@ -1885,7 +2754,7 @@ class Brain:
                     "state_funding_rank": extract_value("State Funding Rank"),
                 }
 
-                return {
+                payload = {
                     "status": "success",
                     "country": item.country or normalized_country,
                     "title": item.title or f"{normalized_country} — 宗教概况",
@@ -1895,10 +2764,245 @@ class Brain:
                     "authority": "ARDA学术数据库",
                     "summary": summary,
                 }
+                payload["evidence"] = self._merge_evidence([self._evidence_from_intelligence_item(item, evidence_type="arda_country_profile")])
+                payload["answer"] = self._format_arda_country_result(payload)
+                return payload
             finally:
                 db.close()
         except Exception as exc:
             return {"status": "error", "message": f"ARDA查询失败: {exc}"}
+
+    def _tool_diag_threshold_ms(self) -> float:
+        try:
+            return max(1.0, float(os.getenv("TOOL_DIAG_BLOCK_THRESHOLD_MS", "1000").strip() or "1000"))
+        except Exception:
+            return 1000.0
+
+    def _tool_diag_print(self, **fields: Any) -> None:
+        try:
+            for key, value in fields.items():
+                if isinstance(value, (dict, list, tuple, set)):
+                    rendered = json.dumps(value, ensure_ascii=False, default=str)
+                else:
+                    rendered = str(value)
+                print(f"{key}={rendered}")
+        except Exception:
+            pass
+
+    def _tool_diag_report_block(
+        self,
+        *,
+        tool_name: str,
+        file_path: str,
+        function_name: str,
+        line_no: int,
+        sql_or_step: str,
+        elapsed_ms: float,
+        params: Any = None,
+        reason: str = "",
+    ) -> None:
+        if elapsed_ms < self._tool_diag_threshold_ms():
+            return
+        self._tool_diag_print(
+            TOOL_BLOCK_HERE=True,
+            ToolName=tool_name,
+            File=file_path,
+            Function=function_name,
+            Line=line_no,
+            SQL=sql_or_step,
+            Params=params if params is not None else {},
+            elapsed_ms=round(elapsed_ms, 2),
+            Reason=reason or "step_elapsed_over_threshold",
+        )
+
+    def _tool_diag_step(
+        self,
+        *,
+        tool_name: str,
+        function_name: str,
+        step_name: str,
+        line_no: int,
+        step_detail: str,
+        func: Any,
+        params: Any = None,
+    ) -> Any:
+        file_path = os.path.abspath(__file__)
+        self._tool_diag_print(ToolName=tool_name, **{step_name: step_detail})
+        started = time.perf_counter()
+        result = func()
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        self._tool_diag_print(ToolName=tool_name, elapsed_ms=round(elapsed_ms, 2))
+        self._tool_diag_report_block(
+            tool_name=tool_name,
+            file_path=file_path,
+            function_name=function_name,
+            line_no=line_no,
+            sql_or_step=step_detail,
+            elapsed_ms=elapsed_ms,
+            params=params,
+            reason="step_elapsed_over_threshold",
+        )
+        return result
+
+    def _acquire_tool_db_session(
+        self,
+        *,
+        tool_name: str,
+        function_name: str,
+        line_no: int,
+        params: Any = None,
+        timeout_seconds: float = 0.95,
+    ) -> dict:
+        from models.database import SessionLocal, record_pool_unavailable
+
+        file_path = os.path.abspath(__file__)
+        outcome: dict[str, Any] = {}
+        finished = threading.Event()
+
+        def runner() -> None:
+            db = None
+            started = time.perf_counter()
+            try:
+                db = SessionLocal()
+                db.connection()
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                if outcome.get("timed_out"):
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+                    outcome["db_closed_after_timeout"] = True
+                    return
+                outcome["db"] = db
+                outcome["elapsed_ms"] = elapsed_ms
+            except Exception as exc:
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                if db is not None:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+                outcome["error_type"] = type(exc).__name__
+                outcome["error"] = str(exc)
+                outcome["elapsed_ms"] = elapsed_ms
+            finally:
+                finished.set()
+
+        self._tool_diag_print(ToolName=tool_name, STEP_1="acquire_db_session")
+        worker = threading.Thread(
+            target=runner,
+            name=f"tool-db-session-{tool_name}-{uuid.uuid4().hex[:6]}",
+            daemon=True,
+        )
+        worker.start()
+
+        if not finished.wait(timeout_seconds):
+            outcome["timed_out"] = True
+            elapsed_ms = round(timeout_seconds * 1000, 2)
+            record_pool_unavailable(
+                file=file_path,
+                function=function_name,
+                line=line_no,
+                reason="DBSessionAcquireTimeout",
+            )
+            self._tool_diag_print(
+                ToolName=tool_name,
+                SessionAcquireMs=elapsed_ms,
+                SQLExecuted=False,
+                SQLMs=0,
+            )
+            self._tool_diag_report_block(
+                tool_name=tool_name,
+                file_path=file_path,
+                function_name=function_name,
+                line_no=line_no,
+                sql_or_step="STEP_1 acquire_db_session",
+                elapsed_ms=elapsed_ms,
+                params=params,
+                reason="DBSessionAcquireTimeout",
+            )
+            return {
+                "status": "error",
+                "error_type": "DBSessionAcquireTimeout",
+                "message": "failed to acquire db session within 1s",
+                "session_acquire_ms": elapsed_ms,
+                "sql_executed": False,
+                "sql_ms": 0,
+            }
+
+        elapsed_ms = round(float(outcome.get("elapsed_ms") or 0.0), 2)
+        if outcome.get("error_type"):
+            self._tool_diag_print(
+                ToolName=tool_name,
+                SessionAcquireMs=elapsed_ms,
+                SQLExecuted=False,
+                SQLMs=0,
+            )
+            self._tool_diag_report_block(
+                tool_name=tool_name,
+                file_path=file_path,
+                function_name=function_name,
+                line_no=line_no,
+                sql_or_step="STEP_1 acquire_db_session",
+                elapsed_ms=elapsed_ms,
+                params=params,
+                reason=str(outcome.get("error_type") or "DBSessionAcquireError"),
+            )
+            return {
+                "status": "error",
+                "error_type": str(outcome.get("error_type") or "DBSessionAcquireError"),
+                "message": str(outcome.get("error") or "failed to acquire db session"),
+                "session_acquire_ms": elapsed_ms,
+                "sql_executed": False,
+                "sql_ms": 0,
+            }
+
+        self._tool_diag_print(ToolName=tool_name, SessionAcquireMs=elapsed_ms)
+        return {"status": "ok", "db": outcome.get("db"), "session_acquire_ms": elapsed_ms}
+
+    def _tool_diag_render_sql(self, query_or_sql: Any) -> str:
+        try:
+            if isinstance(query_or_sql, str):
+                return query_or_sql
+            statement = getattr(query_or_sql, "statement", None)
+            if statement is not None:
+                compiled = statement.compile(compile_kwargs={"literal_binds": True})
+                return str(compiled)
+            return str(query_or_sql)
+        except Exception as exc:
+            return f"<sql-render-failed: {exc}>"
+
+    def _tool_diag_sql(
+        self,
+        *,
+        tool_name: str,
+        function_name: str,
+        step_name: str,
+        line_no: int,
+        query_or_sql: Any,
+        params: Any = None,
+        executor: Any,
+    ) -> Any:
+        file_path = os.path.abspath(__file__)
+        sql_text = self._tool_diag_render_sql(query_or_sql)
+        self._tool_diag_print(ToolName=tool_name, **{step_name: "SQL_EXECUTION"})
+        self._tool_diag_print(SQL_BEGIN=True, SQL_TEXT=sql_text, PARAMS=params if params is not None else {})
+        started = time.perf_counter()
+        result = executor()
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        self._tool_diag_print(ToolName=tool_name, SQLExecuted=True, SQLMs=round(elapsed_ms, 2))
+        self._tool_diag_print(SQL_END=True, SQL_TEXT=sql_text, PARAMS=params if params is not None else {}, elapsed_ms=round(elapsed_ms, 2))
+        self._tool_diag_report_block(
+            tool_name=tool_name,
+            file_path=file_path,
+            function_name=function_name,
+            line_no=line_no,
+            sql_or_step=sql_text,
+            elapsed_ms=elapsed_ms,
+            params=params,
+            reason="sql_elapsed_over_threshold",
+        )
+        return result
 
     def _query_organization_profile(self, org_name: str) -> dict:
         """融合多源数据生成机构深度画像。"""
@@ -1911,17 +3015,27 @@ class Brain:
                 KnowledgeEntity,
                 OrganizationOntologyTag,
                 OrganizationProfile,
-                get_db,
             )
             from sqlalchemy import case, desc, func, or_
 
             normalized_name = (org_name or "").strip()
+            tool_name = "query_organization_profile"
+            function_name = "_query_organization_profile"
+            self._tool_diag_print(ToolName=tool_name, ENTER_TOOL=function_name)
             if not normalized_name:
                 return {"status": "error", "message": "缺少机构名称"}
 
-            db = next(get_db())
+            acquire_result = self._acquire_tool_db_session(
+                tool_name=tool_name,
+                function_name=function_name,
+                line_no=inspect.currentframe().f_lineno + 1,
+                params={"org_name": normalized_name},
+            )
+            if acquire_result.get("status") == "error":
+                return acquire_result
+            db = acquire_result["db"]
             try:
-                org = (
+                org_query = (
                     db.query(OrganizationProfile)
                     .filter(
                         or_(
@@ -1945,7 +3059,15 @@ class Brain:
                         func.length(OrganizationProfile.name).asc(),
                         desc(OrganizationProfile.updated_at),
                     )
-                    .first()
+                )
+                org = self._tool_diag_sql(
+                    tool_name=tool_name,
+                    function_name=function_name,
+                    step_name="STEP_2",
+                    line_no=inspect.currentframe().f_lineno + 1,
+                    query_or_sql=org_query,
+                    params={"org_name": normalized_name},
+                    executor=lambda: org_query.first(),
                 )
 
                 canonical_name = (org.name if org else normalized_name).strip()
@@ -1955,6 +3077,7 @@ class Brain:
                 profile_payload = {}
                 ontology_tags = []
                 if org:
+                    score_payload = self._extract_score_payload(org=org)
                     profile_payload = {
                         "name": org.name,
                         "country": org.country,
@@ -1965,11 +3088,26 @@ class Brain:
                         "leader_name": org.leader_name,
                         "leader_title": org.leader_title,
                         "source_name": org.source_name,
+                        "people_score": score_payload.get("people_score"),
+                        "digital_score": score_payload.get("digital_score"),
+                        "intel_score": score_payload.get("intel_score"),
+                        "composite_score": score_payload.get("composite_score"),
+                        "people_score_grade": getattr(org, "people_score_grade", None),
+                        "digital_score_grade": getattr(org, "digital_score_grade", None),
+                        "intel_score_grade": getattr(org, "intel_score_grade", None),
                     }
-                    tags = (
+                    tags_query = (
                         db.query(OrganizationOntologyTag)
                         .filter(OrganizationOntologyTag.organization_id == org.id)
-                        .all()
+                    )
+                    tags = self._tool_diag_sql(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_3",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        query_or_sql=tags_query,
+                        params={"organization_id": org.id},
+                        executor=lambda: tags_query.all(),
                     )
                     ontology_tags = [
                         {
@@ -1982,7 +3120,15 @@ class Brain:
 
                 arda_payload = {}
                 if english_country and english_country != "Global":
-                    arda_payload = self._query_arda_country(english_country)
+                    arda_payload = self._tool_diag_step(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_4",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        step_detail=f"call _query_arda_country({english_country})",
+                        func=lambda: self._query_arda_country(english_country),
+                        params={"country": english_country},
+                    )
 
                 aliases = []
                 for candidate in [canonical_name, normalized_name, org.name_local if org else ""]:
@@ -2001,18 +3147,27 @@ class Brain:
                                 IntelligenceItem.entity_name.ilike(f"%{term}%"),
                             ]
                         )
-                    intelligence_candidates = (
+                    intelligence_query = (
                         db.query(IntelligenceItem)
                         .filter(
                             IntelligenceItem.source_name != "ARDA",
                             or_(*text_filters),
                         )
                         .order_by(desc(IntelligenceItem.published_at), desc(IntelligenceItem.ingested_at))
-                        .limit(30)
-                        .all()
+                    )
+                    intelligence_query = intelligence_query.limit(30)
+                    intelligence_candidates = self._tool_diag_sql(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_5",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        query_or_sql=intelligence_query,
+                        params={"aliases": aliases},
+                        executor=lambda: intelligence_query.all(),
                     )
 
                 news = []
+                news_evidence = []
                 seen_titles = set()
                 lower_aliases = [alias.lower() for alias in aliases if alias]
                 multi_word_aliases = [alias for alias in lower_aliases if " " in alias]
@@ -2076,36 +3231,66 @@ class Brain:
                             "date": event_time.strftime("%Y-%m-%d") if event_time else "未知日期",
                             "country": item.country or "",
                             "url": item.source_url or "",
+                            "confidence": float(item.confidence or 0.0),
+                            "published_at": self._coerce_datetime_str(getattr(item, "published_at", None)),
+                            "updated_at": self._coerce_datetime_str(getattr(item, "ingested_at", None)),
                         }
                     )
+                    evidence_item = self._evidence_from_intelligence_item(item, evidence_type="organization_news")
+                    if evidence_item:
+                        news_evidence.append(evidence_item)
                     if len(news) >= 5:
                         break
 
                 knowledge_entity = None
                 for candidate in aliases:
-                    knowledge_entity = (
+                    knowledge_query = (
                         db.query(KnowledgeEntity)
                         .filter(KnowledgeEntity.name.ilike(f"%{candidate}%"))
                         .order_by(desc(KnowledgeEntity.ingested_at))
-                        .first()
+                    )
+                    knowledge_entity = self._tool_diag_sql(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_6",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        query_or_sql=knowledge_query,
+                        params={"candidate": candidate},
+                        executor=lambda: knowledge_query.first(),
                     )
                     if knowledge_entity:
                         break
 
                 investor_relations = []
                 if knowledge_entity:
-                    funding_rows = (
+                    funding_query = (
                         db.query(FundingRound)
                         .filter(FundingRound.entity_id == knowledge_entity.id)
                         .order_by(desc(FundingRound.announced_date), desc(FundingRound.id))
-                        .all()
+                    )
+                    funding_rows = self._tool_diag_sql(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_7",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        query_or_sql=funding_query,
+                        params={"entity_id": knowledge_entity.id},
+                        executor=lambda: funding_query.all(),
                     )
                     for fr in funding_rows[:5]:
-                        relation_rows = (
+                        relation_query = (
                             db.query(Investment, Investor)
                             .join(Investor, Investment.investor_id == Investor.id)
                             .filter(Investment.funding_round_id == fr.id)
-                            .all()
+                        )
+                        relation_rows = self._tool_diag_sql(
+                            tool_name=tool_name,
+                            function_name=function_name,
+                            step_name="STEP_8",
+                            line_no=inspect.currentframe().f_lineno + 1,
+                            query_or_sql=relation_query,
+                            params={"funding_round_id": fr.id},
+                            executor=lambda: relation_query.all(),
                         )
                         for investment_row, investor_row in relation_rows:
                             investor_relations.append(
@@ -2126,15 +3311,22 @@ class Brain:
                         "org_name": normalized_name,
                     }
 
-                return {
+                payload = {
                     "status": "success",
                     "org_name": canonical_name or normalized_name,
                     "organization": profile_payload,
+                    "score_summary": self._extract_score_payload(profile=profile_payload),
                     "arda": arda_payload,
                     "news": news,
                     "investor_relations": investor_relations,
                     "ontology_tags": ontology_tags,
                 }
+                org_evidence = []
+                if org:
+                    org_evidence = [self._evidence_from_organization_profile(org, evidence_type="organization_profile")]
+                payload["evidence"] = self._merge_evidence(org_evidence, news_evidence)
+                payload["answer"] = self._format_organization_profile_result(payload)
+                return payload
             finally:
                 db.close()
         except Exception as exc:
@@ -2279,21 +3471,99 @@ class Brain:
         user_message: str,
         conversation_id: str,
         conversation_history: list | None = None,
-    ) -> str:
-        self.conversation_id = conversation_id
-        self._current_session_id = conversation_id
-        self.conversation_history = (conversation_history or [])[-20:]
-        self._compress_conversation_history()
-        history = list(self.conversation_history)
-        self._rebuild_entity_context(history, user_message)
+    ) -> dict:
+        with trace_span("Brain", input_obj={"message": user_message, "conversation_id": conversation_id}) as span:
+            self.conversation_id = conversation_id
+            self._current_session_id = conversation_id
+            self.conversation_history = (conversation_history or [])[-20:]
+            self._compress_conversation_history()
+            history = list(self.conversation_history)
+            self._rebuild_entity_context(history, user_message)
+            prompt_route = self._route_prompt(user_message)
+            product_direct_result = self._product_intent_direct_result(user_message)
+            if product_direct_result:
+                print("RetrievalSkipped=True")
+                print("ToolCalls=0")
+                result = {
+                    "answer": product_direct_result.get("answer") or "",
+                    "evidence": product_direct_result.get("evidence") or [],
+                }
+                span.set_output_obj(result)
+                return result
+            pipeline_enabled = feature_flag_enabled("PIPELINE_ORCHESTRATOR_ENABLED")
+            if self._should_prefer_pipeline_for_insight_render() and pipeline_enabled:
+                pipeline_service = self._get_pipeline_service(conversation_id=conversation_id)
+                if pipeline_service is not None:
+                    result = pipeline_service.execute(user_message, conversation_id, history)
+                    span.set_output_obj(result)
+                    return result
+                from services.pipeline_orchestrator import PipelineOrchestrator
+
+                result = PipelineOrchestrator(self, container=self.container).execute(user_message, conversation_id, history)
+                span.set_output_obj(result)
+                return result
+            governor_enabled = feature_flag_enabled("ARCHITECTURE_GOVERNOR_ENABLED")
+            if governor_enabled:
+                governor = self._get_governor_service(conversation_id=conversation_id)
+                if governor is not None:
+                    result = governor.execute(user_message, conversation_id, history)
+                    span.set_output_obj(result)
+                    return result
+                from services.architecture_governor import ArchitectureGovernor
+
+                result = ArchitectureGovernor(self, container=self.container).execute(user_message, conversation_id, history)
+                span.set_output_obj(result)
+                return result
+            if pipeline_enabled:
+                pipeline_service = self._get_pipeline_service(conversation_id=conversation_id)
+                if pipeline_service is not None:
+                    result = pipeline_service.execute(user_message, conversation_id, history)
+                    span.set_output_obj(result)
+                    return result
+                from services.pipeline_orchestrator import PipelineOrchestrator
+
+                result = PipelineOrchestrator(self, container=self.container).execute(user_message, conversation_id, history)
+                span.set_output_obj(result)
+                return result
+            collected_evidence: list[dict] = []
+
+        def finalize(answer: str, evidence: Any = None) -> dict:
+            merged = self._merge_evidence(collected_evidence, evidence or [])
+            return {"answer": answer or "", "evidence": merged}
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            direct_result = parser.parse(user_message, conversation_id=conversation_id)
+            if direct_result and direct_result.get("data_found"):
+                answer = direct_result.get("answer") or direct_result.get("response") or ""
+                evidence = direct_result.get("evidence") or []
+                return finalize(self._clean_output(answer), evidence)
+        finally:
+            if parser:
+                parser.close()
+
+        if MULTI_AGENT_AVAILABLE:
+            try:
+                orchestrator = AgentOrchestrator()
+                result = orchestrator.process(user_message)
+                if result.get("data_found"):
+                    return finalize(self._clean_output(result.get("response", "")), result.get("evidence") or [])
+            except Exception as exc:
+                logger.warning("[Brain] Multi-Agent失败，fallback到legacy: %s", exc)
 
         should_prioritize_match = self._looks_like_match_query(user_message)
         captured_profile = None if should_prioritize_match else self._capture_profile_from_message(user_message)
         if captured_profile:
-            return captured_profile
+            return finalize(captured_profile, [])
 
         if self._should_use_direct_answer(user_message):
-            return self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            return finalize(
+                self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)),
+                [],
+            )
 
         # ===== 新增：复杂分析类查询识别 =====
         analysis_detection = detect_analysis_type(user_message)
@@ -2330,9 +3600,12 @@ class Brain:
                         continue
 
                 if results:
-                    return self._append_gap_collection_notice(
-                        user_message,
-                        self._format_analysis_result(analysis_type, target, results),
+                    return finalize(
+                        self._apply_gap_notice_policy(
+                            user_message,
+                            self._format_analysis_result(analysis_type, target, results),
+                        ),
+                        [],
                     )
 
         # === Planner 集成（新增）===
@@ -2355,17 +3628,89 @@ class Brain:
                     else:
                         planner_report = planner_result.get("report", "")
                     if planner_report and len(planner_report) > 100:
-                        return f"[[EXECUTIVE_REPORT]]\n{planner_report}"
+                        return finalize(f"[[EXECUTIVE_REPORT]]\n{planner_report}", [])
             except Exception as exc:
                 logger.debug(f"Planner execution failed: {exc}")
         # === Planner 集成结束 ===
 
         if not DEEPSEEK_API_KEY:
-            return self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            return finalize(
+                self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)),
+                [],
+            )
 
+        prompt_route = self._resolve_prompt_route(user_message)
+        assistant_mode = self._is_assistant_prompt_route(prompt_route)
         messages = self._build_messages(user_message, history)
-        prefetched_tool_calls = self._build_direct_investor_prefetch(user_message) or self._build_prefetched_tool_calls(user_message)
-        tool_choice = self._choose_tool_for_message(user_message)
+        reasoning_enabled = feature_flag_enabled("REASONING_ENGINE_V1_ENABLED") and not assistant_mode
+        planned_tool_calls: list[dict] = []
+        if reasoning_enabled:
+            try:
+                engine = self._get_reasoning_engine_service(conversation_id=conversation_id)
+                if engine is None:
+                    from services.reasoning_engine_v1 import ReasoningEngineV1
+
+                    engine = ReasoningEngineV1()
+                country = self._extract_country(user_message)
+                pre = engine.build_reasoning_result_pre(user_message, self.current_entities, country)
+                capability_planner_enabled = feature_flag_enabled("CAPABILITY_PLANNER_ENABLED")
+                self._reasoning_v1_context = {
+                    "question_type": pre.question_type.value,
+                    "country": country,
+                    "requirement": pre.requirement,
+                    "tool_plan": [] if capability_planner_enabled else pre.tool_plan,
+                }
+
+                def build_call(tool_name: str, args: dict) -> dict:
+                    return {
+                        "id": f"call_{uuid.uuid4().hex[:12]}",
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": json.dumps(args or {}, ensure_ascii=False)},
+                    }
+
+                def pick_entity_name() -> str:
+                    candidate = self._extract_organization_profile_name(user_message)
+                    if candidate:
+                        return candidate
+                    for item in (self.current_entities or [])[-5:]:
+                        if isinstance(item, dict) and (item.get("name") or "").strip():
+                            return (item.get("name") or "").strip()
+                    return ""
+
+                for tool_name in pre.tool_plan:
+                    if tool_name == "query_organization_profile":
+                        org_name = pick_entity_name()
+                        if org_name:
+                            planned_tool_calls.append(build_call("query_organization_profile", {"org_name": org_name}))
+                    elif tool_name == "query_contacts":
+                        org_name = pick_entity_name()
+                        if org_name:
+                            planned_tool_calls.append(build_call("query_contacts", {"org_name": org_name}))
+                    elif tool_name == "query_graph":
+                        entity_name = pick_entity_name()
+                        if entity_name:
+                            planned_tool_calls.append(build_call("query_graph", {"entity_name": entity_name}))
+                    elif tool_name == "query_arda_country":
+                        args = self._build_arda_country_args(user_message)
+                        if args.get("country"):
+                            planned_tool_calls.append(build_call("query_arda_country", args))
+                    elif tool_name == "query_intelligence":
+                        args = self._build_intelligence_query_args(user_message)
+                        planned_tool_calls.append(build_call("query_intelligence", args))
+                    elif tool_name == "query_database":
+                        args = self._build_query_args(user_message)
+                        planned_tool_calls.append(build_call("query_database", args))
+            except Exception:
+                planned_tool_calls = []
+
+        prefetched_tool_calls = []
+        if not assistant_mode:
+            prefetched_tool_calls = (
+                self._build_direct_investor_prefetch(user_message)
+                or planned_tool_calls
+                or self._build_prefetched_tool_calls(user_message)
+            )
+        tool_choice = None if assistant_mode else self._choose_tool_for_message(user_message)
 
         if prefetched_tool_calls:
             direct_tool_name = prefetched_tool_calls[0].get("function", {}).get("name", "")
@@ -2377,21 +3722,24 @@ class Brain:
                     function_args = {}
                 func = self.available_functions.get(direct_tool_name)
                 if func:
-                    result = func(**function_args)
+                    result = self._normalize_tool_result(direct_tool_name, func(**function_args))
                     direct_content = self._render_direct_tool_result(direct_tool_name, result)
                     if direct_content:
-                        return self._append_gap_collection_notice(user_message, direct_content)
+                        if isinstance(result, dict) and isinstance(result.get("evidence"), list):
+                            collected_evidence.extend(result.get("evidence") or [])
+                        return finalize(self._apply_gap_notice_policy(user_message, direct_content), result.get("evidence") if isinstance(result, dict) else [])
             response = self._continue_after_tool_calls(messages, prefetched_tool_calls)
             if response:
                 final_content = response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
                 if final_content:
-                    return self._append_gap_collection_notice(user_message, final_content)
-            return self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+                    return finalize(self._apply_gap_notice_policy(user_message, final_content), [])
+            return finalize(self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)), [])
 
-        response = self._call_llm(messages, tools=TOOLS, tool_choice=tool_choice)
+        response = self._call_llm(messages, tools=None if assistant_mode else TOOLS, tool_choice=tool_choice)
         if not response:
-            return self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            return finalize(self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)), [])
 
+        collected_tool_results: list[dict] = []
         for _ in range(3):
             assistant_msg = response.get("choices", [{}])[0].get("message", {})
             tool_calls = assistant_msg.get("tool_calls") or []
@@ -2399,7 +3747,7 @@ class Brain:
             if not tool_calls:
                 final_content = assistant_msg.get("content", "").strip()
                 if final_content:
-                    return self._append_gap_collection_notice(user_message, final_content)
+                    return finalize(self._apply_gap_notice_policy(user_message, final_content), [])
                 break
 
             messages.append(
@@ -2423,11 +3771,15 @@ class Brain:
                 func = self.available_functions.get(function_name)
                 if func:
                     try:
-                        result = func(**function_args)
+                        result = self._normalize_tool_result(function_name, func(**function_args))
                     except TypeError as exc:
-                        result = {"status": "error", "message": f"参数错误: {exc}"}
+                        result = self._normalize_tool_result(function_name, {"status": "error", "message": f"参数错误: {exc}"})
                 else:
-                    result = {"status": "error", "message": f"未知工具: {function_name}"}
+                    result = self._normalize_tool_result(function_name, {"status": "error", "message": f"未知工具: {function_name}"})
+                if isinstance(result, dict) and isinstance(result.get("evidence"), list):
+                    collected_evidence.extend(result.get("evidence") or [])
+                if isinstance(result, dict):
+                    collected_tool_results.append(result)
 
                 messages.append(
                     {
@@ -2437,11 +3789,60 @@ class Brain:
                     }
                 )
 
-            response = self._call_llm(messages, tools=TOOLS)
-            if not response:
-                return self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            composer_enabled = feature_flag_enabled("ANSWER_COMPOSER_ENABLED")
+            if composer_enabled and collected_tool_results:
+                answer_context = self._build_answer_context(user_message, collected_tool_results)
+                filtered_messages = [m for m in messages if m.get("role") != "tool" and "tool_calls" not in m]
+                if answer_context:
+                    filtered_messages = [
+                        m
+                        for m in filtered_messages
+                        if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Answer Context"))
+                    ]
+                    filtered_messages.append({"role": "system", "content": self._format_answer_context(answer_context)})
+                final_response = self._call_llm(filtered_messages, tools=None)
+                if final_response:
+                    final_content = final_response.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    if final_content:
+                        return finalize(self._apply_gap_notice_policy(user_message, final_content), [])
+                return finalize(self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)), [])
 
-        return self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            if reasoning_enabled and collected_tool_results:
+                try:
+                    from services.reasoning_engine_v1 import QuestionType
+
+                    ctx = getattr(self, "_reasoning_v1_context", {}) or {}
+                    qt_value = str(ctx.get("question_type") or "UNKNOWN")
+                    from services.core_models import Requirement as CoreRequirement
+
+                    req = ctx.get("requirement")
+                    requirement = req if isinstance(req, CoreRequirement) else CoreRequirement.from_dict(req or {})
+                    tool_plan = ctx.get("tool_plan") or []
+                    qt = QuestionType(qt_value) if qt_value in getattr(QuestionType, "_value2member_map_", {}) else QuestionType.UNKNOWN
+                    engine = self._get_reasoning_engine_service(conversation_id=conversation_id)
+                    if engine is None:
+                        from services.reasoning_engine_v1 import ReasoningEngineV1
+
+                        engine = ReasoningEngineV1()
+                    evaluation = engine.evaluate_evidence(collected_tool_results, requirement)
+                    conflicts = engine.detect_conflicts(collected_tool_results)
+                    ranked_evidence = engine.rank_evidence(collected_tool_results)
+                    merged = engine.merge_duplicate_facts(ranked_evidence)
+                    outline = engine.build_answer_outline(qt, requirement, ranked_evidence)
+                    verification = engine.verification(evaluation, conflicts, ranked_evidence)
+                    reasoning_message = self._format_reasoning_engine_v1_message(qt_value, requirement.to_dict(), tool_plan, evaluation, conflicts, outline)
+                    messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Reasoning Plan"))]
+                    messages.append({"role": "system", "content": reasoning_message})
+                except Exception:
+                    pass
+
+            response = self._call_llm(messages, tools=None if assistant_mode else TOOLS)
+            if not response:
+                return finalize(self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)), [])
+
+        result = finalize(self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history)), [])
+        span.set_output_obj(result)
+        return result
 
     def think_stream(
         self,
@@ -2449,12 +3850,443 @@ class Brain:
         conversation_id: str,
         conversation_history: list | None = None,
     ):
-        self.conversation_id = conversation_id
-        self._current_session_id = conversation_id
-        self.conversation_history = (conversation_history or [])[-20:]
-        self._compress_conversation_history()
-        history = list(self.conversation_history)
-        self._rebuild_entity_context(history, user_message)
+        with trace_span("Brain", input_obj={"message": user_message, "conversation_id": conversation_id}) as span:
+            direct_answer = False
+            parser_result = None
+            workflow_outputs = None
+            selected_prompt = None
+            route_reason = None
+            prompt_route = None
+            assistant_mode = False
+            llm_entered = False
+            print("STEP_1 ENTER think_stream")
+
+            def _brain_stream_trace(event: str, **extra):
+                print(
+                    "BRAIN_THINK_STREAM_TRACE "
+                    + json.dumps(
+                        {
+                            "event": event,
+                            "Reason": extra.pop("Reason", ""),
+                            "direct_answer": extra.pop("direct_answer", direct_answer),
+                            "parser_result": extra.pop("parser_result", parser_result),
+                            "workflow_outputs": extra.pop("workflow_outputs", workflow_outputs),
+                            "selected_prompt": extra.pop("selected_prompt", selected_prompt),
+                            "route_reason": extra.pop("route_reason", route_reason),
+                            "llm_entered": extra.pop("llm_entered", llm_entered),
+                            **extra,
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    )
+                )
+
+            prompt_route = self._route_prompt(user_message)
+            selected_prompt = str((prompt_route or {}).get("selected_prompt") or "").strip() or None
+            route_reason = str((prompt_route or {}).get("reason") or "").strip() or None
+            assistant_mode = self._is_assistant_prompt_route(prompt_route)
+            self.conversation_id = conversation_id
+            self._current_session_id = conversation_id
+            self.conversation_history = (conversation_history or [])[-20:]
+            self._compress_conversation_history()
+            history = list(self.conversation_history)
+            if selected_prompt == "Research Prompt":
+                self.current_entities = []
+            else:
+                self._rebuild_entity_context(history, user_message)
+            product_direct_result = self._product_intent_direct_result(user_message)
+            if product_direct_result:
+                direct_answer = True
+                parser_result = product_direct_result
+                print("RetrievalSkipped=True")
+                print("ToolCalls=0")
+                response_text = str(product_direct_result.get("answer") or "")
+                words = response_text.split(" ")
+                chunk = ""
+                for word in words:
+                    chunk += word + " "
+                    if len(chunk) >= 50:
+                        yield {"type": "token", "content": chunk.strip() + " "}
+                        chunk = ""
+                if chunk.strip():
+                    yield {"type": "token", "content": chunk.strip()}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": product_direct_result.get("evidence") or [],
+                    "direct_answer": True,
+                    "welcome_reply_uuid": None,
+                }
+                span.set_output_obj({"done": True, "product_intent": product_direct_result.get("product_intent")})
+                _brain_stream_trace(
+                    "RETURN_ID=PRODUCT",
+                    Reason="product_intent_direct_answer",
+                    conversation_id=conversation_id,
+                    parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            _brain_stream_trace(
+                "ENTER Brain",
+                Reason="think_stream_enter",
+                conversation_id=conversation_id,
+            )
+            governor_enabled = feature_flag_enabled("ARCHITECTURE_GOVERNOR_ENABLED")
+            # #region debug-point A:brain-stream-entry
+            debug_answer_event(
+                "Brain Stream Entry",
+                user_message,
+                trace_id=conversation_id,
+                hypothesis_id="A",
+                location="brain.py:think_stream:entry",
+                extra={"conversation_id": conversation_id, "governor_enabled": bool(governor_enabled)},
+            )
+            # #endregion
+            if self._should_prefer_pipeline_for_insight_render():
+                pipeline_service = self._get_pipeline_service(conversation_id=conversation_id)
+                if pipeline_service is not None:
+                    buffered_answer = ""
+                    for chunk in pipeline_service.execute_stream(user_message, conversation_id, history):
+                        if isinstance(chunk, dict) and chunk.get("type") == "token":
+                            buffered_answer += str(chunk.get("content") or "")
+                        elif isinstance(chunk, dict) and chunk.get("type") == "done":
+                            final_answer = str(chunk.get("full_content") or buffered_answer)
+                            debug_answer_event(
+                                "Brain Final Answer",
+                                final_answer,
+                                trace_id=conversation_id,
+                                hypothesis_id="A",
+                                location="brain.py:think_stream:pipeline_preferred",
+                                extra={"path": "pipeline_preferred"},
+                            )
+                            emit_welcome_trace(
+                                "BRAIN_UUID",
+                                lookup_welcome_reply_uuid(conversation_id, final_answer),
+                                conversation_id=conversation_id,
+                                extra={"location": "brain.py:think_stream:pipeline_preferred"},
+                            )
+                            workflow_outputs = {
+                                "path": "pipeline_preferred",
+                                "full_content": final_answer,
+                                "full_content_length": len(final_answer),
+                            }
+                        yield chunk
+                    span.set_output_obj({"done": True})
+                    _brain_stream_trace(
+                        "RETURN_ID=A_PIPELINE",
+                        Reason="pipeline_preferred_return",
+                        conversation_id=conversation_id,
+                    )
+                    return
+                from services.pipeline_orchestrator import PipelineOrchestrator
+
+                buffered_answer = ""
+                for chunk in PipelineOrchestrator(self, container=self.container).execute_stream(user_message, conversation_id, history):
+                    if isinstance(chunk, dict) and chunk.get("type") == "token":
+                        buffered_answer += str(chunk.get("content") or "")
+                    elif isinstance(chunk, dict) and chunk.get("type") == "done":
+                        final_answer = str(chunk.get("full_content") or buffered_answer)
+                        debug_answer_event(
+                            "Brain Final Answer",
+                            final_answer,
+                            trace_id=conversation_id,
+                            hypothesis_id="A",
+                            location="brain.py:think_stream:pipeline_preferred_inline",
+                            extra={"path": "pipeline_preferred_inline"},
+                        )
+                        emit_welcome_trace(
+                            "BRAIN_UUID",
+                            lookup_welcome_reply_uuid(conversation_id, final_answer),
+                            conversation_id=conversation_id,
+                            extra={"location": "brain.py:think_stream:pipeline_preferred_inline"},
+                        )
+                        workflow_outputs = {
+                            "path": "pipeline_preferred_inline",
+                            "full_content": final_answer,
+                            "full_content_length": len(final_answer),
+                        }
+                    yield chunk
+                span.set_output_obj({"done": True})
+                _brain_stream_trace(
+                    "RETURN_ID=A_PIPELINE_INLINE",
+                    Reason="pipeline_preferred_inline_return",
+                    conversation_id=conversation_id,
+                )
+                return
+            if governor_enabled:
+                governor = self._get_governor_service(conversation_id=conversation_id)
+                if governor is not None:
+                    buffered_answer = ""
+                    print("BRAIN_ENTER_GOVERNOR_STREAM")
+                    try:
+                        print("STEP_2 BEFORE governor.execute_stream")
+                        for chunk in governor.execute_stream(user_message, conversation_id, history):
+                            if isinstance(chunk, dict) and chunk.get("type") == "token":
+                                buffered_answer += str(chunk.get("content") or "")
+                            elif isinstance(chunk, dict) and chunk.get("type") == "done":
+                                final_answer = str(chunk.get("full_content") or buffered_answer)
+                                # #region debug-point A:brain-final-answer-governor
+                                debug_answer_event(
+                                    "Brain Final Answer",
+                                    final_answer,
+                                    trace_id=conversation_id,
+                                    hypothesis_id="A",
+                                    location="brain.py:think_stream:governor",
+                                    extra={"path": "governor"},
+                                )
+                                emit_welcome_trace(
+                                    "BRAIN_UUID",
+                                    lookup_welcome_reply_uuid(conversation_id, final_answer),
+                                    conversation_id=conversation_id,
+                                    extra={"location": "brain.py:think_stream:governor"},
+                                )
+                                # #endregion
+                                workflow_outputs = {
+                                    "path": "governor",
+                                    "full_content": final_answer,
+                                    "full_content_length": len(final_answer),
+                                }
+                            yield chunk
+                        print("STEP_3 AFTER governor.execute_stream")
+                        print("BRAIN_GOVERNOR_STREAM_FINISHED")
+                    except GeneratorExit:
+                        print("BRAIN_GENERATOR_EXIT")
+                        raise
+                    except asyncio.CancelledError:
+                        print("BRAIN_CANCELLED")
+                        raise
+                    except Exception as e:
+                        print("BRAIN_EXCEPTION", repr(e))
+                        raise
+                    finally:
+                        print("BRAIN_STREAM_FINALLY")
+                    span.set_output_obj({"done": True})
+                    _brain_stream_trace(
+                        "RETURN_ID=A",
+                        Reason="governor_service_return",
+                        conversation_id=conversation_id,
+                    )
+                    return
+                from services.architecture_governor import ArchitectureGovernor
+
+                buffered_answer = ""
+                print("BRAIN_ENTER_GOVERNOR_STREAM")
+                try:
+                    print("STEP_2 BEFORE governor.execute_stream")
+                    for chunk in ArchitectureGovernor(self, container=self.container).execute_stream(user_message, conversation_id, history):
+                        if isinstance(chunk, dict) and chunk.get("type") == "token":
+                            buffered_answer += str(chunk.get("content") or "")
+                        elif isinstance(chunk, dict) and chunk.get("type") == "done":
+                            final_answer = str(chunk.get("full_content") or buffered_answer)
+                            # #region debug-point A:brain-final-answer-governor-inline
+                            debug_answer_event(
+                                "Brain Final Answer",
+                                final_answer,
+                                trace_id=conversation_id,
+                                hypothesis_id="A",
+                                location="brain.py:think_stream:governor_inline",
+                                extra={"path": "governor_inline"},
+                            )
+                            emit_welcome_trace(
+                                "BRAIN_UUID",
+                                lookup_welcome_reply_uuid(conversation_id, final_answer),
+                                conversation_id=conversation_id,
+                                extra={"location": "brain.py:think_stream:governor_inline"},
+                            )
+                            # #endregion
+                            workflow_outputs = {
+                                "path": "governor_inline",
+                                "full_content": final_answer,
+                                "full_content_length": len(final_answer),
+                            }
+                        yield chunk
+                    print("STEP_3 AFTER governor.execute_stream")
+                    print("BRAIN_GOVERNOR_STREAM_FINISHED")
+                except GeneratorExit:
+                    print("BRAIN_GENERATOR_EXIT")
+                    raise
+                except asyncio.CancelledError:
+                    print("BRAIN_CANCELLED")
+                    raise
+                except Exception as e:
+                    print("BRAIN_EXCEPTION", repr(e))
+                    raise
+                finally:
+                    print("BRAIN_STREAM_FINALLY")
+                span.set_output_obj({"done": True})
+                _brain_stream_trace(
+                    "RETURN_ID=B",
+                    Reason="governor_inline_return",
+                    conversation_id=conversation_id,
+                )
+                return
+            pipeline_enabled = feature_flag_enabled("PIPELINE_ORCHESTRATOR_ENABLED")
+            if pipeline_enabled:
+                pipeline_service = self._get_pipeline_service(conversation_id=conversation_id)
+                if pipeline_service is not None:
+                    buffered_answer = ""
+                    for chunk in pipeline_service.execute_stream(user_message, conversation_id, history):
+                        if isinstance(chunk, dict) and chunk.get("type") == "token":
+                            buffered_answer += str(chunk.get("content") or "")
+                        elif isinstance(chunk, dict) and chunk.get("type") == "done":
+                            final_answer = str(chunk.get("full_content") or buffered_answer)
+                            # #region debug-point A:brain-final-answer-pipeline
+                            debug_answer_event(
+                                "Brain Final Answer",
+                                final_answer,
+                                trace_id=conversation_id,
+                                hypothesis_id="A",
+                                location="brain.py:think_stream:pipeline",
+                                extra={"path": "pipeline"},
+                            )
+                            emit_welcome_trace(
+                                "BRAIN_UUID",
+                                lookup_welcome_reply_uuid(conversation_id, final_answer),
+                                conversation_id=conversation_id,
+                                extra={"location": "brain.py:think_stream:pipeline"},
+                            )
+                            # #endregion
+                            workflow_outputs = {
+                                "path": "pipeline",
+                                "full_content": final_answer,
+                                "full_content_length": len(final_answer),
+                            }
+                        yield chunk
+                    span.set_output_obj({"done": True})
+                    _brain_stream_trace(
+                        "RETURN_ID=C",
+                        Reason="pipeline_service_return",
+                        conversation_id=conversation_id,
+                    )
+                    return
+                from services.pipeline_orchestrator import PipelineOrchestrator
+
+                buffered_answer = ""
+                for chunk in PipelineOrchestrator(self, container=self.container).execute_stream(user_message, conversation_id, history):
+                    if isinstance(chunk, dict) and chunk.get("type") == "token":
+                        buffered_answer += str(chunk.get("content") or "")
+                    elif isinstance(chunk, dict) and chunk.get("type") == "done":
+                        final_answer = str(chunk.get("full_content") or buffered_answer)
+                        # #region debug-point A:brain-final-answer-pipeline-inline
+                        debug_answer_event(
+                            "Brain Final Answer",
+                            final_answer,
+                            trace_id=conversation_id,
+                            hypothesis_id="A",
+                            location="brain.py:think_stream:pipeline_inline",
+                            extra={"path": "pipeline_inline"},
+                        )
+                        emit_welcome_trace(
+                            "BRAIN_UUID",
+                            lookup_welcome_reply_uuid(conversation_id, final_answer),
+                            conversation_id=conversation_id,
+                            extra={"location": "brain.py:think_stream:pipeline_inline"},
+                        )
+                        # #endregion
+                        workflow_outputs = {
+                            "path": "pipeline_inline",
+                            "full_content": final_answer,
+                            "full_content_length": len(final_answer),
+                        }
+                    yield chunk
+                span.set_output_obj({"done": True})
+                _brain_stream_trace(
+                    "RETURN_ID=D",
+                    Reason="pipeline_inline_return",
+                    conversation_id=conversation_id,
+                )
+                return
+            collected_evidence: list[dict] = []
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            _brain_stream_trace(
+                "CALL QueryParser.parse",
+                Reason="before_query_parser_parse",
+                conversation_id=conversation_id,
+            )
+            direct_result = parser.parse(user_message, conversation_id=conversation_id)
+            parser_result = direct_result
+            direct_answer = bool((direct_result or {}).get("direct_answer"))
+            if direct_result and direct_result.get("data_found"):
+                response_text = direct_result.get("answer") or direct_result.get("response") or ""
+                welcome_reply_uuid = direct_result.get("welcome_reply_uuid") or lookup_welcome_reply_uuid(conversation_id, response_text)
+                emit_welcome_trace(
+                    "BRAIN_UUID",
+                    welcome_reply_uuid,
+                    conversation_id=conversation_id,
+                    extra={"location": "brain.py:think_stream:direct_result"},
+                )
+                evidence = direct_result.get("evidence") or []
+                if isinstance(evidence, list):
+                    collected_evidence.extend(evidence)
+                words = response_text.split(" ")
+                chunk = ""
+                for word in words:
+                    chunk += word + " "
+                    if len(chunk) >= 50:
+                        yield {"type": "token", "content": chunk.strip() + " "}
+                        chunk = ""
+                if chunk.strip():
+                    yield {"type": "token", "content": chunk.strip()}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(collected_evidence),
+                    "welcome_reply_uuid": welcome_reply_uuid,
+                }
+                _brain_stream_trace(
+                    "RETURN_ID=E",
+                    Reason="parser_result_direct_answer",
+                    conversation_id=conversation_id,
+                    parser_result=direct_result,
+                    parser_result_response=response_text,
+                    parser_result_direct_answer=bool(direct_result.get("direct_answer")),
+                    parser_result_data_found=bool(direct_result.get("data_found")),
+                )
+                return
+        except Exception as exc:
+            _brain_stream_trace(
+                "EXCEPTION QueryParser.parse",
+                Reason="query_parser_exception",
+                conversation_id=conversation_id,
+                exception_type=type(exc).__name__,
+                exception_message=str(exc),
+            )
+            raise
+        finally:
+            if parser:
+                parser.close()
+
+        # ===== Multi-Agent 直答路径（与 think() 保持一致）=====
+        if MULTI_AGENT_AVAILABLE:
+            try:
+                from agents.orchestrator import AgentOrchestrator
+
+                orchestrator = AgentOrchestrator()
+                result = orchestrator.process(user_message)
+                if result.get("data_found"):
+                    response_text = result.get("response", "") or ""
+                    evidence = result.get("evidence") or []
+                    if isinstance(evidence, list):
+                        collected_evidence.extend(evidence)
+                    words = response_text.split(" ")
+                    chunk = ""
+                    for word in words:
+                        chunk += word + " "
+                        if len(chunk) >= 50:
+                            yield {"type": "token", "content": chunk.strip() + " "}
+                            chunk = ""
+                    if chunk.strip():
+                        yield {"type": "token", "content": chunk.strip()}
+                    yield {"type": "done", "full_content": response_text, "evidence": self._merge_evidence(collected_evidence)}
+                    return
+            except Exception as exc:
+                logger.warning("[Brain] think_stream Multi-Agent fallback: %s", exc)
 
         yield {"type": "thinking"}
 
@@ -2463,14 +4295,25 @@ class Brain:
         if captured_profile:
             for ch in captured_profile:
                 yield {"type": "token", "content": ch}
-            yield {"type": "done"}
+            yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+            _brain_stream_trace(
+                "RETURN_ID=F",
+                Reason="captured_profile_return",
+                conversation_id=conversation_id,
+            )
             return
 
         if self._should_use_direct_answer(user_message):
-            direct_reply = self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            direct_answer = True
+            direct_reply = self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history))
             for ch in direct_reply:
                 yield {"type": "token", "content": ch}
-            yield {"type": "done"}
+            yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+            _brain_stream_trace(
+                "RETURN_ID=G",
+                Reason="should_use_direct_answer",
+                conversation_id=conversation_id,
+            )
             return
 
         # === Planner 集成（新增）===
@@ -2494,7 +4337,16 @@ class Brain:
                     chunk_size = 100
                     for i in range(0, len(report), chunk_size):
                         yield {"type": "token", "content": report[i : i + chunk_size]}
-                    yield {"type": "done"}
+                    yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+                    workflow_outputs = {
+                        "path": "planner_report",
+                        "report_length": len(report),
+                    }
+                    _brain_stream_trace(
+                        "RETURN_ID=H",
+                        Reason="planner_report_return",
+                        conversation_id=conversation_id,
+                    )
                     return
                 if planner_result.get("used_plan") and not is_relevant:
                     logger.warning("Planner stream report skipped due to entity drift: %s", user_message)
@@ -2503,16 +4355,104 @@ class Brain:
         # === Planner 集成结束 ===
 
         if not DEEPSEEK_API_KEY:
-            fallback = self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+            fallback = self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history))
             for ch in fallback:
                 yield {"type": "token", "content": ch}
-            yield {"type": "done"}
+            yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+            _brain_stream_trace(
+                "RETURN_ID=I",
+                Reason="missing_deepseek_api_key",
+                conversation_id=conversation_id,
+            )
             return
 
+        _brain_stream_trace(
+            "CALL PromptRouter",
+            Reason="prompt_route_resolved_at_entry",
+            conversation_id=conversation_id,
+            selected_prompt=selected_prompt,
+            route_reason=route_reason,
+        )
+        print("STEP_4 PROMPT_ROUTE_READY")
+        print("STEP_5 AFTER _resolve_prompt_route")
+        _brain_stream_trace(
+            "CALL build_messages",
+            Reason="before_build_messages",
+            conversation_id=conversation_id,
+            selected_prompt=selected_prompt,
+        )
+        print("STEP_6 BEFORE build_messages")
         messages = self._build_messages(user_message, history)
         first_tool_calls = None
-        prefetched_tool_calls = self._build_direct_investor_prefetch(user_message) or self._build_prefetched_tool_calls(user_message)
-        tool_choice = self._choose_tool_for_message(user_message)
+        reasoning_enabled = feature_flag_enabled("REASONING_ENGINE_V1_ENABLED") and not assistant_mode
+        planned_tool_calls: list[dict] = []
+        if reasoning_enabled:
+            try:
+                engine = self._get_reasoning_engine_service(conversation_id=conversation_id)
+                if engine is None:
+                    from services.reasoning_engine_v1 import ReasoningEngineV1
+
+                    engine = ReasoningEngineV1()
+                country = self._extract_country(user_message)
+                pre = engine.build_reasoning_result_pre(user_message, self.current_entities, country)
+                capability_planner_enabled = feature_flag_enabled("CAPABILITY_PLANNER_ENABLED")
+                self._reasoning_v1_context = {
+                    "question_type": pre.question_type.value,
+                    "country": country,
+                    "requirement": pre.requirement,
+                    "tool_plan": [] if capability_planner_enabled else pre.tool_plan,
+                }
+
+                def build_call(tool_name: str, args: dict) -> dict:
+                    return {
+                        "id": f"call_{uuid.uuid4().hex[:12]}",
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": json.dumps(args or {}, ensure_ascii=False)},
+                    }
+
+                def pick_entity_name() -> str:
+                    candidate = self._extract_organization_profile_name(user_message)
+                    if candidate:
+                        return candidate
+                    for item in (self.current_entities or [])[-5:]:
+                        if isinstance(item, dict) and (item.get("name") or "").strip():
+                            return (item.get("name") or "").strip()
+                    return ""
+
+                for tool_name in pre.tool_plan:
+                    if tool_name == "query_organization_profile":
+                        org_name = pick_entity_name()
+                        if org_name:
+                            planned_tool_calls.append(build_call("query_organization_profile", {"org_name": org_name}))
+                    elif tool_name == "query_contacts":
+                        org_name = pick_entity_name()
+                        if org_name:
+                            planned_tool_calls.append(build_call("query_contacts", {"org_name": org_name}))
+                    elif tool_name == "query_graph":
+                        entity_name = pick_entity_name()
+                        if entity_name:
+                            planned_tool_calls.append(build_call("query_graph", {"entity_name": entity_name}))
+                    elif tool_name == "query_arda_country":
+                        args = self._build_arda_country_args(user_message)
+                        if args.get("country"):
+                            planned_tool_calls.append(build_call("query_arda_country", args))
+                    elif tool_name == "query_intelligence":
+                        args = self._build_intelligence_query_args(user_message)
+                        planned_tool_calls.append(build_call("query_intelligence", args))
+                    elif tool_name == "query_database":
+                        args = self._build_query_args(user_message)
+                        planned_tool_calls.append(build_call("query_database", args))
+            except Exception:
+                planned_tool_calls = []
+
+        prefetched_tool_calls = []
+        if not assistant_mode:
+            prefetched_tool_calls = (
+                self._build_direct_investor_prefetch(user_message)
+                or planned_tool_calls
+                or self._build_prefetched_tool_calls(user_message)
+            )
+        tool_choice = None if assistant_mode else self._choose_tool_for_message(user_message)
 
         if prefetched_tool_calls:
             direct_tool_name = prefetched_tool_calls[0].get("function", {}).get("name", "")
@@ -2525,14 +4465,25 @@ class Brain:
                 yield {"type": "tool_call", "name": direct_tool_name, "args": function_args}
                 func = self.available_functions.get(direct_tool_name)
                 if func:
-                    result = func(**function_args)
-                    direct_content = self._append_gap_collection_notice(
+                    result = self._normalize_tool_result(direct_tool_name, func(**function_args))
+                    if isinstance(result, dict) and isinstance(result.get("evidence"), list):
+                        collected_evidence.extend(result.get("evidence") or [])
+                    direct_content = self._apply_gap_notice_policy(
                         user_message,
                         self._render_direct_tool_result(direct_tool_name, result),
                     )
                     for ch in direct_content:
                         yield {"type": "token", "content": ch}
-                yield {"type": "done"}
+                yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+                workflow_outputs = {
+                    "path": "direct_render_tool",
+                    "tool_name": direct_tool_name,
+                }
+                _brain_stream_trace(
+                    "RETURN_ID=J",
+                    Reason="direct_render_tool_result",
+                    conversation_id=conversation_id,
+                )
                 return
 
             assistant_tool_message = {
@@ -2541,6 +4492,7 @@ class Brain:
                 "tool_calls": prefetched_tool_calls,
             }
             tool_results = []
+            collected_tool_results: list[dict] = []
 
             for tool_call in prefetched_tool_calls:
                 function_name = tool_call.get("function", {}).get("name", "")
@@ -2558,34 +4510,132 @@ class Brain:
                     parsed_result = json.loads(tool_result.get("content", "{}"))
                 except Exception:
                     parsed_result = {}
+                if isinstance(parsed_result, dict) and isinstance(parsed_result.get("evidence"), list):
+                    collected_evidence.extend(parsed_result.get("evidence") or [])
+                if isinstance(parsed_result, dict):
+                    collected_tool_results.append(parsed_result)
                 if self._should_fallback_after_tool(function_name, parsed_result):
-                    fallback = self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+                    fallback = self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history))
                     for ch in fallback:
                         yield {"type": "token", "content": ch}
-                    yield {"type": "done"}
+                    yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+                    workflow_outputs = {
+                        "path": "prefetched_tool_fallback",
+                        "tool_name": function_name,
+                    }
+                    _brain_stream_trace(
+                        "RETURN_ID=K",
+                        Reason="prefetched_tool_fallback",
+                        conversation_id=conversation_id,
+                    )
                     return
+
+            composer_enabled = feature_flag_enabled("ANSWER_COMPOSER_ENABLED")
+            if composer_enabled and collected_tool_results:
+                answer_context = self._build_answer_context(user_message, collected_tool_results)
+                if answer_context:
+                    messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Answer Context"))]
+                    messages.append({"role": "system", "content": self._format_answer_context(answer_context)})
+                buffered_content = ""
+                llm_entered = True
+                print("STEP_7 BEFORE LLM")
+                _brain_stream_trace(
+                    "CALL LLM.stream",
+                    Reason="answer_composer_prefetched_tools",
+                    conversation_id=conversation_id,
+                )
+                for chunk in self._call_llm_stream(messages, tools=None):
+                    if chunk.get("type") == "token":
+                        buffered_content += chunk.get("content", "")
+                    yield chunk
+                patched_content = self._apply_gap_notice_policy(user_message, buffered_content)
+                if patched_content != buffered_content:
+                    for ch in patched_content[len(buffered_content):]:
+                        yield {"type": "token", "content": ch}
+                yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+                workflow_outputs = {
+                    "path": "composer_prefetched_tools",
+                    "full_content_length": len(patched_content),
+                }
+                _brain_stream_trace(
+                    "RETURN_ID=L",
+                    Reason="composer_prefetched_tools_return",
+                    conversation_id=conversation_id,
+                )
+                return
 
             messages.append(assistant_tool_message)
             messages.extend(tool_results)
+            if reasoning_enabled and collected_tool_results:
+                try:
+                    from services.reasoning_engine_v1 import QuestionType, ReasoningEngineV1
+
+                    ctx = getattr(self, "_reasoning_v1_context", {}) or {}
+                    qt_value = str(ctx.get("question_type") or "UNKNOWN")
+                    requirement = ctx.get("requirement") or {"required_fields": ["source"], "minimum_sources": 1, "needs_ranking": False, "needs_graph": False}
+                    tool_plan = ctx.get("tool_plan") or []
+                    qt = QuestionType(qt_value) if qt_value in getattr(QuestionType, "_value2member_map_", {}) else QuestionType.UNKNOWN
+                    engine = ReasoningEngineV1()
+                    evaluation = engine.evaluate_evidence(collected_tool_results, requirement)
+                    conflicts = engine.detect_conflicts(collected_tool_results)
+                    ranked_evidence = engine.rank_evidence(collected_tool_results)
+                    outline = engine.build_answer_outline(qt, requirement, ranked_evidence)
+                    reasoning_message = self._format_reasoning_engine_v1_message(qt_value, requirement, tool_plan, evaluation, conflicts, outline)
+                    messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Reasoning Plan"))]
+                    messages.append({"role": "system", "content": reasoning_message})
+                except Exception:
+                    pass
 
             buffered_content = ""
+            llm_entered = True
+            print("STEP_7 BEFORE LLM")
+            _brain_stream_trace(
+                "CALL LLM.stream",
+                Reason="prefetched_tools_followup",
+                conversation_id=conversation_id,
+            )
             for chunk in self._call_llm_stream(messages, tools=None):
                 if chunk.get("type") == "token":
                     buffered_content += chunk.get("content", "")
                 yield chunk
-            patched_content = self._append_gap_collection_notice(user_message, buffered_content)
+            patched_content = self._apply_gap_notice_policy(user_message, buffered_content)
             if patched_content != buffered_content:
                 for ch in patched_content[len(buffered_content):]:
                     yield {"type": "token", "content": ch}
-            yield {"type": "done"}
+            yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+            workflow_outputs = {
+                "path": "prefetched_tools_followup",
+                "full_content_length": len(patched_content),
+            }
+            _brain_stream_trace(
+                "RETURN_ID=M",
+                Reason="prefetched_tools_followup_return",
+                conversation_id=conversation_id,
+            )
             return
 
         first_pass_content = ""
-        for chunk in self._call_llm_stream(messages, tools=TOOLS, tool_choice=tool_choice):
+        llm_entered = True
+        print("STEP_7 BEFORE LLM")
+        _brain_stream_trace(
+            "CALL LLM.stream",
+            Reason="first_pass_tools_auto",
+            conversation_id=conversation_id,
+        )
+        for chunk in self._call_llm_stream(messages, tools=None if assistant_mode else TOOLS, tool_choice=tool_choice):
             chunk_type = chunk.get("type")
             if chunk_type == "error":
                 yield chunk
-                yield {"type": "done"}
+                yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+                workflow_outputs = {
+                    "path": "first_pass_error",
+                    "chunk": chunk,
+                }
+                _brain_stream_trace(
+                    "RETURN_ID=N",
+                    Reason="llm_stream_error",
+                    conversation_id=conversation_id,
+                )
                 return
             if chunk_type == "tool_call":
                 first_tool_calls = chunk.get("calls") or []
@@ -2597,6 +4647,7 @@ class Brain:
         if first_tool_calls:
             assistant_tool_message = {"role": "assistant", "content": "", "tool_calls": first_tool_calls}
             tool_results = []
+            collected_tool_results: list[dict] = []
 
             for tool_call in first_tool_calls:
                 function_name = tool_call.get("function", {}).get("name", "")
@@ -2614,32 +4665,101 @@ class Brain:
                     parsed_result = json.loads(tool_result.get("content", "{}"))
                 except Exception:
                     parsed_result = {}
+                if isinstance(parsed_result, dict) and isinstance(parsed_result.get("evidence"), list):
+                    collected_evidence.extend(parsed_result.get("evidence") or [])
+                if isinstance(parsed_result, dict):
+                    collected_tool_results.append(parsed_result)
                 if self._should_fallback_after_tool(function_name, parsed_result):
-                    fallback = self._append_gap_collection_notice(user_message, self._fallback_reply(user_message, history))
+                    fallback = self._apply_gap_notice_policy(user_message, self._fallback_reply(user_message, history))
                     for ch in fallback:
                         yield {"type": "token", "content": ch}
-                    yield {"type": "done"}
+                    yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
+                    workflow_outputs = {
+                        "path": "tool_call_fallback",
+                        "tool_name": function_name,
+                    }
+                    _brain_stream_trace(
+                        "RETURN_ID=O",
+                        Reason="tool_call_fallback",
+                        conversation_id=conversation_id,
+                    )
                     return
 
-            messages.append(assistant_tool_message)
-            messages.extend(tool_results)
+            composer_enabled = feature_flag_enabled("ANSWER_COMPOSER_ENABLED")
+            if composer_enabled and collected_tool_results:
+                answer_context = self._build_answer_context(user_message, collected_tool_results)
+                if answer_context:
+                    messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Answer Context"))]
+                    messages.append({"role": "system", "content": self._format_answer_context(answer_context)})
+                buffered_content = ""
+                llm_entered = True
+                print("STEP_7 BEFORE LLM")
+                _brain_stream_trace(
+                    "CALL LLM.stream",
+                    Reason="answer_composer_tool_calls",
+                    conversation_id=conversation_id,
+                )
+                for chunk in self._call_llm_stream(messages, tools=None):
+                    if chunk.get("type") == "token":
+                        buffered_content += chunk.get("content", "")
+                    yield chunk
+                patched_content = self._apply_gap_notice_policy(user_message, buffered_content)
+                if patched_content != buffered_content:
+                    for ch in patched_content[len(buffered_content):]:
+                        yield {"type": "token", "content": ch}
+            else:
+                messages.append(assistant_tool_message)
+                messages.extend(tool_results)
+                if reasoning_enabled and collected_tool_results:
+                    try:
+                        from services.reasoning_engine_v1 import QuestionType
 
-            buffered_content = ""
-            for chunk in self._call_llm_stream(messages, tools=None):
-                if chunk.get("type") == "token":
-                    buffered_content += chunk.get("content", "")
-                yield chunk
-            patched_content = self._append_gap_collection_notice(user_message, buffered_content)
-            if patched_content != buffered_content:
-                for ch in patched_content[len(buffered_content):]:
-                    yield {"type": "token", "content": ch}
+                        ctx = getattr(self, "_reasoning_v1_context", {}) or {}
+                        qt_value = str(ctx.get("question_type") or "UNKNOWN")
+                        from services.core_models import Requirement as CoreRequirement
+
+                        req = ctx.get("requirement")
+                        requirement = req if isinstance(req, CoreRequirement) else CoreRequirement.from_dict(req or {})
+                        tool_plan = ctx.get("tool_plan") or []
+                        qt = QuestionType(qt_value) if qt_value in getattr(QuestionType, "_value2member_map_", {}) else QuestionType.UNKNOWN
+                        engine = self._get_reasoning_engine_service(conversation_id=conversation_id)
+                        if engine is None:
+                            from services.reasoning_engine_v1 import ReasoningEngineV1
+
+                            engine = ReasoningEngineV1()
+                        evaluation = engine.evaluate_evidence(collected_tool_results, requirement)
+                        conflicts = engine.detect_conflicts(collected_tool_results)
+                        ranked_evidence = engine.rank_evidence(collected_tool_results)
+                        outline = engine.build_answer_outline(qt, requirement, ranked_evidence)
+                        reasoning_message = self._format_reasoning_engine_v1_message(qt_value, requirement.to_dict(), tool_plan, evaluation, conflicts, outline)
+                        messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Reasoning Plan"))]
+                        messages.append({"role": "system", "content": reasoning_message})
+                    except Exception:
+                        pass
+
+                buffered_content = ""
+                llm_entered = True
+                print("STEP_7 BEFORE LLM")
+                _brain_stream_trace(
+                    "CALL LLM.stream",
+                    Reason="tool_calls_followup",
+                    conversation_id=conversation_id,
+                )
+                for chunk in self._call_llm_stream(messages, tools=None):
+                    if chunk.get("type") == "token":
+                        buffered_content += chunk.get("content", "")
+                    yield chunk
+                patched_content = self._apply_gap_notice_policy(user_message, buffered_content)
+                if patched_content != buffered_content:
+                    for ch in patched_content[len(buffered_content):]:
+                        yield {"type": "token", "content": ch}
         elif first_pass_content:
-            patched_content = self._append_gap_collection_notice(user_message, first_pass_content)
+            patched_content = self._apply_gap_notice_policy(user_message, first_pass_content)
             if patched_content != first_pass_content:
                 for ch in patched_content[len(first_pass_content):]:
                     yield {"type": "token", "content": ch}
 
-        yield {"type": "done"}
+        yield {"type": "done", "evidence": self._merge_evidence(collected_evidence)}
 
     def _call_llm(
         self,
@@ -2690,85 +4810,94 @@ class Brain:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice or "auto"
 
-        try:
-            pending_tool_calls: dict[int, dict[str, Any]] = {}
-            with httpx.Client(timeout=60) as client:
-                with client.stream(
-                    "POST",
-                    f"{DEEPSEEK_BASE_URL}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                ) as resp:
-                    resp.raise_for_status()
-                    for line in resp.iter_lines():
-                        if not line:
-                            continue
-                        if isinstance(line, bytes):
-                            decoded = line.decode("utf-8", errors="ignore")
-                        else:
-                            decoded = line
-                        if decoded.startswith(":") or not decoded.startswith("data: "):
-                            continue
+        with trace_span("LLM", input_obj={"model": self.model, "message_count": len(messages or [])}) as span:
+            try:
+                buffered_content = ""
+                pending_tool_calls: dict[int, dict[str, Any]] = {}
+                with httpx.Client(timeout=60) as client:
+                    with client.stream(
+                        "POST",
+                        f"{DEEPSEEK_BASE_URL}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    ) as resp:
+                        resp.raise_for_status()
+                        for line in resp.iter_lines():
+                            if not line:
+                                continue
+                            if isinstance(line, bytes):
+                                decoded = line.decode("utf-8", errors="ignore")
+                            else:
+                                decoded = line
+                            if decoded.startswith(":") or not decoded.startswith("data: "):
+                                continue
 
-                        data = decoded[6:]
-                        if data == "[DONE]":
-                            break
+                            data = decoded[6:]
+                            if data == "[DONE]":
+                                break
 
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
+                            try:
+                                chunk = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
 
-                        choice = (chunk.get("choices") or [{}])[0]
-                        delta = choice.get("delta") or {}
-                        finish_reason = choice.get("finish_reason")
+                            choice = (chunk.get("choices") or [{}])[0]
+                            delta = choice.get("delta") or {}
+                            finish_reason = choice.get("finish_reason")
 
-                        content = delta.get("content", "")
-                        if content:
-                            yield {"type": "token", "content": content}
+                            content = delta.get("content", "")
+                            if content:
+                                buffered_content += content
+                                yield {"type": "token", "content": content}
 
-                        for tool_delta in delta.get("tool_calls") or []:
-                            index = tool_delta.get("index", 0)
-                            pending = pending_tool_calls.setdefault(
-                                index,
-                                {
-                                    "id": "",
-                                    "type": "function",
-                                    "function": {"name": "", "arguments": ""},
-                                },
-                            )
-                            if tool_delta.get("id"):
-                                pending["id"] = tool_delta["id"]
-                            if tool_delta.get("type"):
-                                pending["type"] = tool_delta["type"]
+                            for tool_delta in delta.get("tool_calls") or []:
+                                index = tool_delta.get("index", 0)
+                                pending = pending_tool_calls.setdefault(
+                                    index,
+                                    {
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""},
+                                    },
+                                )
+                                if tool_delta.get("id"):
+                                    pending["id"] = tool_delta["id"]
+                                if tool_delta.get("type"):
+                                    pending["type"] = tool_delta["type"]
 
-                            function_delta = tool_delta.get("function") or {}
-                            if function_delta.get("name"):
-                                pending["function"]["name"] += function_delta["name"]
-                            if function_delta.get("arguments"):
-                                pending["function"]["arguments"] += function_delta["arguments"]
+                                function_delta = tool_delta.get("function") or {}
+                                if function_delta.get("name"):
+                                    pending["function"]["name"] += function_delta["name"]
+                                if function_delta.get("arguments"):
+                                    pending["function"]["arguments"] += function_delta["arguments"]
 
-                        if finish_reason == "tool_calls" and pending_tool_calls:
-                            ordered_calls = [
-                                pending_tool_calls[idx]
-                                for idx in sorted(pending_tool_calls.keys())
-                            ]
-                            yield {"type": "tool_call", "calls": ordered_calls}
-                            pending_tool_calls = {}
-                        elif finish_reason == "stop":
-                            continue
+                            if finish_reason == "tool_calls" and pending_tool_calls:
+                                ordered_calls = [pending_tool_calls[idx] for idx in sorted(pending_tool_calls.keys())]
+                                yield {"type": "tool_call", "calls": ordered_calls}
+                                pending_tool_calls = {}
+                            elif finish_reason == "stop":
+                                continue
 
-            if pending_tool_calls:
-                ordered_calls = [
-                    pending_tool_calls[idx]
-                    for idx in sorted(pending_tool_calls.keys())
-                ]
-                yield {"type": "tool_call", "calls": ordered_calls}
-        except Exception as exc:
-            yield {"type": "error", "message": str(exc)}
+                if pending_tool_calls:
+                    ordered_calls = [pending_tool_calls[idx] for idx in sorted(pending_tool_calls.keys())]
+                    yield {"type": "tool_call", "calls": ordered_calls}
+                # #region debug-point C:llm-final-answer
+                debug_answer_event(
+                    "LLM Final Answer",
+                    buffered_content,
+                    trace_id=str(getattr(self, "conversation_id", "") or ""),
+                    hypothesis_id="C",
+                    location="brain.py:_call_llm_stream",
+                    extra={"native_stream": True, "fallback_stream": False, "message_count": len(messages or [])},
+                )
+                # #endregion
+                span.set_output_obj({"status": "ok"})
+            except Exception as exc:
+                span.set_output_obj({"status": "error", "message": str(exc)})
+                yield {"type": "error", "message": str(exc)}
 
     def _query_database(
         self,
@@ -2779,10 +4908,21 @@ class Brain:
         limit: int = 10,
     ) -> dict:
         try:
-            from models.database import IntelligenceItem, get_db
+            from models.database import IntelligenceItem
             from sqlalchemy import desc, or_
 
-            db = next(get_db())
+            tool_name = "query_database"
+            function_name = "_query_database"
+            self._tool_diag_print(ToolName=tool_name, ENTER_TOOL=function_name)
+            acquire_result = self._acquire_tool_db_session(
+                tool_name=tool_name,
+                function_name=function_name,
+                line_no=inspect.currentframe().f_lineno + 1,
+                params={"scope": scope, "country": country, "entity": entity, "keywords": list(keywords or []), "limit": limit},
+            )
+            if acquire_result.get("status") == "error":
+                return acquire_result
+            db = acquire_result["db"]
             try:
                 query = db.query(IntelligenceItem)
 
@@ -2812,9 +4952,19 @@ class Brain:
                 if text_filters:
                     query = query.filter(or_(*text_filters))
 
-                items = query.order_by(desc(IntelligenceItem.ingested_at)).limit(max(1, min(limit, 20))).all()
+                final_query = query.order_by(desc(IntelligenceItem.ingested_at)).limit(max(1, min(limit, 20)))
+                items = self._tool_diag_sql(
+                    tool_name=tool_name,
+                    function_name=function_name,
+                    step_name="STEP_2",
+                    line_no=inspect.currentframe().f_lineno + 1,
+                    query_or_sql=final_query,
+                    params={"scope": scope, "country": country, "entity": entity, "keywords": list(keywords or []), "limit": limit},
+                    executor=lambda: final_query.all(),
+                )
 
                 results = []
+                evidence = []
                 seen_titles = set()
                 source_stats: dict[str, int] = {}
                 for item in items:
@@ -2843,8 +4993,13 @@ class Brain:
                             "entity_name": item.entity_name or "",
                         }
                     )
+                    evidence_item = self._evidence_from_intelligence_item(item, evidence_type="intelligence_item")
+                    if evidence_item:
+                        if safe_url:
+                            evidence_item["url"] = safe_url
+                        evidence.append(evidence_item)
 
-                return {
+                payload = {
                     "status": "success",
                     "count": len(results),
                     "query_summary": {
@@ -2857,6 +5012,9 @@ class Brain:
                     "source_breakdown": source_stats,
                     "items": results,
                 }
+                payload["evidence"] = self._merge_evidence(evidence)
+                payload["answer"] = self._format_intelligence_result(payload)
+                return payload
             finally:
                 db.close()
         except Exception as exc:
@@ -2871,10 +5029,21 @@ class Brain:
         limit: int = 10,
     ) -> dict:
         try:
-            from models.database import IntelligenceItem, get_db
+            from models.database import IntelligenceItem
             from sqlalchemy import desc, func, or_
 
-            db = next(get_db())
+            tool_name = "query_intelligence"
+            function_name = "_query_intelligence"
+            self._tool_diag_print(ToolName=tool_name, ENTER_TOOL=function_name)
+            acquire_result = self._acquire_tool_db_session(
+                tool_name=tool_name,
+                function_name=function_name,
+                line_no=inspect.currentframe().f_lineno + 1,
+                params={"scope": scope, "country": country, "entity": entity, "keywords": list(keywords or []), "limit": limit},
+            )
+            if acquire_result.get("status") == "error":
+                return acquire_result
+            db = acquire_result["db"]
             try:
                 query = db.query(IntelligenceItem)
 
@@ -2916,24 +5085,63 @@ class Brain:
                     query = query.filter(or_(*text_filters))
 
                 order_clause = desc(func.coalesce(IntelligenceItem.published_at, IntelligenceItem.ingested_at))
-                items = (
+                relaxed_match_attempted = False
+                relaxed_match_hit = False
+                initial_query = (
                     query.order_by(order_clause)
                     .limit(max(1, min(limit, 20)))
-                    .all()
+                )
+                items = self._tool_diag_sql(
+                    tool_name=tool_name,
+                    function_name=function_name,
+                    step_name="STEP_2",
+                    line_no=inspect.currentframe().f_lineno + 1,
+                    query_or_sql=initial_query,
+                    params={"scope": scope, "country": country, "entity": entity, "keywords": list(keywords or []), "limit": limit},
+                    executor=lambda: initial_query.all(),
                 )
 
                 # Global news prompts often contain broad phrases like "最近全球基督教有什么新闻".
                 # If that phrase was extracted as a single keyword, retry without text filters.
                 if not items and scope == "global" and text_filters:
-                    items = (
+                    relaxed_global_query = (
                         db.query(IntelligenceItem)
                         .filter(IntelligenceItem.scope == "global")
                         .order_by(order_clause)
                         .limit(max(1, min(limit, 20)))
-                        .all()
                     )
+                    items = self._tool_diag_sql(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_3",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        query_or_sql=relaxed_global_query,
+                        params={"scope": "global", "country": country, "keywords": list(keywords or []), "reason": "relaxed_match"},
+                        executor=lambda: relaxed_global_query.all(),
+                    )
+                    relaxed_match_attempted = True
+                    relaxed_match_hit = bool(items)
+                if not items and scope == "country" and country and text_filters:
+                    relaxed_country_query = (
+                        db.query(IntelligenceItem)
+                        .filter(IntelligenceItem.country == country)
+                        .order_by(order_clause)
+                        .limit(max(1, min(limit, 20)))
+                    )
+                    items = self._tool_diag_sql(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_4",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        query_or_sql=relaxed_country_query,
+                        params={"scope": "country", "country": country, "keywords": list(keywords or []), "reason": "relaxed_match"},
+                        executor=lambda: relaxed_country_query.all(),
+                    )
+                    relaxed_match_attempted = True
+                    relaxed_match_hit = bool(items)
 
                 results = []
+                evidence = []
                 source_stats: dict[str, int] = {}
                 seen_urls = set()
                 for item in items:
@@ -2959,20 +5167,42 @@ class Brain:
                             "entity_name": item.entity_name or "",
                         }
                     )
+                    evidence_item = self._evidence_from_intelligence_item(item, evidence_type="intelligence_item")
+                    if evidence_item:
+                        evidence.append(evidence_item)
 
-                return {
+                payload = {
                     "status": "success",
                     "count": len(results),
                     "query_summary": {
                         "scope": scope,
                         "country": country,
                         "entity": entity,
+                        "keywords": list(keywords or []),
                         "total_found": len(items),
                         "unique_results": len(results),
+                        "relaxed_match_attempted": relaxed_match_attempted,
+                        "relaxed_match_hit": relaxed_match_hit,
+                        "sources_checked": [
+                            "IntelligenceItem.title",
+                            "IntelligenceItem.content",
+                            "IntelligenceItem.entity_name",
+                            "IntelligenceItem.source_url",
+                        ],
+                        "missing_fields": ["url", "source_name", "entity_name"],
+                        "no_hit_reason": (
+                            ""
+                            if results
+                            else "没有满足当前国家/实体/关键词交集的现成情报记录，或命中记录缺少可用来源链接"
+                        ),
+                        "needs_collection": not bool(results),
                     },
                     "source_breakdown": source_stats,
                     "items": results,
                 }
+                payload["evidence"] = self._merge_evidence(evidence)
+                payload["answer"] = self._format_intelligence_result(payload)
+                return payload
             finally:
                 db.close()
         except Exception as exc:
@@ -3016,7 +5246,7 @@ class Brain:
                 if not org:
                     return {"status": "not_found", "message": f"未找到 {normalized_name or org_name} 的联系信息"}
 
-                return {
+                payload = {
                     "status": "found",
                     "org_name": org.name,
                     "country": org.country,
@@ -3028,6 +5258,15 @@ class Brain:
                     "source_name": org.source_name or "机构档案",
                     "source_url": org.source_url or org.official_website or "",
                 }
+                payload["evidence"] = self._merge_evidence([self._evidence_from_organization_profile(org, evidence_type="organization_contacts")])
+                payload["answer"] = (
+                    f"{payload['org_name']} ({payload.get('country') or 'N/A'})\n"
+                    f"website={payload.get('website')}\n"
+                    f"email={payload.get('email')}\n"
+                    f"phone={payload.get('phone')}\n"
+                    f"leader={payload.get('leader_name')} ({payload.get('leader_title')})"
+                )
+                return payload
             finally:
                 db.close()
         except Exception as exc:
@@ -3851,15 +6090,21 @@ class Brain:
         description: str = "",
         priority: str = "medium",
         entity_name: str = "",
+        mission_id: str = "",
     ) -> dict:
         """创建任务并写入数据库"""
         try:
-            from models.database import KnowledgeEntity, OrganizationProfile, Task, get_db, init_db
+            from models.database import KnowledgeEntity, Mission, OrganizationProfile, Task, get_db, init_db
 
             init_db()
             db = next(get_db())
             try:
                 entity_id = None
+                normalized_mission_id = (mission_id or "").strip() or None
+                if normalized_mission_id:
+                    mission = db.query(Mission).filter(Mission.id == normalized_mission_id).first()
+                    if not mission:
+                        return {"status": "error", "message": "创建任务失败: Mission not found"}
                 normalized_entity_name = (entity_name or "").strip()
                 if normalized_entity_name:
                     entity = (
@@ -3895,9 +6140,10 @@ class Brain:
                 task = Task(
                     title=title,
                     description=description,
-                    priority=priority or "medium",
-                    status="pending",
+                    priority=None if normalized_mission_id else (priority or "medium"),
+                    status=None if normalized_mission_id else "pending",
                     entity_id=entity_id,
+                    mission_id=normalized_mission_id,
                 )
                 db.add(task)
                 db.commit()
@@ -4117,31 +6363,66 @@ class Brain:
             "summary": "",
         }
         try:
-            from models.database import FundingRound, Investment, Investor, KnowledgeEntity, OrganizationProfile, get_db
+            from models.database import FundingRound, Investment, Investor, KnowledgeEntity, OrganizationProfile
 
-            db = next(get_db())
+            tool_name = "query_graph"
+            function_name = "_query_graph"
+            self._tool_diag_print(ToolName=tool_name, ENTER_TOOL=function_name)
+            acquire_result = self._acquire_tool_db_session(
+                tool_name=tool_name,
+                function_name=function_name,
+                line_no=inspect.currentframe().f_lineno + 1,
+                params={"entity_name": entity_name, "relation_type": relation_type, "depth": depth, "limit": limit},
+            )
+            if acquire_result.get("status") == "error":
+                return acquire_result
+            db = acquire_result["db"]
             try:
                 counterpart_name = ""
                 if "||" in entity_name:
                     entity_name, counterpart_name = [part.strip() for part in entity_name.split("||", 1)]
 
-                center_ke = (
+                center_ke_query = (
                     db.query(KnowledgeEntity)
                     .filter(KnowledgeEntity.name.ilike(f"%{entity_name}%"))
                     .order_by(KnowledgeEntity.ingested_at.desc())
-                    .first()
                 )
-                center_org = (
+                center_ke = self._tool_diag_sql(
+                    tool_name=tool_name,
+                    function_name=function_name,
+                    step_name="STEP_2",
+                    line_no=inspect.currentframe().f_lineno + 1,
+                    query_or_sql=center_ke_query,
+                    params={"entity_name": entity_name, "target": "KnowledgeEntity"},
+                    executor=lambda: center_ke_query.first(),
+                )
+                center_org_query = (
                     db.query(OrganizationProfile)
                     .filter(OrganizationProfile.name.ilike(f"%{entity_name}%"))
                     .order_by(OrganizationProfile.updated_at.desc())
-                    .first()
                 )
-                center_investor = (
+                center_org = self._tool_diag_sql(
+                    tool_name=tool_name,
+                    function_name=function_name,
+                    step_name="STEP_3",
+                    line_no=inspect.currentframe().f_lineno + 1,
+                    query_or_sql=center_org_query,
+                    params={"entity_name": entity_name, "target": "OrganizationProfile"},
+                    executor=lambda: center_org_query.first(),
+                )
+                center_investor_query = (
                     db.query(Investor)
                     .filter(Investor.name.ilike(f"%{entity_name}%"))
                     .order_by(Investor.updated_at.desc())
-                    .first()
+                )
+                center_investor = self._tool_diag_sql(
+                    tool_name=tool_name,
+                    function_name=function_name,
+                    step_name="STEP_4",
+                    line_no=inspect.currentframe().f_lineno + 1,
+                    query_or_sql=center_investor_query,
+                    params={"entity_name": entity_name, "target": "Investor"},
+                    executor=lambda: center_investor_query.first(),
                 )
 
                 if not center_ke and center_org:
@@ -4184,7 +6465,15 @@ class Brain:
 
                 center_tags = set()
                 if center_org:
-                    center_tags = self._get_org_tag_codes(db, center_org.id, center_org.name, center_org.member_estimate)
+                    center_tags = self._tool_diag_step(
+                        tool_name=tool_name,
+                        function_name=function_name,
+                        step_name="STEP_5",
+                        line_no=inspect.currentframe().f_lineno + 1,
+                        step_detail=f"call _get_org_tag_codes({center_org.id})",
+                        func=lambda: self._get_org_tag_codes(db, center_org.id, center_org.name, center_org.member_estimate),
+                        params={"organization_id": center_org.id, "name": center_org.name},
+                    )
 
                 if relation_type in ("all", "investment"):
                     entity_ids = []
@@ -4194,18 +6483,34 @@ class Brain:
                         entity_ids.append(center_org.id)
 
                     for entity_id in entity_ids:
-                        rounds = (
+                        rounds_query = (
                             db.query(FundingRound)
                             .filter(FundingRound.entity_id == entity_id)
                             .order_by(FundingRound.announced_date.desc(), FundingRound.id.desc())
-                            .all()
+                        )
+                        rounds = self._tool_diag_sql(
+                            tool_name=tool_name,
+                            function_name=function_name,
+                            step_name="STEP_6",
+                            line_no=inspect.currentframe().f_lineno + 1,
+                            query_or_sql=rounds_query,
+                            params={"entity_id": entity_id},
+                            executor=lambda: rounds_query.all(),
                         )
                         for fr in rounds:
-                            investments = (
+                            investments_query = (
                                 db.query(Investment, Investor)
                                 .join(Investor, Investment.investor_id == Investor.id)
                                 .filter(Investment.funding_round_id == fr.id)
-                                .all()
+                            )
+                            investments = self._tool_diag_sql(
+                                tool_name=tool_name,
+                                function_name=function_name,
+                                step_name="STEP_7",
+                                line_no=inspect.currentframe().f_lineno + 1,
+                                query_or_sql=investments_query,
+                                params={"funding_round_id": fr.id},
+                                executor=lambda: investments_query.all(),
                             )
                             for inv, investor in investments:
                                 result["direct_relations"].append(
@@ -4235,13 +6540,21 @@ class Brain:
                                 )
 
                     if center_investor:
-                        outgoing = (
+                        outgoing_query = (
                             db.query(Investment, FundingRound, KnowledgeEntity)
                             .join(FundingRound, Investment.funding_round_id == FundingRound.id)
                             .join(KnowledgeEntity, FundingRound.entity_id == KnowledgeEntity.id)
                             .filter(Investment.investor_id == center_investor.id)
                             .order_by(FundingRound.announced_date.desc(), FundingRound.id.desc())
-                            .all()
+                        )
+                        outgoing = self._tool_diag_sql(
+                            tool_name=tool_name,
+                            function_name=function_name,
+                            step_name="STEP_8",
+                            line_no=inspect.currentframe().f_lineno + 1,
+                            query_or_sql=outgoing_query,
+                            params={"investor_id": center_investor.id},
+                            executor=lambda: outgoing_query.all(),
                         )
                         for inv, fr, entity in outgoing:
                             result["direct_relations"].append(
@@ -4273,20 +6586,36 @@ class Brain:
                 if relation_type in ("all", "partnership", "collaboration"):
                     comparable_org = center_org
                     if not comparable_org and center_ke:
-                        comparable_org = (
+                        comparable_org_query = (
                             db.query(OrganizationProfile)
                             .filter(OrganizationProfile.name.ilike(f"%{center_name}%"))
                             .order_by(OrganizationProfile.updated_at.desc())
-                            .first()
+                        )
+                        comparable_org = self._tool_diag_sql(
+                            tool_name=tool_name,
+                            function_name=function_name,
+                            step_name="STEP_9",
+                            line_no=inspect.currentframe().f_lineno + 1,
+                            query_or_sql=comparable_org_query,
+                            params={"center_name": center_name},
+                            executor=lambda: comparable_org_query.first(),
                         )
                     if comparable_org:
-                        candidates = (
+                        candidates_query = (
                             db.query(OrganizationProfile)
                             .filter(OrganizationProfile.id != comparable_org.id)
                             .filter(OrganizationProfile.country == comparable_org.country)
                             .order_by(OrganizationProfile.updated_at.desc())
                             .limit(max(limit * 3, 12))
-                            .all()
+                        )
+                        candidates = self._tool_diag_sql(
+                            tool_name=tool_name,
+                            function_name=function_name,
+                            step_name="STEP_10",
+                            line_no=inspect.currentframe().f_lineno + 1,
+                            query_or_sql=candidates_query,
+                            params={"organization_id": comparable_org.id, "country": comparable_org.country},
+                            executor=lambda: candidates_query.all(),
                         )
                         for org in candidates:
                             score = 0
@@ -4346,14 +6675,30 @@ class Brain:
                                 )
 
                     if counterpart_name:
-                        counterpart = (
+                        counterpart_query = (
                             db.query(OrganizationProfile)
                             .filter(OrganizationProfile.name.ilike(f"%{counterpart_name}%"))
                             .order_by(OrganizationProfile.updated_at.desc())
-                            .first()
+                        )
+                        counterpart = self._tool_diag_sql(
+                            tool_name=tool_name,
+                            function_name=function_name,
+                            step_name="STEP_11",
+                            line_no=inspect.currentframe().f_lineno + 1,
+                            query_or_sql=counterpart_query,
+                            params={"counterpart_name": counterpart_name},
+                            executor=lambda: counterpart_query.first(),
                         )
                         if counterpart:
-                            counterpart_tags = self._get_org_tag_codes(db, counterpart.id, counterpart.name, counterpart.member_estimate)
+                            counterpart_tags = self._tool_diag_step(
+                                tool_name=tool_name,
+                                function_name=function_name,
+                                step_name="STEP_12",
+                                line_no=inspect.currentframe().f_lineno + 1,
+                                step_detail=f"call _get_org_tag_codes({counterpart.id})",
+                                func=lambda: self._get_org_tag_codes(db, counterpart.id, counterpart.name, counterpart.member_estimate),
+                                params={"organization_id": counterpart.id, "name": counterpart.name},
+                            )
                             reasons = []
                             confidence = 0.42
                             if comparable_org.country and counterpart.country == comparable_org.country:
@@ -5633,7 +7978,7 @@ class Brain:
         ]
 
     def _build_intelligence_tool_calls(self, user_message: str) -> list[dict]:
-        if not self._looks_like_news_query(user_message):
+        if not (self._looks_like_news_query(user_message) or self._looks_like_intel_query(user_message)):
             return []
         args = self._build_intelligence_query_args(user_message)
         return [
@@ -5715,6 +8060,7 @@ class Brain:
 
     def _continue_after_tool_calls(self, messages: list[dict], tool_calls: list[dict]) -> Optional[dict]:
         tool_results = []
+        collected_tool_results: list[dict] = []
         for tool_call in tool_calls:
             raw_arguments = tool_call.get("function", {}).get("arguments") or "{}"
             try:
@@ -5729,12 +8075,50 @@ class Brain:
                 parsed_result = json.loads(result.get("content", "{}"))
             except Exception:
                 parsed_result = {}
+            if isinstance(parsed_result, dict):
+                collected_tool_results.append(parsed_result)
             if self._should_fallback_after_tool(function_name, parsed_result):
                 return None
+
+        composer_enabled = feature_flag_enabled("ANSWER_COMPOSER_ENABLED")
+        if composer_enabled and collected_tool_results:
+            messages = list(messages)
+            answer_context = self._build_answer_context(messages[-1].get("content", "") if messages else "", collected_tool_results)
+            if answer_context:
+                messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Answer Context"))]
+                messages.append({"role": "system", "content": self._format_answer_context(answer_context)})
+            return self._call_llm(messages, tools=None)
 
         messages = list(messages)
         messages.append({"role": "assistant", "content": "", "tool_calls": tool_calls})
         messages.extend(tool_results)
+        reasoning_enabled = feature_flag_enabled("REASONING_ENGINE_V1_ENABLED")
+        if reasoning_enabled and collected_tool_results:
+            try:
+                from services.reasoning_engine_v1 import QuestionType
+
+                ctx = getattr(self, "_reasoning_v1_context", {}) or {}
+                qt_value = str(ctx.get("question_type") or "UNKNOWN")
+                from services.core_models import Requirement as CoreRequirement
+
+                req = ctx.get("requirement")
+                requirement = req if isinstance(req, CoreRequirement) else CoreRequirement.from_dict(req or {})
+                tool_plan = ctx.get("tool_plan") or []
+                qt = QuestionType(qt_value) if qt_value in getattr(QuestionType, "_value2member_map_", {}) else QuestionType.UNKNOWN
+                engine = self._get_reasoning_engine_service(conversation_id=str(getattr(self, "conversation_id", "") or ""))
+                if engine is None:
+                    from services.reasoning_engine_v1 import ReasoningEngineV1
+
+                    engine = ReasoningEngineV1()
+                evaluation = engine.evaluate_evidence(collected_tool_results, requirement)
+                conflicts = engine.detect_conflicts(collected_tool_results)
+                ranked_evidence = engine.rank_evidence(collected_tool_results)
+                outline = engine.build_answer_outline(qt, requirement, ranked_evidence)
+                reasoning_message = self._format_reasoning_engine_v1_message(qt_value, requirement.to_dict(), tool_plan, evaluation, conflicts, outline)
+                messages = [m for m in messages if not (m.get("role") == "system" and str(m.get("content") or "").startswith("Reasoning Plan"))]
+                messages.append({"role": "system", "content": reasoning_message})
+            except Exception:
+                pass
         return self._call_llm(messages, tools=None)
 
     def _execute_tool_call(self, tool_call: dict, function_args: dict) -> dict:
@@ -5744,11 +8128,11 @@ class Brain:
         func = self.available_functions.get(function_name)
         if func:
             try:
-                result = func(**function_args)
+                result = self._normalize_tool_result(function_name, func(**function_args))
             except TypeError as exc:
-                result = {"status": "error", "message": f"参数错误: {exc}"}
+                result = self._normalize_tool_result(function_name, {"status": "error", "message": f"参数错误: {exc}"})
         else:
-            result = {"status": "error", "message": f"未知工具: {function_name}"}
+            result = self._normalize_tool_result(function_name, {"status": "error", "message": f"未知工具: {function_name}"})
 
         return {
             "role": "tool",
@@ -6869,7 +9253,7 @@ class Brain:
         return any(token in lowered for token in ["联系", "联系人", "邮箱", "电话", "负责人", "对接"])
 
 
-def think(user_message: str, conversation_id: str, history: list | None = None) -> str:
+def think(user_message: str, conversation_id: str, history: list | None = None) -> dict:
     """外部调用入口"""
     brain = Brain()
     return brain.think(user_message, conversation_id, history)

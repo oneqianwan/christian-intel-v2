@@ -39,11 +39,302 @@ RSS_URL_OVERRIDES = {
     "https://www1.cbn.com/rss": "https://www1.cbn.com/rss/",
 }
 
+ACTIVE_FEEDS = {
+    "今日基督教 (Christianity Today)": "https://www.christianitytoday.com/rss/",
+    "基督邮报 (Christian Post)": "https://www.christianpost.com/rss",
+    "宗教新闻通讯社 (RNS)": "https://religionnews.com/feed/",
+    "Barna Group": "https://www.barna.com/feed/",
+    "世界福音联盟 (WEA)": "https://worldea.org/feed/",
+    "福音联盟 (TGC)": "http://www.thegospelcoalition.org/feed/",
+    # ===== 扩源 Sprint 2025-07-01：新增 7 个源 =====
+    "天主教通讯社 (CNA)": "https://www.catholicnewsagency.com/rss/news.xml",
+    "CBN新闻 (CBN News)": "https://www1.cbn.com/rss/cbnnews.xml",
+    "基督教头条 (Christian Headlines)": "https://www.christianheadlines.com/rss",
+    "世界杂志 (World Magazine)": "https://wng.org/rss.xml",
+    "Relevant杂志 (Relevant)": "https://relevantmagazine.com/feed/",
+    "Premier基督教新闻 (Premier UK)": "https://www.premierchristiannews.com/rss.xml",
+    "福音聚焦 (Evangelical Focus)": "https://evangelicalfocus.com/rss",
+}
+
+CHRISTIAN_KEYWORDS = [
+    "christian", "church", "jesus", "gospel", "bible", "faith",
+    "ministry", "pastor", "missionary", "denomination", "evangelical",
+    "catholic", "orthodox", "protestant", "baptist", "methodist",
+    "pentecostal", "presbyterian", "anglican", "lutheran",
+    "worship", "prayer", "theology", "christ", "salvation",
+    "christianity", "disciple", "congregation", "parish", "diocese",
+    "archbishop", "bishop", "pope", "vatican", "sermon",
+    "revival", "reformation", "saint", "apostle", "prophet",
+]
+
+CORE_CHRISTIAN_KEYWORDS = [
+    "christian", "church", "jesus", "gospel", "bible", "faith",
+    "god", "christ", "theology", "prayer", "worship", "ministry",
+    "pastor", "scripture", "disciple", "evangelical", "reformed",
+    "sermon", "salvation", "grace", "orthodox", "catholic",
+    "protestant", "baptist", "presbyterian", "anglican",
+]
+
+NON_CHRISTIAN_SIGNALS = [
+    "world cup", "fifa", "olympic", "nba", "nfl", "super bowl",
+    "haircut", "pinkwashing", "lgbtq", "transgender", "abortion",
+    "roe v wade", "election", "vote", "political", "democrat", "republican",
+    "disney", "netflix", "hollywood", "celebrity",
+    "climate change", "global warming", "el nino",
+]
+
+POLITICAL_SOCIAL_SIGNALS = [
+    "election", "vote", "voting", "political", "democrat", "republican",
+    "campaign", "ballot", "midterm", "primary",
+    "lgbtq", "transgender", "trans", "gay", "lesbian", "pride",
+    "same-sex", "homosexual",
+    "abortion", "roe v wade", "pro-choice", "pro-life",
+    "supreme court", "court ruling", "lawsuit", "legal battle",
+    "settlement", "appeal",
+    "israel-hamas", "gaza", "palestinian", "hamas",
+    "war in", "military conflict", "ceasefire",
+    "economy", "inflation", "recession", "stock market", "tariff",
+    "climate change", "global warming", "paris agreement",
+]
+
+COUNTRY_KEYWORDS = {
+    "united states": "United States",
+    "usa": "United States",
+    "america": "United States",
+    "american": "United States",
+    "nigeria": "Nigeria",
+    "nigerian": "Nigeria",
+    "brazil": "Brazil",
+    "brazilian": "Brazil",
+    "brasil": "Brazil",
+    "philippines": "Philippines",
+    "philippine": "Philippines",
+    "filipino": "Philippines",
+    "south korea": "South Korea",
+    "korean": "South Korea",
+    "korea": "South Korea",
+    "india": "India",
+    "indian": "India",
+    "united kingdom": "United Kingdom",
+    "uk": "United Kingdom",
+    "british": "United Kingdom",
+    "britain": "United Kingdom",
+    "england": "United Kingdom",
+    "australia": "Australia",
+    "australian": "Australia",
+    "canada": "Canada",
+    "canadian": "Canada",
+    "germany": "Germany",
+    "german": "Germany",
+    "deutschland": "Germany",
+    "kenya": "Kenya",
+    "kenyan": "Kenya",
+    "south africa": "South Africa",
+    "china": "China",
+    "chinese": "China",
+    "indonesia": "Indonesia",
+    "indonesian": "Indonesia",
+    "egypt": "Egypt",
+    "egyptian": "Egypt",
+    "mexico": "Mexico",
+    "mexican": "Mexico",
+    "israel": "Israel",
+    "israeli": "Israel",
+    "uganda": "Uganda",
+    "ghana": "Ghana",
+    "ethiopia": "Ethiopia",
+    "tanzania": "Tanzania",
+    "singapore": "Singapore",
+    "japan": "Japan",
+    "japanese": "Japan",
+    "france": "France",
+    "french": "France",
+    "russia": "Russia",
+    "russian": "Russia",
+    "syria": "Syria",
+    "syrian": "Syria",
+    "iraq": "Iraq",
+    "iraqi": "Iraq",
+    "iran": "Iran",
+    "iranian": "Iran",
+    "pakistan": "Pakistan",
+    "pakistani": "Pakistan",
+}
+
 
 def _strip_html(text: str) -> str:
     clean = re.sub(r"<[^>]+>", " ", text or "")
     clean = re.sub(r"\s+", " ", unescape(clean)).strip()
     return clean
+
+
+def is_christian_relevant(title: str, content: str, source_name: str = "") -> bool:
+    """
+    三层过滤：
+    L1: 必须有 Christian 关键词
+    L2: 非 Christian 信号不能超过阈值
+    L3 (RNS/TGC only): 标题级精细化过滤
+    """
+    text = f"{title or ''} {content or ''}".lower()
+    title_lower = (title or "").lower()
+
+    # ===== L1: 必须有 Christian 关键词 =====
+    has_christian = any(kw in text for kw in CHRISTIAN_KEYWORDS)
+    if not has_christian:
+        return False
+
+    # ===== L2: 全局非 Christian 信号检查 =====
+    non_christian_score = sum(1 for sig in NON_CHRISTIAN_SIGNALS if sig in text)
+    if non_christian_score >= 2:
+        return False
+
+    # ===== L3: RNS/TGC 精细化二次去噪 =====
+    if source_name in ["宗教新闻通讯社 (RNS)", "福音联盟 (TGC)"]:
+        has_core_in_title = any(kw in title_lower for kw in CORE_CHRISTIAN_KEYWORDS)
+        has_political_in_title = any(sig in title_lower for sig in POLITICAL_SOCIAL_SIGNALS)
+
+        # 标题有政治/社会硬信号但没有 Christian 核心词，直接丢弃。
+        if has_political_in_title and not has_core_in_title:
+            return False
+
+        christian_count = sum(1 for kw in CHRISTIAN_KEYWORDS if kw in text)
+        if christian_count < 2 and not has_core_in_title:
+            return False
+
+        strong_christian_signals = [
+            "church", "jesus", "gospel", "bible", "pastor", "ministry",
+            "worship", "prayer", "sermon", "missionary", "theology",
+            "christianity", "christian school", "christian college",
+            "evangelical", "catholic", "orthodox",
+        ]
+        has_strong_signal = any(signal in title_lower for signal in strong_christian_signals)
+
+        if source_name == "福音联盟 (TGC)":
+            culture_review_signals = [
+                "book review", "movie", "film", "album", "music review",
+                "tv show", "television", "netflix", "podcast review",
+            ]
+            is_culture_review = any(signal in title_lower for signal in culture_review_signals)
+            if is_culture_review and not has_strong_signal:
+                return False
+
+    # ===== Step 4.1: Title Pattern 定向黑名单 =====
+    if source_name == "宗教新闻通讯社 (RNS)":
+        policy_law_patterns = [
+            "court", "judge", "ruling", "lawsuit", "legal", "law ",
+            "supreme court", "appeals court", "district court",
+            "election", "vote", "ballot", "voting", "elect ",
+            "senate", "house of", "congress", "legislation", "bill ",
+            "policy", "executive order", "government",
+        ]
+        institutional_signals = [
+            "church", "churches", "denomination", "diocese", "parish",
+            "ministry", "ministries", "mission", "missions",
+            "seminary", "theological", "christian school", "christian college",
+            "catholic", "baptist", "methodist", "presbyterian", "anglican",
+            "evangelical", "pentecostal", "orthodox",
+            "pope", "vatican", "archbishop", "bishop", "cardinal",
+            "pastor", "priest", "reverend", "clergy",
+        ]
+        is_policy_law = any(pattern in title_lower for pattern in policy_law_patterns)
+        has_institution = any(signal in title_lower for signal in institutional_signals)
+        if is_policy_law and not has_institution:
+            return False
+
+        war_patterns = [
+            "war ", "conflict", "gaza", "hamas", "israeli", "palestinian",
+            "ceasefire", "hostage", "airstrike", "military",
+        ]
+        response_signals = [
+            "church", "churches", "christian", "evangelical", "catholic",
+            "ministry", "ministries", "mission", "aid", "relief",
+            "prayer", "pray", "pastor", "bishop",
+        ]
+        is_war = any(pattern in title_lower for pattern in war_patterns)
+        has_response = any(signal in title_lower for signal in response_signals)
+        if is_war and not has_response:
+            return False
+
+    if source_name == "福音联盟 (TGC)":
+        culture_consumption_patterns = [
+            "book review", "review: ", "review -", "review --",
+            "movie", "film ", "tv series", "television", "netflix",
+            "album", "music review", "podcast",
+            "what ", "teaches us", "lessons from",
+            "how to ", "why we ", "should christians",
+            "christian guide to", "christian case for",
+            "for christians", "christian perspective on",
+            "reading ", "watching ", "listening ",
+        ]
+        academic_institutions = [
+            "seminary", "theological", "divinity school",
+            "biblical", "reformed theological", "southern baptist theological",
+            "westminster", "covenant", " rts ", " tgc ", " 9marks ",
+        ]
+        is_culture_consumption = any(pattern in title_lower for pattern in culture_consumption_patterns)
+        is_academic = any(pattern in title_lower for pattern in academic_institutions)
+        if is_culture_consumption and not is_academic:
+            return False
+
+        devotional_patterns = [
+            "daily ", "morning ", "evening ", "devotion",
+            "meditation", "reflection", "prayer for",
+            "my ", "your ", "our ", "when you",
+            "walking with", "journey with", "finding ",
+        ]
+        has_institutional_scope = any(signal in title_lower for signal in [
+            "church", "churches", "denomination", "movement",
+            "reformation", "revival", "history of", "global ",
+            "evangelicalism", "christianity ", "the church",
+        ])
+        is_devotional = any(pattern in title_lower for pattern in devotional_patterns)
+        if is_devotional and not has_institutional_scope:
+            return False
+
+    if source_name == "基督邮报 (Christian Post)":
+        cp_social_patterns = [
+            " viral", "trending", "social media", "tweet", "twitter",
+            "celebrity", "famous", "hollywood", "oscar", "grammy",
+            "super bowl", "world cup", "olympic",
+        ]
+        cp_christian_signals = [
+            "church", "pastor", "ministry", "bible", "gospel",
+            "christian school", "christian college", "seminary",
+            "missionary", "missions", "evangelical", "catholic",
+            "baptist", "presbyterian", "pentecostal",
+        ]
+        is_social_news = any(pattern in title_lower for pattern in cp_social_patterns)
+        has_cp_christian = any(signal in title_lower for signal in cp_christian_signals)
+        if is_social_news and not has_cp_christian:
+            return False
+
+    if source_name == "Barna Group":
+        barna_generic_patterns = [
+            "americans ", "american adults", "young people",
+            "young adults", "teenagers", "teens ", "generation ",
+            "gen z", "millennial", "boomer", "parents",
+            "most ", "least ", "likely to", "unlikely to",
+        ]
+        barna_christian_focus = [
+            "christian", "church", "pastor", "believer", "faith",
+            "evangelical", "catholic", "protestant", "bible",
+            "practicing christian", "committed christian",
+        ]
+        is_generic_pop = any(pattern in title_lower for pattern in barna_generic_patterns)
+        has_christian_focus = any(signal in title_lower for signal in barna_christian_focus)
+        if is_generic_pop and not has_christian_focus:
+            return False
+
+    return True
+
+
+def extract_country_from_text(title: str, content: str) -> str | None:
+    """从标题和内容提取国家归因。"""
+    text = f"{title or ''} {content or ''}".lower()
+    for keyword, country in COUNTRY_KEYWORDS.items():
+        if keyword in text:
+            return country
+    return None
 
 
 def _parse_entry_date(entry) -> datetime | None:
@@ -257,6 +548,11 @@ def collect_rss(limit_per_source: int = 30):
                     if existing:
                         continue
 
+                    if not is_christian_relevant(title, summary, rss_source.name):
+                        continue
+
+                    country = extract_country_from_text(title, summary)
+
                     db.add(
                         IntelligenceItem(
                             id=str(uuid.uuid4()),
@@ -265,7 +561,7 @@ def collect_rss(limit_per_source: int = 30):
                             content=summary,
                             entity_name=title[:200],
                             entity_type="rss_news",
-                            country="全球",
+                            country=country,
                             category=rss_source.category or "rss_news",
                             source_url=link,
                             source_name=rss_source.name,
@@ -279,8 +575,16 @@ def collect_rss(limit_per_source: int = 30):
 
                 rss_source.last_fetched_at = datetime.utcnow()
                 if used_url != rss_source.rss_url:
-                    print(f"  更新RSS源URL: {rss_source.rss_url} -> {used_url}")
-                    rss_source.rss_url = used_url
+                    duplicate_source = (
+                        db.query(RSSSource)
+                        .filter(RSSSource.id != rss_source.id, RSSSource.rss_url == used_url)
+                        .first()
+                    )
+                    if duplicate_source:
+                        print(f"  跳过URL更新，避免与现有RSS源冲突: {used_url}")
+                    else:
+                        print(f"  更新RSS源URL: {rss_source.rss_url} -> {used_url}")
+                        rss_source.rss_url = used_url
                 mapped_source.last_scan_at = rss_source.last_fetched_at
                 mapped_source.success_rate = 1.0 if inserted > 0 else 0.8
                 db.commit()
@@ -304,4 +608,5 @@ def collect_rss(limit_per_source: int = 30):
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     collect_rss()

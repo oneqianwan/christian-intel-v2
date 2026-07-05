@@ -330,6 +330,7 @@ def collect_arda_denominations():
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     print("Test: ARDA denomination profiles (1-50)")
     print("=" * 60)
     collector = ARDADenominationCollector()

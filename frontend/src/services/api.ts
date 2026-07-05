@@ -1,4 +1,6 @@
 const API_BASE = 'http://localhost:8000/api'
+const WELCOME_REPLY_TEXT = '你好！我是 CIO 情报助手。请问你想查询哪家机构的评分或投资关系？'
+const normalizeWelcomeText = (value: string) => value.replace(/\s+/g, '')
 
 export async function fetchConversations() {
   const r = await fetch(`${API_BASE}/conversations`)
@@ -60,6 +62,11 @@ export async function sendChatStream(
         if (!data || data === '[DONE]') continue
         try {
           const parsed = JSON.parse(data)
+          const fullContent = parsed?.full_content || parsed?.delivery?.content || ''
+          const welcomeReplyUuid = parsed?.welcome_reply_uuid || parsed?.delivery?.welcome_reply_uuid || null
+          if (normalizeWelcomeText(fullContent) === normalizeWelcomeText(WELCOME_REPLY_TEXT) && welcomeReplyUuid) {
+            console.log(`SSE_UUID=${welcomeReplyUuid}`)
+          }
           const type = parsed?.type || 'message'
           onEvent(type, parsed)
         } catch {}

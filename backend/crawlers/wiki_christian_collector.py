@@ -462,6 +462,7 @@ def collect_wiki_christian(country: str = "Philippines"):
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     print("测试：Wikipedia菲律宾基督教机构提取")
     print("=" * 60)
     result = collect_wiki_christian("Philippines")

@@ -1,9 +1,31 @@
+import os
+import uuid
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from models.database import init_db
-from routers import agent, bookmarks, chat, collection, configs, conversations, dashboard, diagnostics, export, feedback, health, missions, search, tasks, url_analysis
+from routers import (
+    agent,
+    bookmarks,
+    chat,
+    collection,
+    configs,
+    conversations,
+    dashboard,
+    diagnostics,
+    export,
+    feedback,
+    health,
+    missions,
+    org_detail,
+    search,
+    tasks,
+    url_analysis,
+)
 
 app = FastAPI(title="Christian Intel v2", version="0.1.0")
+BACKEND_INSTANCE_UUID = str(uuid.uuid4())
+BACKEND_PORT = os.environ.get("PORT", "8000")
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,7 +41,12 @@ def health_root():
 
 @app.on_event("startup")
 async def startup():
+    print(f"BACKEND_INSTANCE_UUID={BACKEND_INSTANCE_UUID}")
+    print(f"PID={os.getpid()}")
+    print(f"PORT={BACKEND_PORT}")
+    print("APP_STARTUP_ENTER")
     init_db()
+    print("APP_STARTUP_EXIT")
 
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(conversations.router, prefix="/api", tags=["conversations"])
@@ -36,3 +63,4 @@ app.include_router(feedback.router, prefix="/api", tags=["feedback"])
 app.include_router(agent.router)
 app.include_router(collection.router)
 app.include_router(dashboard.router)
+app.include_router(org_detail.router)

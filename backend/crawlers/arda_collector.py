@@ -490,6 +490,7 @@ def collect_arda_countries():
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
     print("测试：ARDA菲律宾")
     print("=" * 50)
 

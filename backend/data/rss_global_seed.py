@@ -94,6 +94,30 @@ RSS_SOURCES = [
         "category": "ngo",
         "scope": "global",
     },
+    {
+        "name": "Veritas PH",
+        "rss_url": "https://www.veritasph.net/feed/",
+        "country": "菲律宾",
+        "language": "en",
+        "category": "news",
+        "scope": "country",
+    },
+    {
+        "name": "CBN Asia",
+        "rss_url": "https://www.cbnasia.org/feed/",
+        "country": "菲律宾",
+        "language": "en",
+        "category": "media",
+        "scope": "country",
+    },
+    {
+        "name": "CBN Asia Blog Media",
+        "rss_url": "https://www.cbnasia.org/blog/category/media/feed/",
+        "country": "菲律宾",
+        "language": "en",
+        "category": "media",
+        "scope": "country",
+    },
 ]
 
 

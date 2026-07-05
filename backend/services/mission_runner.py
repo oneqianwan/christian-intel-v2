@@ -20,9 +20,24 @@ from services.llm_client import get_llm_client
 SOURCE_TIMEOUT_SECONDS = 30
 SUCCESS_STATUSES = {"success", "no_change"}
 COMPOSITE_REDIS_TTL_SECONDS = 3600
+MISSION_PAYLOAD_PREFIX = "__mission_payload__:"
 
 
 def _create_job_run(db, mission_id: str, job_type: str, source_id: str) -> JobRun:
+    existing_job = (
+        db.query(JobRun)
+        .filter(
+            JobRun.mission_id == mission_id,
+            JobRun.source_id == source_id,
+            JobRun.job_type == job_type,
+            JobRun.status.in_(["queued", "running"]),
+        )
+        .order_by(JobRun.started_at.desc())
+        .first()
+    )
+    if existing_job:
+        return existing_job
+
     job = JobRun(
         id=str(uuid.uuid4()),
         mission_id=mission_id,
@@ -44,6 +59,184 @@ def _finalize_job_run(db, job: JobRun, result: dict):
     if result.get("error"):
         job.error_message = str(result["error"])[:500]
     db.commit()
+
+
+def _parse_mission_payload(query: str) -> dict:
+    if not query or not query.startswith(MISSION_PAYLOAD_PREFIX):
+        return {}
+    try:
+        return json.loads(query[len(MISSION_PAYLOAD_PREFIX):])
+    except Exception:
+        return {}
+
+
+def _run_newsapi_collection_mission(db, mission: Mission, payload: dict) -> dict:
+    from services.api_collectors import NewsAPICollector
+
+    keywords = [item for item in (payload.get("keywords") or []) if item]
+    if not keywords:
+        fallback_query = (payload.get("query") or "").strip()
+        if fallback_query:
+            keywords = [fallback_query]
+    limit_per_keyword = max(1, min(int(payload.get("limit_per_keyword") or 30), 100))
+    collector = NewsAPICollector(db)
+    job = _create_job_run(db, mission.id, "newsapi_collect", getattr(collector.source, "id", None))
+    if not collector.api_key:
+        result = {"status": "failed", "error": "NEWSAPI_KEY 未配置", "new_items": 0}
+        _finalize_job_run(db, job, result)
+        return result
+
+    total_added = 0
+    failed_keywords = 0
+    for keyword in keywords:
+        try:
+            total_added += collector._collect_keyword(
+                keyword,
+                label=keyword,
+                limit_per_keyword=limit_per_keyword,
+            )
+        except Exception as exc:
+            failed_keywords += 1
+            print(f"[MissionRunner] NewsAPI mission keyword failed: {keyword} -> {exc}")
+
+    status = "success" if failed_keywords < max(len(keywords), 1) else "failed"
+    result = {
+        "status": status,
+        "error": f"{failed_keywords} keywords failed" if failed_keywords else None,
+        "new_items": total_added,
+    }
+    _finalize_job_run(db, job, result)
+    return result
+
+
+def _run_rss_collection_mission(db, mission: Mission, payload: dict) -> dict:
+    from services.rss_collector import collect_rss
+
+    limit_per_source = max(1, min(int(payload.get("limit_per_keyword") or 30), 100))
+    job = _create_job_run(db, mission.id, "rss_collect", None)
+    total_added = 0
+    failed_sources = []
+    try:
+        result = collect_rss(limit_per_source=limit_per_source)
+        if isinstance(result, tuple):
+            total_added = int(result[0] or 0)
+            failed_sources = list(result[1] or [])
+        else:
+            total_added = int(result or 0)
+    except Exception as exc:
+        result = {"status": "failed", "error": str(exc)[:300], "new_items": 0}
+        _finalize_job_run(db, job, result)
+        return result
+
+    status = "success" if total_added > 0 or not failed_sources else "failed"
+    result = {
+        "status": status,
+        "error": f"{len(failed_sources)} RSS sources failed" if failed_sources else None,
+        "new_items": total_added,
+    }
+    _finalize_job_run(db, job, result)
+    return result
+
+
+def _run_webpage_collection_mission(db, mission: Mission, payload: dict) -> dict:
+    try:
+        from backend.crawlers.dynamic_crawler import DynamicCrawler
+    except ImportError:
+        from crawlers.dynamic_crawler import DynamicCrawler
+
+    keywords = [item for item in (payload.get("keywords") or []) if item]
+    if not keywords:
+        fallback_query = (payload.get("query") or "").strip()
+        if fallback_query:
+            keywords = [fallback_query]
+    job = _create_job_run(db, mission.id, "webpage_collect", None)
+
+    async def run_crawler() -> tuple[int, int]:
+        crawler = DynamicCrawler()
+        collected = 0
+        failed = 0
+        try:
+            await crawler.start()
+            for keyword in keywords:
+                search_url = f"https://www.google.com/search?q={keyword.replace(' ', '+')}"
+                try:
+                    result = await crawler.fetch_page(search_url)
+                    if result.get("success"):
+                        collected += 1
+                    else:
+                        failed += 1
+                except Exception as exc:
+                    failed += 1
+                    print(f"[MissionRunner] Webpage mission keyword failed: {keyword} -> {exc}")
+        finally:
+            await crawler.stop()
+        return collected, failed
+
+    try:
+        collected, failed = asyncio.run(run_crawler())
+    except Exception as exc:
+        result = {"status": "failed", "error": str(exc)[:300], "new_items": 0}
+        _finalize_job_run(db, job, result)
+        return result
+
+    status = "success" if failed < max(len(keywords), 1) else "failed"
+    result = {
+        "status": status,
+        "error": f"{failed} keywords failed" if failed else None,
+        "new_items": collected,
+    }
+    _finalize_job_run(db, job, result)
+    return result
+
+
+def _run_global_api_collectors_mission(db, mission: Mission, payload: dict) -> dict:
+    from services.api_collectors import (
+        NewsAPICollector,
+        ScrapingBeeCollector,
+        YouTubeCollector,
+        _mark_api_run,
+    )
+
+    job = _create_job_run(db, mission.id, "global_api_collect", None)
+    total_added = 0
+    errors = []
+
+    collectors = [
+        ("NewsAPI", lambda: NewsAPICollector(db).collect()),
+        ("ScrapingBee", lambda: ScrapingBeeCollector(db).collect()),
+        ("YouTube", lambda: YouTubeCollector(db).collect()),
+    ]
+    for label, runner in collectors:
+        try:
+            total_added += int(runner() or 0)
+        except Exception as exc:
+            errors.append(f"{label}: {str(exc)[:120]}")
+            print(f"[MissionRunner] Global API collector failed: {label} -> {exc}")
+
+    _mark_api_run()
+    status = "success" if len(errors) < len(collectors) else "failed"
+    result = {
+        "status": status,
+        "error": "; ".join(errors[:3]) if errors else None,
+        "new_items": total_added,
+    }
+    _finalize_job_run(db, job, result)
+    return result
+
+
+def _run_structured_collection_mission(db, mission: Mission, payload: dict) -> dict | None:
+    source = (payload.get("source") or "").strip().lower()
+    if not source:
+        return None
+    if source == "newsapi":
+        return _run_newsapi_collection_mission(db, mission, payload)
+    if source == "rss":
+        return _run_rss_collection_mission(db, mission, payload)
+    if source == "webpage":
+        return _run_webpage_collection_mission(db, mission, payload)
+    if source == "global_api_collectors":
+        return _run_global_api_collectors_mission(db, mission, payload)
+    raise RuntimeError(f"unsupported mission collector source: {source}")
 
 
 def _load_composite_meta(composite_id: str) -> dict:
@@ -422,12 +615,32 @@ def run_mission(mission_id: str):
             print(f"Mission {mission_id} not found")
             return
 
+        current_status = (mission.status or "").strip().lower()
+        if current_status not in {"queued", "failed"}:
+            print(
+                f"Mission skipped. mission_id={mission_id} "
+                f"current_status={mission.status} reason=status_not_executable"
+            )
+            return
+
         mission.status = "running"
         if mission.composite_task_id:
             mission.composite_status = "running"
         mission.updated_at = datetime.utcnow()
         db.commit()
         print(f"开始执行采集任务: {mission.query} (priority={mission.priority})")
+        payload = _parse_mission_payload(mission.query)
+        structured_result = _run_structured_collection_mission(db, mission, payload) if payload else None
+        if structured_result is not None:
+            mission.status = "done" if structured_result.get("status") in SUCCESS_STATUSES else "failed"
+            if mission.composite_task_id:
+                mission.composite_status = "completed" if mission.status == "done" else "failed"
+            mission.updated_at = datetime.utcnow()
+            db.commit()
+            check_composite_completion(mission.id, db)
+            print(f"结构化采集任务完成: {mission_id}")
+            return
+
         allowed_source_ids = _resolve_mission_source_scope(db, mission)
         primary_status_source = _resolve_primary_status_source(db, mission, allowed_source_ids)
 

@@ -207,6 +207,7 @@ async def fetch_url(url: str, headless: bool = True) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
+    # Development/Test entry. Not production collection path.
 
     async def test():
         crawler = DynamicCrawler()
