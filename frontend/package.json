@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:watch-alert-contract": "node scripts/verify-watch-alert-contract.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },
