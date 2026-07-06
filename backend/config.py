@@ -137,6 +137,21 @@ class Settings(BaseSettings):
     WATCH_ALERT_NOTIFICATIONS_ENABLED: bool = FEATURE_FLAG_DEFAULTS["WATCH_ALERT_NOTIFICATIONS_ENABLED"]
     AUTH_V1_ENABLED: bool = FEATURE_FLAG_DEFAULTS["AUTH_V1_ENABLED"]
     AUTH_COOKIE_REQUIRED: bool = FEATURE_FLAG_DEFAULTS["AUTH_COOKIE_REQUIRED"]
+    AUTH_COOKIE_NAME: str = "cio_session"
+    AUTH_SESSION_TTL_SECONDS: int = 86400
+    AUTH_COOKIE_SECURE: bool = False
+    AUTH_COOKIE_SAMESITE: str = "lax"
+    AUTH_COOKIE_PATH: str = "/"
+    AUTH_SESSION_LAST_SEEN_UPDATE_SECONDS: int = 300
+    AUTH_LOGIN_RATE_LIMIT_ENABLED: bool = True
+    AUTH_LOGIN_MAX_ATTEMPTS: int = 10
+    AUTH_LOGIN_WINDOW_SECONDS: int = 300
+    AUTH_CORS_ALLOW_ORIGINS: str = "http://127.0.0.1:4173,http://localhost:4173,http://127.0.0.1:5173,http://localhost:5173"
+    AUTH_PASSWORD_TIME_COST: int = 3
+    AUTH_PASSWORD_MEMORY_COST_KIB: int = 65536
+    AUTH_PASSWORD_PARALLELISM: int = 4
+    AUTH_PASSWORD_HASH_LEN: int = 32
+    AUTH_PASSWORD_SALT_LEN: int = 16
     WATCH_ALERT_SCHEDULER_INTERVAL_SECONDS: int = 300
     WATCH_ALERT_MAX_RETRIES: int = 3
     WATCH_ALERT_RETRY_BASE_SECONDS: int = 300
@@ -150,6 +165,42 @@ class Settings(BaseSettings):
             db_path = Path(raw_path)
             if not db_path.is_absolute():
                 self.DATABASE_URL = f"sqlite:///{(BACKEND_DIR / db_path).resolve().as_posix()}"
+        cookie_samesite = str(self.AUTH_COOKIE_SAMESITE or "").strip().lower()
+        if cookie_samesite not in {"lax", "strict", "none"}:
+            raise ValueError("AUTH_COOKIE_SAMESITE must be one of: lax, strict, none")
+        self.AUTH_COOKIE_SAMESITE = cookie_samesite
+
+        if int(self.AUTH_SESSION_TTL_SECONDS or 0) <= 0:
+            raise ValueError("AUTH_SESSION_TTL_SECONDS must be > 0")
+        if int(self.AUTH_SESSION_LAST_SEEN_UPDATE_SECONDS or 0) <= 0:
+            raise ValueError("AUTH_SESSION_LAST_SEEN_UPDATE_SECONDS must be > 0")
+        if int(self.AUTH_LOGIN_MAX_ATTEMPTS or 0) <= 0:
+            raise ValueError("AUTH_LOGIN_MAX_ATTEMPTS must be > 0")
+        if int(self.AUTH_LOGIN_WINDOW_SECONDS or 0) <= 0:
+            raise ValueError("AUTH_LOGIN_WINDOW_SECONDS must be > 0")
+
+        if not str(self.AUTH_COOKIE_PATH or "").startswith("/"):
+            raise ValueError("AUTH_COOKIE_PATH must start with '/'")
+
+        if cookie_samesite == "none" and not bool(self.AUTH_COOKIE_SECURE):
+            raise ValueError("AUTH_COOKIE_SECURE must be true when AUTH_COOKIE_SAMESITE=none")
+
+        origins = [part.strip() for part in str(self.AUTH_CORS_ALLOW_ORIGINS or "").split(",") if part.strip()]
+        if not origins:
+            raise ValueError("AUTH_CORS_ALLOW_ORIGINS must not be empty")
+        if any(origin == "*" for origin in origins):
+            raise ValueError("AUTH_CORS_ALLOW_ORIGINS must not contain '*'")
+
+        if int(self.AUTH_PASSWORD_TIME_COST or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_TIME_COST must be > 0")
+        if int(self.AUTH_PASSWORD_MEMORY_COST_KIB or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_MEMORY_COST_KIB must be > 0")
+        if int(self.AUTH_PASSWORD_PARALLELISM or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_PARALLELISM must be > 0")
+        if int(self.AUTH_PASSWORD_HASH_LEN or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_HASH_LEN must be > 0")
+        if int(self.AUTH_PASSWORD_SALT_LEN or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_SALT_LEN must be > 0")
         return self
 
     @property

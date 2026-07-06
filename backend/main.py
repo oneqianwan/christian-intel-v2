@@ -3,10 +3,12 @@ import uuid
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from config import settings
 from models.database import init_db
 from routers import (
     agent,
     alerts,
+    auth,
     bookmarks,
     chat,
     collection,
@@ -31,7 +33,8 @@ BACKEND_PORT = os.environ.get("PORT", "8000")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[part.strip() for part in str(settings.AUTH_CORS_ALLOW_ORIGINS or "").split(",") if part.strip()],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -52,6 +55,7 @@ async def startup():
 
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(conversations.router, prefix="/api", tags=["conversations"])
+app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(missions.router, prefix="/api", tags=["missions"])
 app.include_router(diagnostics.router, prefix="/api", tags=["diagnostics"])
 app.include_router(url_analysis.router, prefix="/api", tags=["url_analysis"])
