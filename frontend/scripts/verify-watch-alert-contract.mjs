@@ -5,9 +5,11 @@ import process from 'node:process'
 const root = process.cwd()
 const apiPath = path.join(root, 'src', 'api', 'watchAlerts.ts')
 const typesPath = path.join(root, 'src', 'types', 'watchAlerts.ts')
+const identityPath = path.join(root, 'src', 'features', 'watchAlerts', 'identity.ts')
 const envExamplePath = path.join(root, '.env.example')
 const watchTargetsRouterPath = path.join(root, '..', 'backend', 'routers', 'watch_targets.py')
 const alertsRouterPath = path.join(root, '..', 'backend', 'routers', 'alerts.py')
+const dependencyPath = path.join(root, '..', 'backend', 'dependencies', 'watch_alert_auth.py')
 const schemasPath = path.join(root, '..', 'backend', 'schemas', 'watch_alert.py')
 
 function read(filePath) {
@@ -56,23 +58,25 @@ function scanForBannedIdentity(searchRoot) {
 
 const apiSource = read(apiPath)
 const typesSource = read(typesPath)
+const identitySource = read(identityPath)
 const envExample = read(envExamplePath)
 const watchTargetsRouter = read(watchTargetsRouterPath)
 const alertsRouter = read(alertsRouterPath)
+const watchAlertDependency = read(dependencyPath)
 const schemaSource = read(schemasPath)
 
 const endpointChecks = [
-  ['createWatchTarget', 'POST', '/api/watch-targets'],
-  ['listWatchTargets', 'GET', '/api/watch-targets'],
-  ['updateWatchTarget', 'PATCH', '/api/watch-targets/${encodeURIComponent(String(watchTargetId))}'],
-  ['deleteWatchTarget', 'DELETE', '/api/watch-targets/${encodeURIComponent(String(watchTargetId))}'],
-  ['runWatchTarget', 'POST', '/api/watch-targets/${encodeURIComponent(String(watchTargetId))}/run'],
-  ['listWatchTargetSignals', 'GET', '/api/watch-targets/${encodeURIComponent(String(watchTargetId))}/signals'],
-  ['listAlerts', 'GET', '/api/alerts'],
-  ['getUnreadAlertCount', 'GET', '/api/alerts/unread-count'],
-  ['markAlertRead', 'PATCH', '/api/alerts/${encodeURIComponent(String(alertId))}/read'],
-  ['dismissAlert', 'PATCH', '/api/alerts/${encodeURIComponent(String(alertId))}/dismiss'],
-  ['markAllAlertsRead', 'POST', '/api/alerts/read-all'],
+  ['createWatchTarget', 'POST', '/watch-targets'],
+  ['listWatchTargets', 'GET', '/watch-targets'],
+  ['updateWatchTarget', 'PATCH', '/watch-targets/${encodeURIComponent(String(watchTargetId))}'],
+  ['deleteWatchTarget', 'DELETE', '/watch-targets/${encodeURIComponent(String(watchTargetId))}'],
+  ['runWatchTarget', 'POST', '/watch-targets/${encodeURIComponent(String(watchTargetId))}/run'],
+  ['listWatchTargetSignals', 'GET', '/watch-targets/${encodeURIComponent(String(watchTargetId))}/signals'],
+  ['listAlerts', 'GET', '/alerts'],
+  ['getUnreadAlertCount', 'GET', '/alerts/unread-count'],
+  ['markAlertRead', 'PATCH', '/alerts/${encodeURIComponent(String(alertId))}/read'],
+  ['dismissAlert', 'PATCH', '/alerts/${encodeURIComponent(String(alertId))}/dismiss'],
+  ['markAllAlertsRead', 'POST', '/alerts/read-all'],
 ]
 
 for (const [functionName, method, endpoint] of endpointChecks) {
@@ -85,7 +89,9 @@ for (const [functionName, method, endpoint] of endpointChecks) {
 }
 
 assertMatch(!/\buser_id\b/.test(apiSource), 'API client must not send or mention user_id')
+assertMatch(!/\bowner_user_id\b/.test(apiSource), 'API client must not send or mention owner_user_id')
 assertMatch(!/\buser_id\b/.test(typesSource), 'Types must not include user_id')
+assertMatch(!/\bowner_user_id\b/.test(typesSource), 'Types must not include owner_user_id')
 assertMatch(
   apiSource.includes("if (response.status === 204 || !parseJson)"),
   'Request helper must handle 204 without response.json()',
@@ -105,26 +111,52 @@ assertMatch(
 scanForBannedIdentity(path.join(root, 'src'))
 scanForBannedIdentity(path.join(root, 'scripts'))
 assertMatch(
-  apiSource.includes('export function hasWatchAlertSession'),
-  'API client must expose a watch/alert authentication presence helper',
+  identitySource.includes('export type WatchAlertIdentityMode'),
+  'Identity module must expose WatchAlertIdentityMode',
 )
 assertMatch(
-  /const sessionId = getStoredSessionId\(\)[\s\S]*if \(!sessionId\)[\s\S]*throw createAuthRequiredError\(\)/.test(
-    apiSource,
-  ),
-  'API client must block unauthenticated requests before fetch()',
+  identitySource.includes("'legacy-session'") &&
+    identitySource.includes("'authenticated-user'") &&
+    identitySource.includes("'invalid'"),
+  'Identity module must cover disabled/legacy-session/authenticated-user/invalid modes',
 )
 assertMatch(
-  /headers\.set\(['"]x-session-id['"], sessionId\)/.test(apiSource),
-  'API client must inject x-session-id only when a real session exists',
+  apiSource.includes('buildWatchAlertRequestOptions'),
+  'API client must centralize watch/alert request authentication logic',
 )
 assertMatch(
-  apiSource.includes("import.meta.env.VITE_WATCH_ALERT_UI_ENABLED === 'true'"),
-  'Feature flag must default to false and only enable on strict true',
+  apiSource.includes("credentials: 'include'"),
+  'Authenticated watch/alert requests must support credentials: include',
+)
+assertMatch(
+  apiSource.includes("headers.set('x-session-id', sessionId)"),
+  'Legacy watch/alert mode must still set x-session-id',
+)
+assertMatch(
+  apiSource.includes("if (identityMode === 'authenticated-user')") &&
+    apiSource.includes("headers.delete('x-session-id')"),
+  'Authenticated mode must actively remove x-session-id headers',
+)
+assertMatch(
+  apiSource.indexOf("if (identityMode === 'authenticated-user')") <
+    apiSource.indexOf('const sessionId = getStoredSessionId()'),
+  'Authenticated requests must not depend on legacy session storage reads',
+)
+assertMatch(
+  identitySource.includes("import.meta.env.VITE_WATCH_ALERT_UI_ENABLED === 'true'"),
+  'Identity module must read VITE_WATCH_ALERT_UI_ENABLED',
+)
+assertMatch(
+  identitySource.includes("import.meta.env.VITE_WATCH_ALERT_USER_OWNERSHIP_ENABLED === 'true'"),
+  'Identity module must read VITE_WATCH_ALERT_USER_OWNERSHIP_ENABLED',
 )
 assertMatch(
   envExample.includes('VITE_WATCH_ALERT_UI_ENABLED=false'),
   '.env.example must default VITE_WATCH_ALERT_UI_ENABLED to false',
+)
+assertMatch(
+  envExample.includes('VITE_WATCH_ALERT_USER_OWNERSHIP_ENABLED=false'),
+  '.env.example must default VITE_WATCH_ALERT_USER_OWNERSHIP_ENABLED to false',
 )
 assertMatch(
   /interface PaginatedResponse<T>[\s\S]*items: T\[][\s\S]*page: number[\s\S]*page_size: number[\s\S]*total: number/.test(typesSource),
@@ -173,6 +205,12 @@ assertMatch(
 assertMatch(
   hasRegex(alertsRouter, /@router\.post\("\/read-all"/),
   'Alerts router must expose POST /alerts/read-all',
+)
+assertMatch(
+  watchAlertDependency.includes('x_session_id') &&
+    watchAlertDependency.includes('watch_alert_user_ownership_enabled') &&
+    watchAlertDependency.includes('resolve_user_for_request'),
+  'Backend dependency must support both legacy x-session-id and authenticated ownership modes',
 )
 
 console.log('WATCH_ALERT_CONTRACT_CHECK=PASS')

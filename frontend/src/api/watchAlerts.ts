@@ -13,8 +13,14 @@ import {
   type WatchTarget,
   type WatchTargetListParams,
 } from '../types/watchAlerts'
+import { buildApiUrl } from '../services/api'
+import {
+  getWatchAlertIdentityMode,
+  getWatchAlertInvalidConfigMessage,
+  isAuthenticatedOwnershipEnabled,
+  isWatchAlertUiEnabled,
+} from '../features/watchAlerts/identity'
 
-const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://localhost:8000'
 const SESSION_STORAGE_KEY = 'x-session-id'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -45,6 +51,27 @@ export function hasWatchAlertSession() {
   return Boolean(getStoredSessionId())
 }
 
+function createInvalidConfigurationError() {
+  const status = 503
+  const code = 'WATCH_ALERT_IDENTITY_INVALID'
+  const message = getWatchAlertInvalidConfigMessage()
+  return new WatchAlertApiError({
+    status,
+    code,
+    message,
+    userMessage: message,
+  })
+}
+
+function createNetworkError() {
+  return new WatchAlertApiError({
+    status: 0,
+    code: 'NETWORK_ERROR',
+    message: 'Network request failed',
+    userMessage: '后端不可用，请稍后重试。',
+  })
+}
+
 function createAuthRequiredError() {
   const status = 401
   const code = 'AUTH_REQUIRED'
@@ -58,7 +85,7 @@ function createAuthRequiredError() {
 }
 
 function createUrl(path: string, query?: Record<string, string | number | undefined>) {
-  const url = new URL(path, API_ORIGIN)
+  const url = new URL(buildApiUrl(path))
   if (!query) {
     return url
   }
@@ -81,11 +108,17 @@ function getUserMessage(status: number, code: string, message: string) {
   if (status === 401) {
     return '登录状态已失效，请重新登录'
   }
+  if (status === 403) {
+    return '当前账号没有访问权限。'
+  }
   if (status === 404) {
     return '记录不存在或已被删除。'
   }
   if (status === 409) {
     return '操作冲突：可能是重复操作，或任务正在运行。'
+  }
+  if (status === 429) {
+    return '请求过于频繁，请稍后再试。'
   }
   if (status === 422) {
     return '请求参数无效，请检查后重试。'
@@ -134,6 +167,46 @@ async function parseApiError(response: Response): Promise<WatchAlertApiError> {
   })
 }
 
+function buildWatchAlertRequestOptions(
+  requestInit: RequestInit,
+): RequestInit {
+  const identityMode = getWatchAlertIdentityMode()
+  const headers = new Headers(requestInit.headers)
+
+  if (requestInit.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  if (identityMode === 'invalid') {
+    throw createInvalidConfigurationError()
+  }
+
+  if (identityMode === 'authenticated-user') {
+    headers.delete('x-session-id')
+    headers.delete('X-Session-Id')
+    return {
+      ...requestInit,
+      credentials: 'include',
+      headers,
+    }
+  }
+
+  if (identityMode !== 'legacy-session') {
+    throw createAuthRequiredError()
+  }
+
+  const sessionId = getStoredSessionId()
+  if (!sessionId) {
+    throw createAuthRequiredError()
+  }
+
+  headers.set('x-session-id', sessionId)
+  return {
+    ...requestInit,
+    headers,
+  }
+}
+
 async function request<T>(
   path: string,
   init: RequestInit & {
@@ -142,20 +215,17 @@ async function request<T>(
   } = {},
 ): Promise<T> {
   const { query, parseJson = true, ...requestInit } = init
-  const sessionId = getStoredSessionId()
-  if (!sessionId) {
-    throw createAuthRequiredError()
-  }
-  const headers = new Headers(requestInit.headers)
-  headers.set('x-session-id', sessionId)
-  if (requestInit.body && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json')
-  }
+  const finalRequestInit = buildWatchAlertRequestOptions(requestInit)
 
-  const response = await fetch(createUrl(path, query), {
-    ...requestInit,
-    headers,
-  })
+  let response: Response
+  try {
+    response = await fetch(createUrl(path, query), finalRequestInit)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error
+    }
+    throw createNetworkError()
+  }
 
   if (!response.ok) {
     throw await parseApiError(response)
@@ -168,8 +238,12 @@ async function request<T>(
   return response.json() as Promise<T>
 }
 
-export const isWatchAlertUiEnabled = () => import.meta.env.VITE_WATCH_ALERT_UI_ENABLED === 'true'
 export const WATCH_ALERT_UNREAD_REFRESH_EVENT = 'watch-alerts:unread-refresh'
+export {
+  getWatchAlertIdentityMode,
+  isAuthenticatedOwnershipEnabled,
+  isWatchAlertUiEnabled,
+}
 
 export function dispatchWatchAlertUnreadRefresh() {
   if (typeof window === 'undefined') {
@@ -178,9 +252,17 @@ export function dispatchWatchAlertUnreadRefresh() {
   window.dispatchEvent(new CustomEvent(WATCH_ALERT_UNREAD_REFRESH_EVENT))
 }
 
-export async function createWatchTarget(requestBody: CreateWatchTargetRequest): Promise<WatchTarget> {
-  return request<WatchTarget>('/api/watch-targets', {
+type WatchAlertRequestOptions = {
+  signal?: AbortSignal
+}
+
+export async function createWatchTarget(
+  requestBody: CreateWatchTargetRequest,
+  options: WatchAlertRequestOptions = {},
+): Promise<WatchTarget> {
+  return request<WatchTarget>('/watch-targets', {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({
       entity_id: requestBody.entity_id,
       entity_type: requestBody.entity_type,
@@ -191,9 +273,11 @@ export async function createWatchTarget(requestBody: CreateWatchTargetRequest): 
 
 export async function listWatchTargets(
   params: WatchTargetListParams = {},
+  options: WatchAlertRequestOptions = {},
 ): Promise<PaginatedResponse<WatchTarget>> {
-  return request<PaginatedResponse<WatchTarget>>('/api/watch-targets', {
+  return request<PaginatedResponse<WatchTarget>>('/watch-targets', {
     method: 'GET',
+    signal: options.signal,
     query: {
       status: params.status,
       entity_type: params.entity_type,
@@ -206,9 +290,11 @@ export async function listWatchTargets(
 export async function updateWatchTarget(
   watchTargetId: string,
   requestBody: UpdateWatchTargetRequest,
+  options: WatchAlertRequestOptions = {},
 ): Promise<WatchTarget> {
-  return request<WatchTarget>(`/api/watch-targets/${encodeURIComponent(String(watchTargetId))}`, {
+  return request<WatchTarget>(`/watch-targets/${encodeURIComponent(String(watchTargetId))}`, {
     method: 'PATCH',
+    signal: options.signal,
     body: JSON.stringify({
       status: requestBody.status,
       frequency: requestBody.frequency,
@@ -216,27 +302,37 @@ export async function updateWatchTarget(
   })
 }
 
-export async function deleteWatchTarget(watchTargetId: string): Promise<void> {
-  await request<void>(`/api/watch-targets/${encodeURIComponent(String(watchTargetId))}`, {
+export async function deleteWatchTarget(
+  watchTargetId: string,
+  options: WatchAlertRequestOptions = {},
+): Promise<void> {
+  await request<void>(`/watch-targets/${encodeURIComponent(String(watchTargetId))}`, {
     method: 'DELETE',
+    signal: options.signal,
     parseJson: false,
   })
 }
 
-export async function runWatchTarget(watchTargetId: string): Promise<WatchRunResult> {
-  return request<WatchRunResult>(`/api/watch-targets/${encodeURIComponent(String(watchTargetId))}/run`, {
+export async function runWatchTarget(
+  watchTargetId: string,
+  options: WatchAlertRequestOptions = {},
+): Promise<WatchRunResult> {
+  return request<WatchRunResult>(`/watch-targets/${encodeURIComponent(String(watchTargetId))}/run`, {
     method: 'POST',
+    signal: options.signal,
   })
 }
 
 export async function listWatchTargetSignals(
   watchTargetId: string,
   params: WatchSignalListParams = {},
+  options: WatchAlertRequestOptions = {},
 ): Promise<PaginatedResponse<WatchSignal>> {
   return request<PaginatedResponse<WatchSignal>>(
-    `/api/watch-targets/${encodeURIComponent(String(watchTargetId))}/signals`,
+    `/watch-targets/${encodeURIComponent(String(watchTargetId))}/signals`,
     {
       method: 'GET',
+      signal: options.signal,
       query: {
         signal_type: params.signal_type,
         severity: params.severity,
@@ -247,9 +343,13 @@ export async function listWatchTargetSignals(
   )
 }
 
-export async function listAlerts(params: WatchAlertListParams = {}): Promise<PaginatedResponse<WatchAlert>> {
-  return request<PaginatedResponse<WatchAlert>>('/api/alerts', {
+export async function listAlerts(
+  params: WatchAlertListParams = {},
+  options: WatchAlertRequestOptions = {},
+): Promise<PaginatedResponse<WatchAlert>> {
+  return request<PaginatedResponse<WatchAlert>>('/alerts', {
     method: 'GET',
+    signal: options.signal,
     query: {
       status: params.status,
       severity: params.severity,
@@ -260,28 +360,38 @@ export async function listAlerts(params: WatchAlertListParams = {}): Promise<Pag
   })
 }
 
-export async function getUnreadAlertCount(): Promise<number> {
-  const response = await request<AlertUnreadCountResponse>('/api/alerts/unread-count', {
+export async function getUnreadAlertCount(options: WatchAlertRequestOptions = {}): Promise<number> {
+  const response = await request<AlertUnreadCountResponse>('/alerts/unread-count', {
     method: 'GET',
+    signal: options.signal,
   })
   return response.unread_count
 }
 
-export async function markAlertRead(alertId: string): Promise<WatchAlert> {
-  return request<WatchAlert>(`/api/alerts/${encodeURIComponent(String(alertId))}/read`, {
+export async function markAlertRead(
+  alertId: string,
+  options: WatchAlertRequestOptions = {},
+): Promise<WatchAlert> {
+  return request<WatchAlert>(`/alerts/${encodeURIComponent(String(alertId))}/read`, {
     method: 'PATCH',
+    signal: options.signal,
   })
 }
 
-export async function dismissAlert(alertId: string): Promise<WatchAlert> {
-  return request<WatchAlert>(`/api/alerts/${encodeURIComponent(String(alertId))}/dismiss`, {
+export async function dismissAlert(
+  alertId: string,
+  options: WatchAlertRequestOptions = {},
+): Promise<WatchAlert> {
+  return request<WatchAlert>(`/alerts/${encodeURIComponent(String(alertId))}/dismiss`, {
     method: 'PATCH',
+    signal: options.signal,
   })
 }
 
-export async function markAllAlertsRead(): Promise<number> {
-  const response = await request<AlertReadAllResponse>('/api/alerts/read-all', {
+export async function markAllAlertsRead(options: WatchAlertRequestOptions = {}): Promise<number> {
+  const response = await request<AlertReadAllResponse>('/alerts/read-all', {
     method: 'POST',
+    signal: options.signal,
   })
   return response.updated_count
 }

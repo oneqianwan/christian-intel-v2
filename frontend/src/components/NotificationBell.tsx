@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getUnreadAlertCount,
   hasWatchAlertSession,
-  isWatchAlertUiEnabled,
   WATCH_ALERT_UNREAD_REFRESH_EVENT,
 } from '../api/watchAlerts'
+import { useAuth } from '../auth/useAuth'
+import { getWatchAlertIdentityMode } from '../features/watchAlerts/identity'
 import { WatchAlertApiError } from '../types/watchAlerts'
 
 const POLL_INTERVAL_MS = 60_000
@@ -35,6 +36,9 @@ function getUnreadErrorMessage(error: unknown) {
     if (error.status === 401) {
       return '登录状态已失效，请重新登录'
     }
+    if (error.status === 429) {
+      return '请求过于频繁，请稍后重试'
+    }
     if (error.status === 503) {
       return 'Watch / Alert 功能当前未启用'
     }
@@ -46,7 +50,13 @@ function getUnreadErrorMessage(error: unknown) {
 
 export function NotificationBell() {
   const navigate = useNavigate()
-  const enabled = isWatchAlertUiEnabled()
+  const { refreshUser, status, user } = useAuth()
+  const identityMode = getWatchAlertIdentityMode()
+  const enabled = identityMode !== 'disabled' && identityMode !== 'invalid'
+  const authenticatedMode = identityMode === 'authenticated-user'
+  const canPoll =
+    enabled &&
+    (authenticatedMode ? status === 'authenticated' : hasWatchAlertSession())
   const [unreadCount, setUnreadCount] = useState(0)
   const [inlineMessage, setInlineMessage] = useState<string | null>(null)
   const [hasLoaded, setHasLoaded] = useState(false)
@@ -54,6 +64,7 @@ export function NotificationBell() {
   const timerRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
   const mountedRef = useRef(false)
+  const controllerRef = useRef<AbortController | null>(null)
 
   const clearTimer = () => {
     if (timerRef.current !== null) {
@@ -64,7 +75,7 @@ export function NotificationBell() {
 
   const scheduleNextPoll = (delayMs = POLL_INTERVAL_MS) => {
     clearTimer()
-    if (!enabled || authExpired || document.visibilityState === 'hidden') {
+    if (!canPoll || authExpired || document.visibilityState === 'hidden') {
       return
     }
     timerRef.current = window.setTimeout(() => {
@@ -73,11 +84,11 @@ export function NotificationBell() {
   }
 
   const refreshUnreadCount = async () => {
-    if (!enabled || authExpired || inFlightRef.current) {
+    if (!canPoll || authExpired || inFlightRef.current) {
       return
     }
 
-    if (!hasWatchAlertSession()) {
+    if (!authenticatedMode && !hasWatchAlertSession()) {
       if (mountedRef.current) {
         setUnreadCount(0)
         setInlineMessage('登录状态已失效，请重新登录')
@@ -89,9 +100,11 @@ export function NotificationBell() {
 
     inFlightRef.current = true
     clearTimer()
+    const controller = new AbortController()
+    controllerRef.current = controller
 
     try {
-      const nextCount = await getUnreadAlertCount()
+      const nextCount = await getUnreadAlertCount({ signal: controller.signal })
       if (!mountedRef.current) {
         return
       }
@@ -110,29 +123,54 @@ export function NotificationBell() {
       setInlineMessage(message)
 
       if (error instanceof WatchAlertApiError && error.status === 401) {
+        setUnreadCount(0)
         setAuthExpired(true)
+        if (authenticatedMode) {
+          await refreshUser()
+        }
         return
       }
 
-      if (error instanceof WatchAlertApiError && error.status === 503) {
+      if (error instanceof WatchAlertApiError && (error.status === 429 || error.status === 503)) {
         scheduleNextPoll(SERVICE_UNAVAILABLE_RETRY_MS)
         return
       }
 
       scheduleNextPoll(POLL_INTERVAL_MS)
     } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null
+      }
       inFlightRef.current = false
     }
   }
 
   useEffect(() => {
+    mountedRef.current = true
+
     if (!enabled) {
+      setUnreadCount(0)
+      setInlineMessage(null)
+      setHasLoaded(false)
+      setAuthExpired(false)
       return
     }
 
-    mountedRef.current = true
+    if (authenticatedMode && status !== 'authenticated') {
+      clearTimer()
+      controllerRef.current?.abort()
+      setUnreadCount(0)
+      setInlineMessage(null)
+      setHasLoaded(status !== 'loading')
+      setAuthExpired(status === 'unauthenticated')
+      return () => {
+        mountedRef.current = false
+        clearTimer()
+        controllerRef.current?.abort()
+      }
+    }
 
-    if (!hasWatchAlertSession()) {
+    if (!authenticatedMode && !hasWatchAlertSession()) {
       setUnreadCount(0)
       setInlineMessage('登录状态已失效，请重新登录')
       setHasLoaded(true)
@@ -140,9 +178,11 @@ export function NotificationBell() {
       return () => {
         mountedRef.current = false
         clearTimer()
+        controllerRef.current?.abort()
       }
     }
 
+    setAuthExpired(false)
     void refreshUnreadCount()
 
     const handleUnreadRefresh = () => {
@@ -170,27 +210,30 @@ export function NotificationBell() {
     return () => {
       mountedRef.current = false
       clearTimer()
+      controllerRef.current?.abort()
       window.removeEventListener(WATCH_ALERT_UNREAD_REFRESH_EVENT, handleUnreadRefresh)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleFocus)
     }
-  }, [enabled, authExpired])
+  }, [authenticatedMode, canPoll, enabled, status, user?.public_id])
+
+  const showBadge = unreadCount > 0
+  const badgeText = unreadCount > 99 ? '99+' : String(unreadCount)
+  const ariaLabel = authExpired
+    ? '通知铃铛，登录状态已失效'
+    : inlineMessage && !showBadge
+      ? `通知铃铛，${inlineMessage}`
+      : showBadge
+        ? `通知铃铛，当前 ${unreadCount} 条未读通知`
+        : '通知铃铛，当前无未读通知'
 
   if (!enabled) {
     return null
   }
 
-  const showBadge = unreadCount > 0
-  const badgeText = unreadCount > 99 ? '99+' : String(unreadCount)
-  const ariaLabel = useMemo(() => {
-    if (authExpired) {
-      return '通知铃铛，登录状态已失效'
-    }
-    if (inlineMessage && !showBadge) {
-      return `通知铃铛，${inlineMessage}`
-    }
-    return showBadge ? `通知铃铛，当前 ${unreadCount} 条未读通知` : '通知铃铛，当前无未读通知'
-  }, [authExpired, inlineMessage, showBadge, unreadCount])
+  if (authenticatedMode && status !== 'authenticated') {
+    return null
+  }
 
   return (
     <div style={{ display: 'grid', gap: 6 }}>

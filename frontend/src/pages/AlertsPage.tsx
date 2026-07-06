@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   dismissAlert,
   dispatchWatchAlertUnreadRefresh,
-  isWatchAlertUiEnabled,
   listAlerts,
   listWatchTargets,
   markAlertRead,
   markAllAlertsRead,
 } from '../api/watchAlerts'
+import { useAuth } from '../auth/useAuth'
+import {
+  getWatchAlertIdentityMode,
+  getWatchAlertInvalidConfigMessage,
+} from '../features/watchAlerts/identity'
 import {
   type AlertStatus,
   type WatchAlert,
@@ -100,17 +104,20 @@ function StatusBadge({ status }: { status: AlertStatus }) {
   )
 }
 
-async function loadAllWatchTargets() {
+async function loadAllWatchTargets(signal?: AbortSignal) {
   const items: WatchTarget[] = []
   let page = 1
   const pageSize = 100
   let total = 0
 
   do {
-    const response = await listWatchTargets({
-      page,
-      page_size: pageSize,
-    })
+    const response = await listWatchTargets(
+      {
+        page,
+        page_size: pageSize,
+      },
+      { signal },
+    )
     items.push(...response.items)
     total = response.total
     page += 1
@@ -121,7 +128,10 @@ async function loadAllWatchTargets() {
 
 export function AlertsPage() {
   const navigate = useNavigate()
-  const featureEnabled = isWatchAlertUiEnabled()
+  const { refreshUser, status, user } = useAuth()
+  const identityMode = getWatchAlertIdentityMode()
+  const featureEnabled = identityMode !== 'disabled'
+  const authenticatedMode = identityMode === 'authenticated-user'
   const [items, setItems] = useState<WatchAlert[]>([])
   const [watchTargets, setWatchTargets] = useState<WatchTarget[]>([])
   const [page, setPage] = useState(1)
@@ -136,6 +146,10 @@ export function AlertsPage() {
   const [actionState, setActionState] = useState<{ id: string; action: 'read' | 'dismiss' } | null>(null)
   const [readAllLoading, setReadAllLoading] = useState(false)
   const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null)
+  const listControllerRef = useRef<AbortController | null>(null)
+  const filterControllerRef = useRef<AbortController | null>(null)
+  const listRequestSequenceRef = useRef(0)
+  const filterRequestSequenceRef = useRef(0)
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [pageSize, total])
   const hasUnreadAlerts = useMemo(() => items.some((item) => item.status === 'unread'), [items])
@@ -151,17 +165,52 @@ export function AlertsPage() {
   )
 
   const loadAlertPage = async (nextPage = page, preserveData = false) => {
+    if (identityMode === 'invalid') {
+      if (!preserveData) {
+        setItems([])
+        setTotal(0)
+      }
+      setErrorMessage(getAlertErrorMessage(new WatchAlertApiError({
+        status: 503,
+        code: 'WATCH_ALERT_IDENTITY_INVALID',
+        message: getWatchAlertInvalidConfigMessage(),
+        userMessage: getWatchAlertInvalidConfigMessage(),
+      })))
+      return
+    }
+
+    if (authenticatedMode && status !== 'authenticated') {
+      if (!preserveData) {
+        setItems([])
+        setTotal(0)
+      }
+      setErrorMessage(null)
+      return
+    }
+
+    listControllerRef.current?.abort()
+    const requestSequence = listRequestSequenceRef.current + 1
+    listRequestSequenceRef.current = requestSequence
+    const controller = new AbortController()
+    listControllerRef.current = controller
+
     setLoading(true)
     setErrorMessage(null)
 
     try {
-      const response = await listAlerts({
-        status: statusFilter || undefined,
-        severity: severityFilter || undefined,
-        watch_target_id: watchTargetFilter || undefined,
-        page: nextPage,
-        page_size: pageSize,
-      })
+      const response = await listAlerts(
+        {
+          status: statusFilter || undefined,
+          severity: severityFilter || undefined,
+          watch_target_id: watchTargetFilter || undefined,
+          page: nextPage,
+          page_size: pageSize,
+        },
+        { signal: controller.signal },
+      )
+      if (listRequestSequenceRef.current !== requestSequence) {
+        return
+      }
 
       if (response.total > 0 && response.items.length === 0 && nextPage > 1) {
         setPage(nextPage - 1)
@@ -171,12 +220,26 @@ export function AlertsPage() {
       setItems(response.items)
       setTotal(response.total)
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+      if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+        if (!preserveData) {
+          setItems([])
+          setTotal(0)
+        }
+        await refreshUser()
+        return
+      }
       if (!preserveData) {
         setItems([])
         setTotal(0)
       }
       setErrorMessage(getAlertErrorMessage(error))
     } finally {
+      if (listControllerRef.current === controller) {
+        listControllerRef.current = null
+      }
       setLoading(false)
     }
   }
@@ -187,9 +250,10 @@ export function AlertsPage() {
     }
 
     void loadAlertPage(page)
-    // Filters and paging intentionally drive loading from here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featureEnabled, page, pageSize, statusFilter, severityFilter, watchTargetFilter])
+    return () => {
+      listControllerRef.current?.abort()
+    }
+  }, [authenticatedMode, featureEnabled, identityMode, page, pageSize, severityFilter, status, statusFilter, user?.public_id, watchTargetFilter])
 
   useEffect(() => {
     if (!featureEnabled) {
@@ -197,18 +261,62 @@ export function AlertsPage() {
     }
 
     const loadFilterTargets = async () => {
-      try {
-        setWatchTargets(await loadAllWatchTargets())
-      } catch {
+      if (identityMode === 'invalid') {
         setWatchTargets([])
+        return
+      }
+
+      if (authenticatedMode && status !== 'authenticated') {
+        setWatchTargets([])
+        return
+      }
+
+      filterControllerRef.current?.abort()
+      const requestSequence = filterRequestSequenceRef.current + 1
+      filterRequestSequenceRef.current = requestSequence
+      const controller = new AbortController()
+      filterControllerRef.current = controller
+
+      try {
+        const items = await loadAllWatchTargets(controller.signal)
+        if (filterRequestSequenceRef.current !== requestSequence) {
+          return
+        }
+        setWatchTargets(items)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+        if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+          await refreshUser()
+          return
+        }
+        setWatchTargets([])
+      } finally {
+        if (filterControllerRef.current === controller) {
+          filterControllerRef.current = null
+        }
       }
     }
 
     void loadFilterTargets()
-  }, [featureEnabled])
+    return () => {
+      filterControllerRef.current?.abort()
+    }
+  }, [authenticatedMode, featureEnabled, identityMode, refreshUser, status, user?.public_id])
 
   if (!featureEnabled) {
     return <Navigate to="/dashboard" replace />
+  }
+
+  if (identityMode === 'invalid') {
+    return (
+      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 20px 48px', background: '#f8fafc', minHeight: '100vh' }}>
+        <div style={{ border: '1px solid #fecaca', borderRadius: 16, padding: 24, background: '#fff', color: '#991b1b' }}>
+          {getWatchAlertInvalidConfigMessage()}
+        </div>
+      </div>
+    )
   }
 
   const executeRowAction = async (
@@ -226,6 +334,13 @@ export function AlertsPage() {
       dispatchWatchAlertUnreadRefresh()
       setActionMessage(action === 'read' ? '通知已标记为已读' : '通知已忽略')
     } catch (error) {
+      if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+        setItems([])
+        setTotal(0)
+        setWatchTargets([])
+        await refreshUser()
+        return
+      }
       setErrorMessage(getAlertErrorMessage(error))
     } finally {
       setActionState(null)
@@ -243,6 +358,13 @@ export function AlertsPage() {
       dispatchWatchAlertUnreadRefresh()
       setActionMessage(`已全部标记已读，本次更新 ${updatedCount} 条`)
     } catch (error) {
+      if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+        setItems([])
+        setTotal(0)
+        setWatchTargets([])
+        await refreshUser()
+        return
+      }
       setErrorMessage(getAlertErrorMessage(error))
     } finally {
       setReadAllLoading(false)

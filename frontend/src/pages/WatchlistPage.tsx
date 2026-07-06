@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   deleteWatchTarget,
-  isWatchAlertUiEnabled,
   listWatchTargets,
   runWatchTarget,
   updateWatchTarget,
 } from '../api/watchAlerts'
+import { useAuth } from '../auth/useAuth'
 import { SignalList } from '../components/SignalList'
+import {
+  getWatchAlertIdentityMode,
+  getWatchAlertInvalidConfigMessage,
+} from '../features/watchAlerts/identity'
+import { buildApiUrl } from '../services/api'
 import {
   type WatchEntityType,
   type WatchFrequency,
@@ -16,8 +21,6 @@ import {
   WatchAlertApiError,
 } from '../types/watchAlerts'
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8000'
-
 function getErrorMessage(error: unknown) {
   if (error instanceof WatchAlertApiError) {
     return error.userMessage
@@ -25,8 +28,8 @@ function getErrorMessage(error: unknown) {
   return 'Request failed. Please try again.'
 }
 
-async function fetchOrganizationName(entityId: string) {
-  const response = await fetch(`${API_BASE}/api/dashboard/org/${encodeURIComponent(entityId)}`)
+async function fetchOrganizationName(entityId: string, signal?: AbortSignal) {
+  const response = await fetch(buildApiUrl(`/dashboard/org/${encodeURIComponent(entityId)}`), { signal })
   if (!response.ok) {
     return entityId
   }
@@ -41,7 +44,10 @@ function formatDate(value: string | null) {
 
 export function WatchlistPage() {
   const navigate = useNavigate()
-  const featureEnabled = isWatchAlertUiEnabled()
+  const { refreshUser, status, user } = useAuth()
+  const identityMode = getWatchAlertIdentityMode()
+  const featureEnabled = identityMode !== 'disabled'
+  const authenticatedMode = identityMode === 'authenticated-user'
   const [items, setItems] = useState<WatchTarget[]>([])
   const [entityNames, setEntityNames] = useState<Record<string, string>>({})
   const [page, setPage] = useState(1)
@@ -53,20 +59,52 @@ export function WatchlistPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [actionState, setActionState] = useState<{ id: string; action: string } | null>(null)
   const [expandedSignalsFor, setExpandedSignalsFor] = useState<string | null>(null)
+  const requestSequenceRef = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [pageSize, total])
 
   const loadWatchTargets = async (nextPage = page) => {
+    if (identityMode === 'invalid') {
+      setItems([])
+      setEntityNames({})
+      setTotal(0)
+      setExpandedSignalsFor(null)
+      setErrorMessage(getWatchAlertInvalidConfigMessage())
+      return
+    }
+
+    if (authenticatedMode && status !== 'authenticated') {
+      setItems([])
+      setEntityNames({})
+      setTotal(0)
+      setExpandedSignalsFor(null)
+      setErrorMessage(null)
+      return
+    }
+
+    controllerRef.current?.abort()
+    const requestSequence = requestSequenceRef.current + 1
+    requestSequenceRef.current = requestSequence
+    const controller = new AbortController()
+    controllerRef.current = controller
+
     setLoading(true)
     setErrorMessage(null)
 
     try {
-      const response = await listWatchTargets({
-        status: statusFilter || undefined,
-        entity_type: entityTypeFilter || undefined,
-        page: nextPage,
-        page_size: pageSize,
-      })
+      const response = await listWatchTargets(
+        {
+          status: statusFilter || undefined,
+          entity_type: entityTypeFilter || undefined,
+          page: nextPage,
+          page_size: pageSize,
+        },
+        { signal: controller.signal },
+      )
+      if (requestSequenceRef.current !== requestSequence) {
+        return
+      }
 
       setItems(response.items)
       setTotal(response.total)
@@ -74,17 +112,35 @@ export function WatchlistPage() {
       const organizationItems = response.items.filter((item) => item.entity_type === 'organization')
       const uniqueIds = [...new Set(organizationItems.map((item) => item.entity_id))]
       const names = await Promise.all(
-        uniqueIds.map(async (entityId) => [entityId, await fetchOrganizationName(entityId)] as const),
+        uniqueIds.map(async (entityId) => [entityId, await fetchOrganizationName(entityId, controller.signal)] as const),
       )
+      if (requestSequenceRef.current !== requestSequence) {
+        return
+      }
       setEntityNames((current) => ({
         ...current,
         ...Object.fromEntries(names),
       }))
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+      if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+        setItems([])
+        setEntityNames({})
+        setTotal(0)
+        setExpandedSignalsFor(null)
+        await refreshUser()
+        return
+      }
       setItems([])
+      setEntityNames({})
       setTotal(0)
       setErrorMessage(getErrorMessage(error))
     } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null
+      }
       setLoading(false)
     }
   }
@@ -94,12 +150,23 @@ export function WatchlistPage() {
       return
     }
     void loadWatchTargets(page)
-    // Pagination and filters intentionally drive loading from here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [featureEnabled, page, statusFilter, entityTypeFilter])
+    return () => {
+      controllerRef.current?.abort()
+    }
+  }, [authenticatedMode, entityTypeFilter, featureEnabled, identityMode, page, status, statusFilter, user?.public_id])
 
   if (!featureEnabled) {
     return <Navigate to="/dashboard" replace />
+  }
+
+  if (identityMode === 'invalid') {
+    return (
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 20px 48px', background: '#f8fafc', minHeight: '100vh' }}>
+        <div style={{ border: '1px solid #fecaca', borderRadius: 16, padding: 24, background: '#fff', color: '#991b1b' }}>
+          {getWatchAlertInvalidConfigMessage()}
+        </div>
+      </div>
+    )
   }
 
   const runAction = async (targetId: string, action: string, callback: () => Promise<void>) => {
@@ -109,6 +176,14 @@ export function WatchlistPage() {
       await callback()
       await loadWatchTargets(page)
     } catch (error) {
+      if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+        setItems([])
+        setEntityNames({})
+        setTotal(0)
+        setExpandedSignalsFor(null)
+        await refreshUser()
+        return
+      }
       setErrorMessage(getErrorMessage(error))
     } finally {
       setActionState(null)

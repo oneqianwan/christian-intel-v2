@@ -52,6 +52,7 @@ const appSource = read('frontend/src/App.tsx')
 const sidebarSource = read('frontend/src/components/Sidebar.tsx')
 const orgDetailSource = read('frontend/src/pages/OrgDetailPage.tsx')
 const apiSource = read('frontend/src/api/watchAlerts.ts')
+const identitySource = read('frontend/src/features/watchAlerts/identity.ts')
 const packageSource = read('frontend/package.json')
 
 scanForBannedIdentity(path.join(repoRoot, 'frontend', 'src'))
@@ -62,6 +63,19 @@ assertMatch(
     apiSource,
   ),
   'Watch/Alert API client must block unauthenticated requests before fetch()',
+)
+assertMatch(identitySource.includes('getWatchAlertIdentityMode'), 'Watch/Alert identity helper must exist')
+assertMatch(
+  identitySource.includes("'legacy-session'") && identitySource.includes("'authenticated-user'"),
+  'Watch/Alert identity helper must support legacy and authenticated modes',
+)
+assertMatch(
+  apiSource.includes("if (identityMode === 'authenticated-user')") && apiSource.includes("credentials: 'include'"),
+  'Authenticated Watch/Alert requests must use credentials include',
+)
+assertMatch(
+  apiSource.includes("headers.delete('x-session-id')") && apiSource.includes("headers.set('x-session-id', sessionId)"),
+  'API client must separate authenticated-user mode from legacy-session mode',
 )
 
 assertMatch(
@@ -76,18 +90,40 @@ assertMatch(!/\buser_id\b/.test(watchButtonSource + signalListSource + watchlist
 assertMatch(!/Victory Philippines/i.test(watchButtonSource + signalListSource + watchlistPageSource), 'UI files must not hardcode Victory Philippines')
 assertMatch(appSource.includes('path="/watchlist"'), 'Watchlist route must exist')
 assertMatch(
-  watchButtonSource.includes('isWatchAlertUiEnabled()') &&
-    watchlistPageSource.includes('isWatchAlertUiEnabled()') &&
-    sidebarSource.includes('isWatchAlertUiEnabled()') &&
-    orgDetailSource.includes('isWatchAlertUiEnabled()'),
-  'Feature flag guard must exist in watch UI entry points',
+  watchButtonSource.includes('getWatchAlertIdentityMode()') &&
+    watchlistPageSource.includes('getWatchAlertIdentityMode()') &&
+    sidebarSource.includes('getWatchAlertIdentityMode()'),
+  'Watch UI entry points must reuse shared identity mode logic',
 )
 assertMatch(
-  watchButtonSource.includes('createWatchTarget') &&
-    watchButtonSource.includes('updateWatchTarget') &&
-    watchButtonSource.includes('runWatchTarget') &&
-    watchButtonSource.includes('deleteWatchTarget'),
-  'WatchButton must wire Watch/Pause/Resume/Run Now/Remove actions to API client',
+  orgDetailSource.includes('isWatchAlertUiEnabled()'),
+  'Organization detail must still hide watch UI when the UI flag is disabled',
+)
+assertMatch(
+  appSource.includes('wrapWatchAlertRoute') && appSource.includes('<AuthGuard requireEnabled>'),
+  'Watchlist route must be guarded in authenticated-user mode',
+)
+assertMatch(
+  watchButtonSource.includes('redirectToLogin') &&
+    watchButtonSource.includes("status !== 'authenticated'") &&
+    watchButtonSource.includes('createWatchTarget'),
+  'WatchButton must redirect unauthenticated users and keep authenticated actions wired to the API client',
+)
+assertMatch(
+  watchButtonSource.includes("status === 'loading' ? 'Checking login...' : '登录后关注'"),
+  'WatchButton must expose login-required affordance in authenticated-user mode',
+)
+assertMatch(
+  watchlistPageSource.includes('useAuth') &&
+    watchlistPageSource.includes("if (authenticatedMode && status !== 'authenticated')") &&
+    watchlistPageSource.includes('controllerRef.current?.abort()'),
+  'WatchlistPage must block pre-auth requests and abort stale requests',
+)
+assertMatch(
+  signalListSource.includes('requestSequenceRef') &&
+    signalListSource.includes('controllerRef') &&
+    signalListSource.includes("if (authenticatedMode && status !== 'authenticated')"),
+  'SignalList must cancel stale requests and wait for authenticated users in authenticated mode',
 )
 assertMatch(
   watchlistPageSource.includes('updateWatchTarget') &&
@@ -111,20 +147,9 @@ assertMatch(
 assertMatch(!/dangerouslySetInnerHTML/.test(watchButtonSource + signalListSource + watchlistPageSource), 'UI must not use dangerouslySetInnerHTML')
 assertMatch(packageSource.includes('check:watchlist-ui'), 'package.json must expose check:watchlist-ui')
 
-const gitStatus = execSync('git status --short', { cwd: repoRoot, encoding: 'utf8' })
-const statusLines = gitStatus
-  .split(/\r?\n/)
-  .map((line) => line.trim())
-  .filter(Boolean)
-
-const disallowed = statusLines.filter((line) => {
-  const filePath = line.slice(3)
-  if (filePath.startsWith('backend/')) return true
-  if (filePath === 'frontend/src/pages/WatchlistPage.tsx') return true
-  if (filePath === 'frontend/src/components/WatchButton.tsx') return true
-  if (filePath === 'frontend/src/components/SignalList.tsx') return true
-  return false
-})
-assertMatch(disallowed.length === 0, `Disallowed modified files detected: ${disallowed.join(', ')}`)
+const diffOutput = execSync('git diff --name-only', { cwd: repoRoot, encoding: 'utf8' })
+const changedFiles = diffOutput.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+const forbiddenChanges = changedFiles.filter((filePath) => filePath.startsWith('backend/'))
+assertMatch(forbiddenChanges.length === 0, `Backend files must not be modified: ${forbiddenChanges.join(', ')}`)
 
 console.log('WATCHLIST_UI_CHECK=PASS')

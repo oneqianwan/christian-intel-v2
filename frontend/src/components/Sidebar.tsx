@@ -1,21 +1,24 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/useAuth'
+import { getWatchAlertIdentityMode, isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
 import { useConversationStore } from '../stores/conversationStore'
 import { buildApiUrl, createConversation, fetchConversations } from '../services/api'
 import type { Conversation } from '../stores/conversationStore'
-import { isWatchAlertUiEnabled } from '../api/watchAlerts'
 import { NotificationBell } from './NotificationBell'
 import { UserMenu } from './UserMenu'
 
 function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { status } = useAuth()
   const { conversations, currentId, setConversations, setCurrentId, addConversation } = useConversationStore()
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [hoverId, setHoverId] = useState<string | null>(null)
   const showWatchlistNav = isWatchAlertUiEnabled()
+  const watchAlertIdentityMode = getWatchAlertIdentityMode()
   const watchlistActive = location.pathname.startsWith('/watchlist')
   const alertsActive = location.pathname.startsWith('/alerts')
 
@@ -110,6 +113,19 @@ function Sidebar() {
     fontWeight: active ? 600 : 500,
   })
 
+  const navigateToWatchAlertRoute = (path: '/watchlist' | '/alerts') => {
+    if (watchAlertIdentityMode === 'authenticated-user' && status !== 'authenticated') {
+      navigate('/login', {
+        state: {
+          from: path,
+          message: '登录后可访问 Watch / Alert 页面。',
+        },
+      })
+      return
+    }
+    navigate(path)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ padding: '16px', borderBottom: '1px solid #e0e0e0' }}>
@@ -127,14 +143,14 @@ function Sidebar() {
             <NotificationBell />
             <button
               type="button"
-              onClick={() => navigate('/watchlist')}
+              onClick={() => navigateToWatchAlertRoute('/watchlist')}
               style={navButtonStyle(watchlistActive)}
             >
               Watchlist
             </button>
             <button
               type="button"
-              onClick={() => navigate('/alerts')}
+              onClick={() => navigateToWatchAlertRoute('/alerts')}
               style={navButtonStyle(alertsActive)}
             >
               Alerts

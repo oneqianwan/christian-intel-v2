@@ -62,12 +62,14 @@ try {
   scanForBannedIdentity(scriptsRoot)
 
   const apiPath = path.join(srcRoot, 'api', 'watchAlerts.ts')
+  const identityPath = path.join(srcRoot, 'features', 'watchAlerts', 'identity.ts')
   const bellPath = path.join(srcRoot, 'components', 'NotificationBell.tsx')
   const watchButtonPath = path.join(srcRoot, 'components', 'WatchButton.tsx')
   const watchlistPath = path.join(srcRoot, 'pages', 'WatchlistPage.tsx')
   const alertsPath = path.join(srcRoot, 'pages', 'AlertsPage.tsx')
 
   const apiSource = read(apiPath)
+  const identitySource = read(identityPath)
   const bellSource = read(bellPath)
   const watchButtonSource = read(watchButtonPath)
   const watchlistSource = read(watchlistPath)
@@ -79,6 +81,13 @@ try {
     'Watch/Alert UI must not send or mention user_id',
   )
 
+  assertMatch(identitySource.includes('getWatchAlertIdentityMode'), 'Identity mode helper must exist')
+  assertMatch(
+    identitySource.includes("'legacy-session'") &&
+      identitySource.includes("'authenticated-user'") &&
+      identitySource.includes("'invalid'"),
+    'Identity mode helper must support legacy/authenticated/invalid modes',
+  )
   assertMatch(apiSource.includes('export function hasWatchAlertSession'), 'API must expose hasWatchAlertSession()')
   assertMatch(!/DEFAULT_SESSION_ID/.test(apiSource), 'Watch/Alert API client must not define a default session id')
   assertMatch(
@@ -87,7 +96,13 @@ try {
     ),
     'API client must reject unauthenticated requests without falling back',
   )
-  assertOrder(apiSource, 'const sessionId = getStoredSessionId()', 'if (!sessionId)', "headers.set('x-session-id'", 'fetch(')
+  assertMatch(
+    apiSource.includes("if (identityMode === 'authenticated-user')") &&
+      apiSource.includes("credentials: 'include'") &&
+      apiSource.includes("headers.delete('x-session-id')"),
+    'Authenticated mode must use credentials include and remove legacy headers',
+  )
+  assertOrder(apiSource, 'const sessionId = getStoredSessionId()', 'if (!sessionId)', "headers.set('x-session-id'")
   assertMatch(!/headers\.set\(['"]x-session-id['"],\s*['"`]/.test(apiSource), 'x-session-id header must not be hardcoded')
 
   assertMatch(
@@ -107,22 +122,39 @@ try {
     'runWatchTarget must use shared request helper (unauthenticated calls should be blocked there)',
   )
 
+  assertMatch(bellSource.includes('getWatchAlertIdentityMode'), 'NotificationBell must use identity mode helper')
   assertMatch(bellSource.includes('hasWatchAlertSession'), 'NotificationBell must check auth presence')
   assertMatch(
-    bellSource.includes("if (!hasWatchAlertSession())") && bellSource.includes('setAuthExpired(true)'),
-    'NotificationBell must stop polling and show auth-expired state when unauthenticated',
+    bellSource.includes("status === 'authenticated'") && bellSource.includes('const canPoll'),
+    'NotificationBell must only poll for authenticated users in authenticated mode',
   )
-  const unauthIndex = bellSource.indexOf("if (!hasWatchAlertSession())")
-  const awaitUnreadIndex = bellSource.indexOf('await getUnreadAlertCount()')
   assertMatch(
-    unauthIndex >= 0 && awaitUnreadIndex >= 0 && unauthIndex < awaitUnreadIndex,
-    'NotificationBell must check auth presence before calling getUnreadAlertCount()',
+    bellSource.includes("if (!authenticatedMode && !hasWatchAlertSession())") && bellSource.includes('setAuthExpired(true)'),
+    'NotificationBell must stop polling and show auth-expired state in legacy mode when unauthenticated',
+  )
+  assertMatch(
+    bellSource.includes('await getUnreadAlertCount({ signal: controller.signal })'),
+    'NotificationBell must pass AbortSignal to unread-count polling',
   )
   assertMatch(
     bellSource.includes('status === 401') && bellSource.includes('setAuthExpired(true)'),
     'NotificationBell must stop polling after receiving 401',
   )
-  assertMatch(bellSource.includes('clearTimer'), 'NotificationBell must cleanup polling timer')
+  assertMatch(
+    bellSource.includes('clearTimer') && bellSource.includes('controllerRef.current?.abort()'),
+    'NotificationBell must cleanup timer and abort in-flight requests',
+  )
+  assertMatch(
+    watchButtonSource.includes("status !== 'authenticated'") &&
+      watchButtonSource.includes('redirectToLogin') &&
+      watchButtonSource.includes('useAuth'),
+    'WatchButton must redirect unauthenticated users in authenticated mode',
+  )
+  assertMatch(
+    watchlistSource.includes("if (authenticatedMode && status !== 'authenticated')") &&
+      alertsSource.includes("if (authenticatedMode && status !== 'authenticated')"),
+    'Watchlist and Alerts pages must avoid data requests before authentication is ready',
+  )
 
   const status = execSync('git status --short', { cwd: repoRoot, encoding: 'utf8' })
   const modified = status

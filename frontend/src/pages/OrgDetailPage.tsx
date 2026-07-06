@@ -8,10 +8,9 @@ import {
   RadarChart,
   ResponsiveContainer,
 } from 'recharts'
-import { isWatchAlertUiEnabled } from '../api/watchAlerts'
+import { isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
 import { WatchButton } from '../components/WatchButton'
-
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || 'http://localhost:8000'
+import { buildApiUrl } from '../services/api'
 
 interface OrgDetail {
   id: string
@@ -104,7 +103,7 @@ export function OrgDetailPage() {
 
   const fetchOrg = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard/org/${orgId}`)
+      const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}`))
       if (!res.ok) throw new Error('fetch org failed')
       const data = (await res.json()) as OrgDetail
       setOrg(data)
@@ -118,7 +117,7 @@ export function OrgDetailPage() {
 
   const fetchRelations = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard/org/${orgId}/relations`)
+      const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}/relations`))
       if (!res.ok) throw new Error('fetch relations failed')
       const data = await res.json()
       setRelations(Array.isArray(data.relations) ? data.relations : [])
@@ -130,7 +129,7 @@ export function OrgDetailPage() {
 
   const fetchTimeline = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/dashboard/org/${orgId}/timeline?limit=20`)
+      const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}/timeline?limit=20`))
       if (!res.ok) throw new Error('fetch timeline failed')
       const data = await res.json()
       setTimeline(Array.isArray(data.items) ? data.items : [])

@@ -60,6 +60,7 @@ const alertsPageSource = read(alertsPagePath)
 const appSource = read(appPath)
 const sidebarSource = read(sidebarPath)
 const apiSource = read(apiPath)
+const identitySource = read('frontend/src/features/watchAlerts/identity.ts')
 const packageSource = read(packagePath)
 
 scanForBannedIdentity(path.join(repoRoot, 'frontend', 'src'))
@@ -72,27 +73,43 @@ assertMatch(
   ),
   'API client must block unauthenticated requests before fetch()',
 )
+assertMatch(identitySource.includes('getWatchAlertIdentityMode'), 'Watch/Alert identity helper must exist')
+assertMatch(
+  apiSource.includes("credentials: 'include'") && apiSource.includes("headers.delete('x-session-id')"),
+  'Authenticated alerts requests must use credentials include without legacy session headers',
+)
 
 assertMatch(appSource.includes('path="/alerts"'), 'Alerts route must exist in App.tsx')
-assertMatch(sidebarSource.includes('Alerts') && sidebarSource.includes("navigate('/alerts')"), 'Alerts nav entry must exist')
 assertMatch(
-  bellSource.includes('isWatchAlertUiEnabled()') &&
-    alertsPageSource.includes('isWatchAlertUiEnabled()') &&
-    sidebarSource.includes('isWatchAlertUiEnabled()'),
-  'Feature flag guard must exist in alerts entry points',
+  appSource.includes('wrapWatchAlertRoute') && appSource.includes('<AuthGuard requireEnabled>'),
+  'Alerts route must be guarded in authenticated-user mode',
+)
+assertMatch(
+  sidebarSource.includes('Alerts') && sidebarSource.includes('navigateToWatchAlertRoute'),
+  'Alerts nav entry must exist and route through the shared Watch/Alert navigation guard',
+)
+assertMatch(
+  bellSource.includes('getWatchAlertIdentityMode') &&
+    alertsPageSource.includes('getWatchAlertIdentityMode') &&
+    sidebarSource.includes('getWatchAlertIdentityMode'),
+  'Alerts entry points must reuse the shared identity mode helper',
 )
 assertMatch(
   bellSource.includes('if (!enabled) {') && bellSource.includes('return null'),
   'NotificationBell must not render when feature flag is disabled',
 )
 assertMatch(
-  bellSource.includes('if (!enabled) {') && bellSource.includes('return') && bellSource.includes('useEffect'),
-  'NotificationBell must not poll when feature flag is disabled',
+  bellSource.includes("status === 'authenticated'") && bellSource.includes('const canPoll'),
+  'NotificationBell must only poll while authenticated in authenticated-user mode',
 )
 assertMatch(bellSource.includes('getUnreadAlertCount'), 'NotificationBell must use getUnreadAlertCount')
 assertMatch(
-  bellSource.includes('hasWatchAlertSession') && bellSource.includes('if (!hasWatchAlertSession())'),
-  'NotificationBell must avoid unread-count polling when unauthenticated',
+  bellSource.includes('hasWatchAlertSession') && bellSource.includes("if (!authenticatedMode && !hasWatchAlertSession())"),
+  'NotificationBell must avoid unread-count polling when unauthenticated in legacy mode',
+)
+assertMatch(
+  bellSource.includes('await getUnreadAlertCount({ signal: controller.signal })'),
+  'NotificationBell unread polling must pass AbortSignal',
 )
 assertMatch(alertsPageSource.includes('listAlerts'), 'AlertsPage must use listAlerts')
 assertMatch(alertsPageSource.includes('markAlertRead'), 'AlertsPage must use markAlertRead')
@@ -116,12 +133,18 @@ assertMatch(
   'NotificationBell polling must have cleanup logic',
 )
 assertMatch(
-  bellSource.includes('inFlightRef.current'),
-  'NotificationBell must guard against concurrent unread-count requests',
+  bellSource.includes('inFlightRef.current') && bellSource.includes('controllerRef'),
+  'NotificationBell must guard against concurrent unread-count requests and abort stale polls',
 )
 assertMatch(
   bellSource.includes('status === 401') && bellSource.includes('setAuthExpired(true)'),
   'NotificationBell must stop or avoid continued polling after 401',
+)
+assertMatch(
+  alertsPageSource.includes('useAuth') &&
+    alertsPageSource.includes("if (authenticatedMode && status !== 'authenticated')") &&
+    alertsPageSource.includes('listControllerRef.current?.abort()'),
+  'AlertsPage must block pre-auth requests and abort stale list requests',
 )
 assertMatch(
   sidebarSource.includes('showWatchlistNav') && sidebarSource.includes('Alerts'),
@@ -147,9 +170,6 @@ const statusLines = gitStatus
 const disallowed = statusLines.filter((line) => {
   const filePath = line.slice(3)
   if (filePath.startsWith('backend/')) return true
-  if (filePath === 'frontend/src/pages/WatchlistPage.tsx') return true
-  if (filePath === 'frontend/src/components/WatchButton.tsx') return true
-  if (filePath === 'frontend/src/components/SignalList.tsx') return true
   if (filePath.includes('Chat')) return true
   if (filePath.includes('Dashboard')) return true
   if (filePath.includes('Insight')) return true

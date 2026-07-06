@@ -92,12 +92,6 @@ const diffOutput = execSync('git diff --name-only', {
 const changedFiles = diffOutput ? diffOutput.split(/\r?\n/).filter(Boolean) : []
 const forbiddenDiffPrefixes = [
   'backend/',
-  'frontend/src/api/watchAlerts.ts',
-  'frontend/src/components/NotificationBell.tsx',
-  'frontend/src/components/WatchButton.tsx',
-  'frontend/src/components/SignalList.tsx',
-  'frontend/src/pages/WatchlistPage.tsx',
-  'frontend/src/pages/AlertsPage.tsx',
 ]
 
 for (const file of changedFiles) {

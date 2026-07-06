@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { listWatchTargetSignals } from '../api/watchAlerts'
+import { useAuth } from '../auth/useAuth'
+import { getWatchAlertIdentityMode, getWatchAlertInvalidConfigMessage } from '../features/watchAlerts/identity'
 import {
   type WatchSeverity,
   type WatchSignal,
@@ -82,6 +84,9 @@ function SeverityBadge({ severity }: { severity: WatchSeverity }) {
 }
 
 export function SignalList({ watchTargetId }: SignalListProps) {
+  const { refreshUser, status, user } = useAuth()
+  const identityMode = getWatchAlertIdentityMode()
+  const authenticatedMode = identityMode === 'authenticated-user'
   const [items, setItems] = useState<WatchSignal[]>([])
   const [page, setPage] = useState(1)
   const [pageSize] = useState(5)
@@ -90,34 +95,86 @@ export function SignalList({ watchTargetId }: SignalListProps) {
   const [severity, setSeverity] = useState<'' | WatchSeverity>('')
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const requestSequenceRef = useRef(0)
+  const controllerRef = useRef<AbortController | null>(null)
+
+  const clearData = () => {
+    setItems([])
+    setTotal(0)
+    setErrorMessage(null)
+  }
 
   const loadSignals = async (params?: Partial<WatchSignalListParams>) => {
+    if (!watchTargetId) {
+      clearData()
+      return
+    }
+
+    if (identityMode === 'invalid') {
+      clearData()
+      setErrorMessage(getWatchAlertInvalidConfigMessage())
+      return
+    }
+
+    if (authenticatedMode && status !== 'authenticated') {
+      clearData()
+      return
+    }
+
+    controllerRef.current?.abort()
+    const requestSequence = requestSequenceRef.current + 1
+    requestSequenceRef.current = requestSequence
+    const controller = new AbortController()
+    controllerRef.current = controller
+
     setLoading(true)
     setErrorMessage(null)
 
     try {
-      const response = await listWatchTargetSignals(watchTargetId, {
-        signal_type: (params?.signal_type ?? signalType) || undefined,
-        severity: (params?.severity ?? severity) || undefined,
-        page: params?.page ?? page,
-        page_size: pageSize,
-      })
+      const response = await listWatchTargetSignals(
+        watchTargetId,
+        {
+          signal_type: (params?.signal_type ?? signalType) || undefined,
+          severity: (params?.severity ?? severity) || undefined,
+          page: params?.page ?? page,
+          page_size: pageSize,
+        },
+        { signal: controller.signal },
+      )
+      if (requestSequenceRef.current !== requestSequence) {
+        return
+      }
       setItems(response.items)
       setTotal(response.total)
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+      if (requestSequenceRef.current !== requestSequence) {
+        return
+      }
+      if (authenticatedMode && error instanceof WatchAlertApiError && error.status === 401) {
+        clearData()
+        await refreshUser()
+        return
+      }
       setErrorMessage(getErrorMessage(error))
       setItems([])
       setTotal(0)
     } finally {
+      if (controllerRef.current === controller) {
+        controllerRef.current = null
+      }
       setLoading(false)
     }
   }
 
   useEffect(() => {
     void loadSignals()
-    // page and filter state intentionally drive loading here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchTargetId, page, signalType, severity])
+    return () => {
+      controllerRef.current?.abort()
+    }
+  }, [authenticatedMode, identityMode, page, refreshUser, severity, signalType, status, user?.public_id, watchTargetId])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
