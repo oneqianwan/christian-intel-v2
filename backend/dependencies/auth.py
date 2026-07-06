@@ -6,7 +6,7 @@ from datetime import datetime
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from config import settings
+import config
 from models.auth import AuthSession, User
 from models.database import get_db
 from schemas.watch_alert import ApiErrorResponse
@@ -21,12 +21,12 @@ def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
 
 
 def require_auth_enabled() -> None:
-    if not bool(settings.AUTH_V1_ENABLED):
+    if not bool(config.settings.AUTH_V1_ENABLED):
         _raise_api_error(status.HTTP_503_SERVICE_UNAVAILABLE, "AUTH_DISABLED", "Auth is disabled")
 
 
 def _get_cookie_token(request: Request) -> str:
-    cookie_name = str(settings.AUTH_COOKIE_NAME or "").strip()
+    cookie_name = str(config.settings.AUTH_COOKIE_NAME or "").strip()
     return str(request.cookies.get(cookie_name) or "")
 
 
@@ -36,11 +36,7 @@ class AuthContext:
     session: AuthSession
 
 
-def get_current_auth_context(
-    request: Request,
-    _: None = Depends(require_auth_enabled),
-    db: Session = Depends(get_db),
-) -> AuthContext:
+def _resolve_auth_context(*, request: Request, db: Session, touch_last_seen: bool) -> AuthContext:
     raw_token = _get_cookie_token(request).strip()
     if not raw_token:
         _raise_api_error(status.HTTP_401_UNAUTHORIZED, "AUTH_REQUIRED", "Authentication required")
@@ -69,8 +65,25 @@ def get_current_auth_context(
     if status_value == "pending":
         _raise_api_error(status.HTTP_403_FORBIDDEN, "ACCOUNT_PENDING", "Account pending")
 
-    touch_session_last_seen(db, session=session)
+    if touch_last_seen:
+        touch_session_last_seen(db, session=session)
     return AuthContext(user=user, session=session)
+
+
+def get_current_auth_context(
+    request: Request,
+    _: None = Depends(require_auth_enabled),
+    db: Session = Depends(get_db),
+) -> AuthContext:
+    return _resolve_auth_context(request=request, db=db, touch_last_seen=True)
+
+
+def get_current_auth_context_no_touch(
+    request: Request,
+    _: None = Depends(require_auth_enabled),
+    db: Session = Depends(get_db),
+) -> AuthContext:
+    return _resolve_auth_context(request=request, db=db, touch_last_seen=False)
 
 
 def get_current_auth_session(context: AuthContext = Depends(get_current_auth_context)) -> AuthSession:
@@ -82,4 +95,12 @@ def get_current_user(context: AuthContext = Depends(get_current_auth_context)) -
 
 
 def require_authenticated_user(user: User = Depends(get_current_user)) -> User:
+    return user
+
+
+def get_current_user_no_touch(context: AuthContext = Depends(get_current_auth_context_no_touch)) -> User:
+    return context.user
+
+
+def require_authenticated_user_no_touch(user: User = Depends(get_current_user_no_touch)) -> User:
     return user

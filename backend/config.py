@@ -152,6 +152,8 @@ class Settings(BaseSettings):
     AUTH_PASSWORD_PARALLELISM: int = 4
     AUTH_PASSWORD_HASH_LEN: int = 32
     AUTH_PASSWORD_SALT_LEN: int = 16
+    AUTH_PASSWORD_MIN_LENGTH: int = 12
+    AUTH_PASSWORD_MAX_LENGTH: int = 128
     WATCH_ALERT_SCHEDULER_INTERVAL_SECONDS: int = 300
     WATCH_ALERT_MAX_RETRIES: int = 3
     WATCH_ALERT_RETRY_BASE_SECONDS: int = 300
@@ -201,6 +203,12 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_PASSWORD_HASH_LEN must be > 0")
         if int(self.AUTH_PASSWORD_SALT_LEN or 0) <= 0:
             raise ValueError("AUTH_PASSWORD_SALT_LEN must be > 0")
+        if int(self.AUTH_PASSWORD_MIN_LENGTH or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_MIN_LENGTH must be > 0")
+        if int(self.AUTH_PASSWORD_MAX_LENGTH or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_MAX_LENGTH must be > 0")
+        if int(self.AUTH_PASSWORD_MIN_LENGTH) > int(self.AUTH_PASSWORD_MAX_LENGTH):
+            raise ValueError("AUTH_PASSWORD_MIN_LENGTH must be <= AUTH_PASSWORD_MAX_LENGTH")
         return self
 
     @property

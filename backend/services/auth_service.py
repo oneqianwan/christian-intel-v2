@@ -15,7 +15,7 @@ from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchErro
 from argon2.low_level import Type
 from sqlalchemy.orm import Session
 
-from config import settings
+import config
 from models.auth import AuthSession, User
 
 
@@ -33,11 +33,11 @@ def normalize_email(email: str) -> str:
 
 def _password_hasher() -> PasswordHasher:
     return PasswordHasher(
-        time_cost=int(settings.AUTH_PASSWORD_TIME_COST),
-        memory_cost=int(settings.AUTH_PASSWORD_MEMORY_COST_KIB),
-        parallelism=int(settings.AUTH_PASSWORD_PARALLELISM),
-        hash_len=int(settings.AUTH_PASSWORD_HASH_LEN),
-        salt_len=int(settings.AUTH_PASSWORD_SALT_LEN),
+        time_cost=int(config.settings.AUTH_PASSWORD_TIME_COST),
+        memory_cost=int(config.settings.AUTH_PASSWORD_MEMORY_COST_KIB),
+        parallelism=int(config.settings.AUTH_PASSWORD_PARALLELISM),
+        hash_len=int(config.settings.AUTH_PASSWORD_HASH_LEN),
+        salt_len=int(config.settings.AUTH_PASSWORD_SALT_LEN),
         type=Type.ID,
     )
 
@@ -63,6 +63,17 @@ def needs_rehash(password_hash: str) -> bool:
         return bool(_password_hasher().check_needs_rehash(str(password_hash)))
     except Exception:
         return False
+
+
+def validate_new_password(password: str) -> None:
+    if password is None:
+        raise AuthError(422, "PASSWORD_TOO_SHORT", "Password too short")
+    if len(password) < int(config.settings.AUTH_PASSWORD_MIN_LENGTH):
+        raise AuthError(422, "PASSWORD_TOO_SHORT", "Password too short")
+    if len(password) > int(config.settings.AUTH_PASSWORD_MAX_LENGTH):
+        raise AuthError(422, "PASSWORD_TOO_LONG", "Password too long")
+    if password.strip() == "":
+        raise AuthError(422, "PASSWORD_WHITESPACE_ONLY", "Password must not be whitespace only")
 
 
 def generate_session_token() -> str:
@@ -120,8 +131,8 @@ class LoginRateLimiter:
 
 
 _default_rate_limiter = LoginRateLimiter(
-    max_attempts=int(settings.AUTH_LOGIN_MAX_ATTEMPTS),
-    window_seconds=int(settings.AUTH_LOGIN_WINDOW_SECONDS),
+    max_attempts=int(config.settings.AUTH_LOGIN_MAX_ATTEMPTS),
+    window_seconds=int(config.settings.AUTH_LOGIN_WINDOW_SECONDS),
 )
 
 
@@ -145,7 +156,7 @@ def authenticate_user(
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
     limiter_key = _client_key(normalized_email=normalized, client_fingerprint=client_fingerprint)
-    if bool(settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
+    if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
         retry_after = _default_rate_limiter.is_limited(key=limiter_key)
         if retry_after is not None:
             raise AuthError(429, "LOGIN_RATE_LIMITED", "Too many login attempts", retry_after_seconds=retry_after)
@@ -154,7 +165,7 @@ def authenticate_user(
 
     if user is None:
         verify_password(_DUMMY_PASSWORD_HASH, password)
-        if bool(settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
+        if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
             _default_rate_limiter.record_failure(key=limiter_key)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
@@ -168,7 +179,7 @@ def authenticate_user(
         raise AuthError(403, "ACCOUNT_PENDING", "Account is pending")
 
     if not verify_password(user.password_hash, password):
-        if bool(settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
+        if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
             _default_rate_limiter.record_failure(key=limiter_key)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
@@ -180,7 +191,7 @@ def authenticate_user(
     db.flush()
     db.commit()
 
-    if bool(settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
+    if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
         _default_rate_limiter.clear(key=limiter_key)
 
     return user
@@ -189,7 +200,7 @@ def authenticate_user(
 def create_auth_session(db: Session, *, user: User) -> tuple[AuthSession, str]:
     raw_token = generate_session_token()
     token_hash = hash_session_token(raw_token)
-    expires_at = datetime.utcnow() + timedelta(seconds=int(settings.AUTH_SESSION_TTL_SECONDS))
+    expires_at = datetime.utcnow() + timedelta(seconds=int(config.settings.AUTH_SESSION_TTL_SECONDS))
 
     session = AuthSession(
         id=str(uuid.uuid4()),
@@ -228,7 +239,7 @@ def revoke_auth_session(db: Session, *, session: AuthSession) -> None:
 
 def touch_session_last_seen(db: Session, *, session: AuthSession) -> None:
     now = datetime.utcnow()
-    threshold_seconds = int(settings.AUTH_SESSION_LAST_SEEN_UPDATE_SECONDS)
+    threshold_seconds = int(config.settings.AUTH_SESSION_LAST_SEEN_UPDATE_SECONDS)
     last_seen = session.last_seen_at
     if last_seen is not None:
         age_seconds = int((now - last_seen).total_seconds())
@@ -237,3 +248,39 @@ def touch_session_last_seen(db: Session, *, session: AuthSession) -> None:
     session.last_seen_at = now
     db.add(session)
     db.commit()
+
+
+def revoke_all_user_sessions(db: Session, *, user_id: str) -> int:
+    now = datetime.utcnow()
+    rowcount = (
+        db.query(AuthSession)
+        .filter(AuthSession.user_id == str(user_id), AuthSession.status == "active")
+        .update(
+            {"status": "revoked", "revoked_at": now},
+            synchronize_session=False,
+        )
+    )
+    return int(rowcount or 0)
+
+
+def change_user_password(
+    db: Session,
+    *,
+    user: User,
+    current_password: str,
+    new_password: str,
+) -> int:
+    if not verify_password(user.password_hash, current_password):
+        raise AuthError(401, "CURRENT_PASSWORD_INVALID", "Invalid credentials")
+
+    if verify_password(user.password_hash, new_password):
+        raise AuthError(422, "PASSWORD_UNCHANGED", "New password must be different")
+
+    validate_new_password(new_password)
+
+    user.password_hash = hash_password(new_password)
+    user.updated_at = datetime.utcnow()
+    db.add(user)
+
+    revoked_count = revoke_all_user_sessions(db, user_id=user.id)
+    return revoked_count

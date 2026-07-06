@@ -30,7 +30,7 @@ class MessageResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=1, max_length=320)
-    password: str = Field(min_length=1, max_length=256)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class AuthUserResponse(BaseModel):
@@ -47,3 +47,19 @@ class LoginResponse(BaseModel):
 
 class LogoutResponse(BaseModel):
     success: bool = True
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
+    confirm_password: str = Field(min_length=1, max_length=128)
+
+
+class ChangePasswordResponse(BaseModel):
+    success: bool = True
+    reauthentication_required: bool = True
+
+
+class LogoutAllResponse(BaseModel):
+    success: bool = True
+    revoked_count: int

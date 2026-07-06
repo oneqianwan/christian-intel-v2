@@ -33,7 +33,7 @@ def _purge_modules() -> None:
         sys.modules.pop(module_name, None)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def runtime():
     TEST_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     if TEST_DB_PATH.exists():
@@ -131,12 +131,17 @@ def _error_code(response) -> str | None:
     return payload.get("error_code")
 
 
+def _set_auth_enabled(enabled: bool) -> None:
+    import config as config_module
+
+    config_module.settings.AUTH_V1_ENABLED = bool(enabled)
+
 
 def test_flag_disabled_login_returns_503(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = False
+    _set_auth_enabled(False)
     response = client.post("/api/auth/login", json={"email": "a@example.com", "password": "pw"})
     assert response.status_code == 503
     assert _error_code(response) == "AUTH_DISABLED"
@@ -147,7 +152,7 @@ def test_flag_disabled_me_returns_503(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = False
+    _set_auth_enabled(False)
     response = client.get("/api/auth/me")
     assert response.status_code == 503
     assert _error_code(response) == "AUTH_DISABLED"
@@ -160,7 +165,7 @@ def test_login_sets_cookie_and_returns_user(runtime):
     auth_models = runtime["auth_models"]
     auth_service = runtime["auth_service"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     _create_user(runtime, email="user@example.com", password="pw")
 
     response = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
@@ -197,7 +202,7 @@ def test_flag_disabled_login_does_not_create_session(runtime):
     database = runtime["database"]
     auth_models = runtime["auth_models"]
 
-    config.settings.AUTH_V1_ENABLED = False
+    _set_auth_enabled(False)
     _create_user(runtime, email="user@example.com", password="pw")
 
     resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
@@ -215,7 +220,7 @@ def test_invalid_credentials_same_error(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     _create_user(runtime, email="known@example.com", password="pw")
 
     resp1 = client.post("/api/auth/login", json={"email": "known@example.com", "password": "wrong"})
@@ -230,7 +235,7 @@ def test_disabled_user_forbidden(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     _create_user(runtime, email="disabled@example.com", password="pw", status="disabled")
 
     response = client.post("/api/auth/login", json={"email": "disabled@example.com", "password": "pw"})
@@ -242,7 +247,7 @@ def test_pending_user_forbidden(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     _create_user(runtime, email="pending@example.com", password="pw", status="pending")
 
     response = client.post("/api/auth/login", json={"email": "pending@example.com", "password": "pw"})
@@ -254,7 +259,7 @@ def test_empty_password_rejected(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     response = client.post("/api/auth/login", json={"email": "user@example.com", "password": ""})
     assert response.status_code == 422
 
@@ -263,7 +268,7 @@ def test_oversized_password_rejected(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     response = client.post("/api/auth/login", json={"email": "user@example.com", "password": "x" * 300})
     assert response.status_code == 422
 
@@ -272,7 +277,7 @@ def test_me_requires_cookie_and_does_not_accept_x_session_id(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     response = client.get("/api/auth/me", headers={"x-session-id": "session-anything"})
     assert response.status_code == 401
     assert _error_code(response) == "AUTH_REQUIRED"
@@ -282,7 +287,7 @@ def test_me_does_not_accept_user_id_query_param(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     response = client.get("/api/auth/me", params={"user_id": "any"})
     assert response.status_code == 401
     assert _error_code(response) == "AUTH_REQUIRED"
@@ -295,7 +300,7 @@ def test_logout_revokes_session_and_clears_cookie(runtime):
     auth_models = runtime["auth_models"]
     auth_service = runtime["auth_service"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     _create_user(runtime, email="user@example.com", password="pw")
 
     login_resp = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
@@ -343,7 +348,7 @@ def test_expired_session_returns_401(runtime):
     auth_models = runtime["auth_models"]
     auth_service = runtime["auth_service"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     user = _create_user(runtime, email="user@example.com", password="pw")
     raw_token = auth_service.generate_session_token()
     token_hash = auth_service.hash_session_token(raw_token)
@@ -372,7 +377,7 @@ def test_invalid_session_returns_401(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     client.cookies.set(config.settings.AUTH_COOKIE_NAME, "not-a-real-token", path=config.settings.AUTH_COOKIE_PATH)
     response = client.get("/api/auth/me")
     assert response.status_code == 401
@@ -383,7 +388,7 @@ def test_rate_limit_returns_429(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED = True
 
     for _ in range(3):
@@ -400,7 +405,7 @@ def test_cookie_value_is_not_user_id_or_public_id(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     user = _create_user(runtime, email="user@example.com", password="pw")
 
     response = client.post("/api/auth/login", json={"email": "user@example.com", "password": "pw"})
@@ -417,7 +422,7 @@ def test_needs_rehash_upgrades_password_hash_on_login(runtime):
     auth_models = runtime["auth_models"]
     auth_service = runtime["auth_service"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     config.settings.AUTH_PASSWORD_TIME_COST = 1
     user = _create_user(runtime, email="user@example.com", password="pw")
 
@@ -447,7 +452,7 @@ def test_last_seen_throttled(runtime):
     database = runtime["database"]
     auth_models = runtime["auth_models"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     config.settings.AUTH_SESSION_LAST_SEEN_UPDATE_SECONDS = 60
     _create_user(runtime, email="user@example.com", password="pw")
 
@@ -480,7 +485,7 @@ def test_cors_credentials_headers(runtime):
     config = runtime["config"]
     client = runtime["client"]
 
-    config.settings.AUTH_V1_ENABLED = True
+    _set_auth_enabled(True)
     allowed_origin = "http://127.0.0.1:4173"
     resp_allowed = client.get("/api/auth/me", headers={"Origin": allowed_origin})
     assert resp_allowed.headers.get("access-control-allow-origin") == allowed_origin

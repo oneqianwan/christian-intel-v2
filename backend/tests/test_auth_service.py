@@ -68,3 +68,19 @@ def test_session_token_generation_and_hash(service):
     assert len(token_hash) == 64
     assert all(ch in "0123456789abcdef" for ch in token_hash)
 
+
+def test_validate_new_password_rules(service):
+    ok = "123456789012"
+    service.validate_new_password(ok)
+
+    with pytest.raises(service.AuthError) as exc_short:
+        service.validate_new_password("short")
+    assert exc_short.value.error_code == "PASSWORD_TOO_SHORT"
+
+    with pytest.raises(service.AuthError) as exc_ws:
+        service.validate_new_password(" " * 12)
+    assert exc_ws.value.error_code == "PASSWORD_WHITESPACE_ONLY"
+
+    with pytest.raises(service.AuthError) as exc_long:
+        service.validate_new_password("x" * 129)
+    assert exc_long.value.error_code == "PASSWORD_TOO_LONG"
