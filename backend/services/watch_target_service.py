@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from models.database import KnowledgeEntity, OrganizationProfile, WatchTarget
 from schemas.watch_alert import WatchTargetCreate, WatchTargetUpdate
+from services.watch_alert_ownership import ownership_enabled
 
 
 class WatchTargetServiceError(Exception):
@@ -117,15 +118,16 @@ def _entity_exists(db: Session, entity_id: str, entity_type: Literal["organizati
 
 
 def get_owned_watch_target(db: Session, watch_target_id: str, user_id: str) -> WatchTarget:
-    watch_target = (
-        db.query(WatchTarget)
-        .filter(
-            WatchTarget.id == watch_target_id,
-            WatchTarget.user_id == user_id,
-            WatchTarget.deleted_at.is_(None),
-        )
-        .first()
-    )
+    filters = [
+        WatchTarget.id == watch_target_id,
+        WatchTarget.deleted_at.is_(None),
+    ]
+    if ownership_enabled():
+        filters.append(WatchTarget.owner_user_id == user_id)
+    else:
+        filters.append(WatchTarget.user_id == user_id)
+
+    watch_target = db.query(WatchTarget).filter(*filters).first()
     if not watch_target:
         raise WatchTargetNotFoundError()
     return watch_target
@@ -135,21 +137,23 @@ def create_watch_target(db: Session, user_id: str, payload: WatchTargetCreate) -
     if not _entity_exists(db, payload.entity_id, payload.entity_type):
         raise WatchTargetEntityNotFoundError()
 
-    existing = (
-        db.query(WatchTarget)
-        .filter(
-            WatchTarget.user_id == user_id,
-            WatchTarget.entity_id == payload.entity_id,
-            WatchTarget.entity_type == payload.entity_type,
-            WatchTarget.deleted_at.is_(None),
-        )
-        .first()
-    )
+    existing_filters = [
+        WatchTarget.entity_id == payload.entity_id,
+        WatchTarget.entity_type == payload.entity_type,
+        WatchTarget.deleted_at.is_(None),
+    ]
+    if ownership_enabled():
+        existing_filters.append(WatchTarget.owner_user_id == user_id)
+    else:
+        existing_filters.append(WatchTarget.user_id == user_id)
+
+    existing = db.query(WatchTarget).filter(*existing_filters).first()
     if existing:
         raise WatchTargetExistsError()
 
     watch_target = WatchTarget(
         user_id=user_id,
+        owner_user_id=user_id if ownership_enabled() else None,
         entity_id=payload.entity_id,
         entity_type=payload.entity_type,
         status="active",
@@ -178,13 +182,12 @@ def list_watch_targets(
     page: int,
     page_size: int,
 ) -> tuple[list[WatchTarget], int]:
-    query = (
-        db.query(WatchTarget)
-        .filter(
-            WatchTarget.user_id == user_id,
-            WatchTarget.deleted_at.is_(None),
-        )
-    )
+    filters = [WatchTarget.deleted_at.is_(None)]
+    if ownership_enabled():
+        filters.append(WatchTarget.owner_user_id == user_id)
+    else:
+        filters.append(WatchTarget.user_id == user_id)
+    query = db.query(WatchTarget).filter(*filters)
     if status:
         query = query.filter(WatchTarget.status == status)
     if entity_type:

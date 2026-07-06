@@ -56,8 +56,8 @@ def _validate_email(email: str) -> str:
 def _create_first_super_admin(*, database_url: str, email: str, display_name: str, password: str):
     os.environ["DATABASE_URL"] = str(database_url)
 
-    from models.auth import User
     from models.database import SessionLocal, init_db
+    from models.auth import User
     from services.auth_service import hash_password, validate_new_password
 
     init_db()

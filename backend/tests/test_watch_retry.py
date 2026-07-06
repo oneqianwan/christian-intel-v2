@@ -18,8 +18,10 @@ if str(BACKEND_DIR) not in sys.path:
 TEST_DB_PATH = BACKEND_DIR / "data" / "watch_alert_phase43b_retry_test.db"
 MODULES_TO_PURGE = [
     "config",
+    "models.auth",
     "models.watch_alert",
     "models.database",
+    "services.watch_alert_ownership",
     "schemas.watch_alert",
     "services.watch_target_service",
     "services.watch_scheduler",
@@ -59,6 +61,7 @@ def _purge_modules() -> None:
 def _set_flags(runtime, *, v1: bool, scheduler: bool) -> None:
     runtime["config"].settings.WATCH_ALERT_V1_ENABLED = v1
     runtime["config"].settings.WATCH_ALERT_SCHEDULER_ENABLED = scheduler
+    runtime["config"].settings.WATCH_ALERT_USER_OWNERSHIP_ENABLED = False
 
 
 def _set_now(monkeypatch, runtime, current_time: datetime) -> None:

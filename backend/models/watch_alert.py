@@ -21,10 +21,12 @@ class WatchTarget(Base):
         Index("ix_watch_targets_entity_id", "entity_id"),
         Index("ix_watch_targets_status_next_check_at", "status", "next_check_at"),
         Index("ix_watch_targets_user_id", "user_id"),
+        Index("ix_watch_targets_owner_user_id", "owner_user_id"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, nullable=False)
+    owner_user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     entity_id = Column(String, nullable=False)
     entity_type = Column(String, nullable=False)
     status = Column(String, nullable=False, default="active")
@@ -50,6 +52,14 @@ Index(
     WatchTarget.entity_type,
     unique=True,
     sqlite_where=WatchTarget.deleted_at.is_(None),
+)
+Index(
+    "ux_watch_targets_owner_entity_type_active",
+    WatchTarget.owner_user_id,
+    WatchTarget.entity_id,
+    WatchTarget.entity_type,
+    unique=True,
+    sqlite_where=(WatchTarget.deleted_at.is_(None) & WatchTarget.owner_user_id.is_not(None)),
 )
 
 
@@ -97,10 +107,12 @@ class Signal(Base):
         Index("ix_signals_watch_target_id", "watch_target_id"),
         Index("ix_signals_entity_id_detected_at", "entity_id", "detected_at"),
         Index("ix_signals_signal_type_severity", "signal_type", "severity"),
+        Index("ix_signals_owner_user_id_detected_at", "owner_user_id", "detected_at"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     watch_target_id = Column(String, ForeignKey("watch_targets.id"), nullable=False)
+    owner_user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     entity_id = Column(String, nullable=False)
     signal_type = Column(String, nullable=False)
     title = Column(String, nullable=False)
@@ -176,6 +188,7 @@ class Alert(Base):
         ),
         UniqueConstraint("signal_id", "user_id", name="uix_alerts_signal_id_user_id"),
         Index("ix_alerts_user_id_status_created_at", "user_id", "status", "created_at"),
+        Index("ix_alerts_owner_user_id_status_created_at", "owner_user_id", "status", "created_at"),
         Index("ix_alerts_watch_target_id", "watch_target_id"),
         Index("ix_alerts_signal_id", "signal_id"),
         Index("ix_alerts_severity", "severity"),
@@ -183,6 +196,7 @@ class Alert(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, nullable=False)
+    owner_user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     watch_target_id = Column(String, ForeignKey("watch_targets.id"), nullable=False)
     signal_id = Column(String, ForeignKey("signals.id"), nullable=False)
     title = Column(String, nullable=False)
@@ -196,3 +210,12 @@ class Alert(Base):
 
     watch_target = relationship("WatchTarget", back_populates="alerts")
     signal = relationship("Signal", back_populates="alerts")
+
+
+Index(
+    "ux_alerts_signal_id_owner_user_id",
+    Alert.signal_id,
+    Alert.owner_user_id,
+    unique=True,
+    sqlite_where=Alert.owner_user_id.is_not(None),
+)

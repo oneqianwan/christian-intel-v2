@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from config import settings
+from dependencies.watch_alert_auth import get_watch_alert_current_user_id as get_current_user_id
 from models.database import get_db
 from schemas.watch_alert import (
     AlertListResponse,
@@ -42,19 +41,6 @@ def require_alert_notifications_enabled() -> None:
         "WATCH_ALERT_NOTIFICATIONS_DISABLED",
         "Watch alert notifications are disabled",
     )
-
-
-def get_current_user_id(
-    x_session_id: Annotated[str | None, Header(alias="x-session-id")] = None,
-) -> str:
-    user_id = (x_session_id or "").strip()
-    if not user_id:
-        _raise_api_error(
-            status.HTTP_401_UNAUTHORIZED,
-            "AUTH_REQUIRED",
-            "Authentication required",
-        )
-    return user_id
 
 
 def _translate_service_error(exc: AlertServiceError) -> None:

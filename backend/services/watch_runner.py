@@ -22,6 +22,7 @@ from services.watch_scheduler import (
     retry_base_seconds,
 )
 from services.watch_snapshot_builder import build_watch_snapshot
+from services.watch_alert_ownership import ownership_enabled
 from services.watch_target_service import (
     WatchTargetEntityNotFoundError,
     WatchTargetNotFoundError,
@@ -141,6 +142,8 @@ def _load_auto_watch_target(db: Session, watch_target_id: str) -> WatchTarget:
         .first()
     )
     if not watch_target:
+        raise WatchTargetNotFoundError()
+    if ownership_enabled() and not str(watch_target.owner_user_id or "").strip():
         raise WatchTargetNotFoundError()
     return watch_target
 
@@ -717,6 +720,7 @@ def list_watch_target_signals(
     return list_signals_for_watch_target(
         db,
         watch_target.id,
+        owner_user_id=user_id,
         signal_type=signal_type,
         severity=severity,
         page=page,

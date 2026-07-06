@@ -69,7 +69,7 @@ def _init_db() -> None:
         "-c",
         "import os,sys; from pathlib import Path; "
         f"sys.path.insert(0, r\"{str(BACKEND_DIR)}\"); "
-        "import models.auth; from models.database import init_db; init_db()",
+        "from models.database import init_db; import models.auth; init_db()",
     ]
     subprocess.run(cmd, text=True, capture_output=True, env=env, check=True)
 

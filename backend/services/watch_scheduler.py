@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from models.watch_alert import WatchRun, WatchTarget
 from queue_client import get_collection_queue
+from services.watch_alert_ownership import ownership_enabled
 
 
 WATCH_RUN_DUPLICATE = "WATCH_RUN_DUPLICATE"
@@ -82,21 +83,24 @@ def scan_due_watch_targets(db: Session, now: datetime | None = None, limit: int 
         WatchRun.status == "running",
     )
 
-    query = (
+    filters = [
+        WatchTarget.deleted_at.is_(None),
+        WatchTarget.status == "active",
+        WatchTarget.frequency.in_(("daily", "weekly")),
+        WatchTarget.next_check_at.is_not(None),
+        WatchTarget.next_check_at <= current_time,
+        WatchTarget.consecutive_failures < max_consecutive_failures(),
+        ~running_exists,
+    ]
+    if ownership_enabled():
+        filters.append(WatchTarget.owner_user_id.is_not(None))
+    return (
         db.query(WatchTarget)
-        .filter(
-            WatchTarget.deleted_at.is_(None),
-            WatchTarget.status == "active",
-            WatchTarget.frequency.in_(("daily", "weekly")),
-            WatchTarget.next_check_at.is_not(None),
-            WatchTarget.next_check_at <= current_time,
-            WatchTarget.consecutive_failures < max_consecutive_failures(),
-            ~running_exists,
-        )
+        .filter(*filters)
         .order_by(WatchTarget.next_check_at.asc())
         .limit(due_scan_limit(limit))
+        .all()
     )
-    return query.all()
 
 
 def _build_watch_run_metadata(

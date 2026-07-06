@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.watch_alert import Signal, WatchTarget
+from services.watch_alert_ownership import ownership_enabled
 
 
 SIGNAL_SEVERITY = {
@@ -100,12 +101,18 @@ def create_signal_records_for_changes(
     changes: list[dict],
 ) -> list[Signal]:
     created_signals: list[Signal] = []
+    owner_user_id = None
+    if ownership_enabled():
+        owner_user_id = str(watch_target.owner_user_id or "").strip() or None
+        if owner_user_id is None:
+            raise ValueError("SIGNAL_OWNER_REQUIRED")
     for change in changes:
         dedup_key = _dedup_key(watch_target, change)
         title, summary = _title_and_summary(change)
         signal = Signal(
             id=str(uuid.uuid4()),
             watch_target_id=watch_target.id,
+            owner_user_id=owner_user_id,
             entity_id=watch_target.entity_id,
             signal_type=change["signal_type"],
             title=title,
@@ -145,12 +152,18 @@ def list_signals_for_watch_target(
     db: Session,
     watch_target_id: str,
     *,
+    owner_user_id: str | None = None,
     signal_type: str | None,
     severity: str | None,
     page: int,
     page_size: int,
 ):
     query = db.query(Signal).filter(Signal.watch_target_id == watch_target_id)
+    if ownership_enabled():
+        normalized_owner_user_id = str(owner_user_id or "").strip()
+        if not normalized_owner_user_id:
+            return [], 0
+        query = query.filter(Signal.owner_user_id == normalized_owner_user_id)
     if signal_type:
         query = query.filter(Signal.signal_type == signal_type)
     if severity:

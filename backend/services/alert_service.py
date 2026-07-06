@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from models.watch_alert import Alert
+from services.watch_alert_ownership import ownership_enabled
 
 
 class AlertServiceError(Exception):
@@ -35,14 +36,12 @@ def utcnow() -> datetime:
 
 
 def get_owned_alert(db: Session, alert_id: str, user_id: str) -> Alert:
-    alert = (
-        db.query(Alert)
-        .filter(
-            Alert.id == alert_id,
-            Alert.user_id == user_id,
-        )
-        .first()
-    )
+    filters = [Alert.id == alert_id]
+    if ownership_enabled():
+        filters.append(Alert.owner_user_id == user_id)
+    else:
+        filters.append(Alert.user_id == user_id)
+    alert = db.query(Alert).filter(*filters).first()
     if not alert:
         raise AlertNotFoundError()
     return alert
@@ -58,7 +57,11 @@ def list_alerts(
     page: int,
     page_size: int,
 ) -> tuple[list[Alert], int]:
-    query = db.query(Alert).filter(Alert.user_id == user_id)
+    query = db.query(Alert)
+    if ownership_enabled():
+        query = query.filter(Alert.owner_user_id == user_id)
+    else:
+        query = query.filter(Alert.user_id == user_id)
     if status:
         query = query.filter(Alert.status == status)
     if severity:
@@ -77,14 +80,12 @@ def list_alerts(
 
 
 def get_unread_count(db: Session, user_id: str) -> int:
-    return (
-        db.query(Alert)
-        .filter(
-            Alert.user_id == user_id,
-            Alert.status == "unread",
-        )
-        .count()
-    )
+    query = db.query(Alert).filter(Alert.status == "unread")
+    if ownership_enabled():
+        query = query.filter(Alert.owner_user_id == user_id)
+    else:
+        query = query.filter(Alert.user_id == user_id)
+    return query.count()
 
 
 def mark_alert_read(db: Session, alert_id: str, user_id: str) -> Alert:
@@ -124,19 +125,17 @@ def dismiss_alert(db: Session, alert_id: str, user_id: str) -> Alert:
 def mark_all_read(db: Session, user_id: str) -> int:
     current_time = utcnow()
     try:
-        updated_count = (
-            db.query(Alert)
-            .filter(
-                Alert.user_id == user_id,
-                Alert.status == "unread",
-            )
-            .update(
-                {
-                    Alert.status: "read",
-                    Alert.read_at: current_time,
-                },
-                synchronize_session=False,
-            )
+        query = db.query(Alert).filter(Alert.status == "unread")
+        if ownership_enabled():
+            query = query.filter(Alert.owner_user_id == user_id)
+        else:
+            query = query.filter(Alert.user_id == user_id)
+        updated_count = query.update(
+            {
+                Alert.status: "read",
+                Alert.read_at: current_time,
+            },
+            synchronize_session=False,
         )
         db.commit()
         return int(updated_count or 0)

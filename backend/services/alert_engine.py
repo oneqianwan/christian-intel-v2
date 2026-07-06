@@ -15,6 +15,7 @@ from services.alert_rule_service import (
     notifications_enabled,
     severity_meets_minimum,
 )
+from services.watch_alert_ownership import ownership_enabled
 
 
 @dataclass
@@ -52,9 +53,24 @@ def process_signal(db: Session, signal_id: str) -> Alert | None:
     if signal is None or signal.watch_target is None:
         return None
 
-    user_id = str(signal.watch_target.user_id or "").strip()
-    if not user_id:
-        return None
+    if ownership_enabled():
+        user_id = str(signal.owner_user_id or signal.watch_target.owner_user_id or "").strip()
+        if not user_id:
+            print(
+                json.dumps(
+                    {
+                        "event": "alert_engine_owner_missing",
+                        "signal_id": signal_id,
+                        "watch_target_id": signal.watch_target_id,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return None
+    else:
+        user_id = str(signal.watch_target.user_id or "").strip()
+        if not user_id:
+            return None
 
     rule = get_applicable_alert_rule(
         db,
@@ -69,6 +85,7 @@ def process_signal(db: Session, signal_id: str) -> Alert | None:
     alert = Alert(
         id=str(uuid.uuid4()),
         user_id=user_id,
+        owner_user_id=user_id if ownership_enabled() else None,
         watch_target_id=signal.watch_target_id,
         signal_id=signal.id,
         title=signal.title,

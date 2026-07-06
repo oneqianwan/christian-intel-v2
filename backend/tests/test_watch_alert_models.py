@@ -17,8 +17,10 @@ if str(BACKEND_DIR) not in sys.path:
 TEST_DB_PATH = BACKEND_DIR / "data" / "watch_alert_phase41_test.db"
 MODULES_TO_PURGE = [
     "config",
+    "models.auth",
     "models.watch_alert",
     "models.database",
+    "services.watch_alert_ownership",
     "services.insight_models",
     "services.insight_engine",
     "services.pipeline_orchestrator",

@@ -1245,6 +1245,7 @@ class UserProfile(Base):
     )
 
 
+from models.auth import AuthSession, User  # noqa: E402,F401
 from models.watch_alert import Alert, AlertRule, Signal, WatchRun, WatchTarget  # noqa: E402,F401
 
 
@@ -1382,6 +1383,15 @@ def _ensure_indexes(conn, inspector, table_name: str, indexes: list[tuple[str, t
         existing_indexes.add(index_name)
 
 
+def _ensure_partial_indexes(conn, inspector, table_name: str, indexes: list[tuple[str, str, bool]]) -> None:
+    existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+    for index_name, sql, _ in indexes:
+        if index_name in existing_indexes:
+            continue
+        conn.execute(text(sql))
+        existing_indexes.add(index_name)
+
+
 def _ensure_schema_compatibility():
     is_sqlite = engine.dialect.name == "sqlite"
 
@@ -1458,6 +1468,88 @@ def _ensure_schema_compatibility():
             conn.execute(text("UPDATE intelligence_items SET scope = 'country' WHERE scope IS NULL OR scope = ''"))
             if not is_sqlite:
                 conn.execute(text("ALTER TABLE intelligence_items ALTER COLUMN scope SET NOT NULL"))
+
+        if "watch_targets" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "watch_targets",
+                [
+                    ("owner_user_id", "VARCHAR REFERENCES users(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "watch_targets",
+                [
+                    ("ix_watch_targets_owner_user_id", ("owner_user_id",)),
+                ],
+            )
+            _ensure_partial_indexes(
+                conn,
+                inspector,
+                "watch_targets",
+                [
+                    (
+                        "ux_watch_targets_owner_entity_type_active",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_watch_targets_owner_entity_type_active "
+                        "ON watch_targets (owner_user_id, entity_id, entity_type) "
+                        "WHERE deleted_at IS NULL AND owner_user_id IS NOT NULL",
+                        True,
+                    ),
+                ],
+            )
+
+        if "signals" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "signals",
+                [
+                    ("owner_user_id", "VARCHAR REFERENCES users(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "signals",
+                [
+                    ("ix_signals_owner_user_id_detected_at", ("owner_user_id", "detected_at")),
+                ],
+            )
+
+        if "alerts" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "alerts",
+                [
+                    ("owner_user_id", "VARCHAR REFERENCES users(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "alerts",
+                [
+                    ("ix_alerts_owner_user_id_status_created_at", ("owner_user_id", "status", "created_at")),
+                ],
+            )
+            _ensure_partial_indexes(
+                conn,
+                inspector,
+                "alerts",
+                [
+                    (
+                        "ux_alerts_signal_id_owner_user_id",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_alerts_signal_id_owner_user_id "
+                        "ON alerts (signal_id, owner_user_id) "
+                        "WHERE owner_user_id IS NOT NULL",
+                        True,
+                    ),
+                ],
+            )
 
         if "api_configs" in table_names:
             api_columns = {column["name"] for column in inspector.get_columns("api_configs")}

@@ -21,8 +21,10 @@ TEST_DB_PATH = BACKEND_DIR / "data" / "watch_alert_phase44_api_test.db"
 MODULES_TO_PURGE = [
     "config",
     "main",
+    "models.auth",
     "models.watch_alert",
     "models.database",
+    "services.watch_alert_ownership",
     "routers.alerts",
     "routers.watch_targets",
     "schemas.watch_alert",
@@ -38,6 +40,7 @@ def _purge_modules() -> None:
 def _set_flags(runtime, *, v1: bool = True, notifications: bool = True) -> None:
     runtime["config"].settings.WATCH_ALERT_V1_ENABLED = v1
     runtime["config"].settings.WATCH_ALERT_NOTIFICATIONS_ENABLED = notifications
+    runtime["config"].settings.WATCH_ALERT_USER_OWNERSHIP_ENABLED = False
 
 
 @pytest.fixture(scope="module")

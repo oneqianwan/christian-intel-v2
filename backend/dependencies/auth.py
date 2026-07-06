@@ -70,6 +70,29 @@ def _resolve_auth_context(*, request: Request, db: Session, touch_last_seen: boo
     return AuthContext(user=user, session=session)
 
 
+def resolve_auth_context_for_request(
+    *,
+    request: Request,
+    db: Session,
+    touch_last_seen: bool = True,
+) -> AuthContext:
+    require_auth_enabled()
+    return _resolve_auth_context(request=request, db=db, touch_last_seen=touch_last_seen)
+
+
+def resolve_user_for_request(
+    *,
+    request: Request,
+    db: Session,
+    touch_last_seen: bool = True,
+) -> User:
+    return resolve_auth_context_for_request(
+        request=request,
+        db=db,
+        touch_last_seen=touch_last_seen,
+    ).user
+
+
 def get_current_auth_context(
     request: Request,
     _: None = Depends(require_auth_enabled),

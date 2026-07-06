@@ -20,8 +20,10 @@ TEST_DB_PATH = BACKEND_DIR / "data" / "watch_alert_phase43a_test.db"
 MODULES_TO_PURGE = [
     "config",
     "main",
+    "models.auth",
     "models.watch_alert",
     "models.database",
+    "services.watch_alert_ownership",
     "routers.watch_targets",
     "services.watch_target_service",
     "services.watch_runner",
@@ -43,6 +45,7 @@ def _purge_modules() -> None:
 
 def _set_watch_flag(config, enabled: bool) -> None:
     config.settings.WATCH_ALERT_V1_ENABLED = enabled
+    config.settings.WATCH_ALERT_USER_OWNERSHIP_ENABLED = False
     config.settings.FEATURE_FLAGS.WATCH_ALERT_V1_ENABLED = enabled
 
 
