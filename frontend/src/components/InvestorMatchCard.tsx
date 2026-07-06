@@ -68,9 +68,16 @@ export function InvestorMatchCard({
 
   const submitFeedback = async (type: string, investorName: string) => {
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const sessionId =
+        typeof window === 'undefined' ? null : window.localStorage.getItem('x-session-id')?.trim() || null
+      if (sessionId) {
+        headers['x-session-id'] = sessionId
+      }
+
       const response = await fetch('http://localhost:8000/api/feedback', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-session-id': 'session-1' },
+        headers,
         body: JSON.stringify({
           feedback_type: type,
           related_investor: investorName,

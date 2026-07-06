@@ -9,6 +9,7 @@
     "check:watch-alert-contract": "node scripts/verify-watch-alert-contract.mjs",
     "check:watchlist-ui": "node scripts/verify-watchlist-ui.mjs",
     "check:alerts-ui": "node scripts/verify-alerts-ui.mjs",
+    "check:watch-alert-auth": "node scripts/verify-watch-alert-auth-boundary.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

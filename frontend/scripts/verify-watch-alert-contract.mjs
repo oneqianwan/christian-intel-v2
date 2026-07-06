@@ -24,6 +24,36 @@ function hasRegex(source, pattern) {
   return pattern.test(source)
 }
 
+function walkFiles(dirPath) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...walkFiles(fullPath))
+      continue
+    }
+    files.push(fullPath)
+  }
+  return files
+}
+
+function scanForBannedIdentity(searchRoot) {
+  const allowExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'])
+  const banned = /\bsession-1\b|\buser-1\b|\btest-user\b|\bdefault-user\b|\banonymous\b|\bguest\b/i
+  const matches = []
+
+  for (const filePath of walkFiles(searchRoot)) {
+    if (!allowExtensions.has(path.extname(filePath))) continue
+    const source = read(filePath)
+    if (banned.test(source)) {
+      matches.push(path.relative(root, filePath))
+    }
+  }
+
+  assertMatch(matches.length === 0, `Banned default identity found in: ${matches.join(', ')}`)
+}
+
 const apiSource = read(apiPath)
 const typesSource = read(typesPath)
 const envExample = read(envExamplePath)
@@ -71,6 +101,22 @@ assertMatch(
 assertMatch(
   apiSource.includes("return response.updated_count"),
   'Read-all client must parse updated_count',
+)
+scanForBannedIdentity(path.join(root, 'src'))
+scanForBannedIdentity(path.join(root, 'scripts'))
+assertMatch(
+  apiSource.includes('export function hasWatchAlertSession'),
+  'API client must expose a watch/alert authentication presence helper',
+)
+assertMatch(
+  /const sessionId = getStoredSessionId\(\)[\s\S]*if \(!sessionId\)[\s\S]*throw createAuthRequiredError\(\)/.test(
+    apiSource,
+  ),
+  'API client must block unauthenticated requests before fetch()',
+)
+assertMatch(
+  /headers\.set\(['"]x-session-id['"], sessionId\)/.test(apiSource),
+  'API client must inject x-session-id only when a real session exists',
 )
 assertMatch(
   apiSource.includes("import.meta.env.VITE_WATCH_ALERT_UI_ENABLED === 'true'"),

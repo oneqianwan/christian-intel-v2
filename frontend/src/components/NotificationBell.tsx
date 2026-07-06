@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   getUnreadAlertCount,
+  hasWatchAlertSession,
   isWatchAlertUiEnabled,
   WATCH_ALERT_UNREAD_REFRESH_EVENT,
 } from '../api/watchAlerts'
@@ -76,6 +77,16 @@ export function NotificationBell() {
       return
     }
 
+    if (!hasWatchAlertSession()) {
+      if (mountedRef.current) {
+        setUnreadCount(0)
+        setInlineMessage('登录状态已失效，请重新登录')
+        setHasLoaded(true)
+        setAuthExpired(true)
+      }
+      return
+    }
+
     inFlightRef.current = true
     clearTimer()
 
@@ -120,6 +131,18 @@ export function NotificationBell() {
     }
 
     mountedRef.current = true
+
+    if (!hasWatchAlertSession()) {
+      setUnreadCount(0)
+      setInlineMessage('登录状态已失效，请重新登录')
+      setHasLoaded(true)
+      setAuthExpired(true)
+      return () => {
+        mountedRef.current = false
+        clearTimer()
+      }
+    }
+
     void refreshUnreadCount()
 
     const handleUnreadRefresh = () => {

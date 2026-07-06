@@ -15,13 +15,12 @@ import {
 } from '../types/watchAlerts'
 
 const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://localhost:8000'
-const DEFAULT_SESSION_ID = 'session-1'
 const SESSION_STORAGE_KEY = 'x-session-id'
 
 const ERROR_MESSAGES: Record<string, string> = {
   ALERT_DISMISSED: '该提醒已被忽略，不能再标记为已读。',
   ALERT_NOT_FOUND: '记录不存在或已被删除。',
-  AUTH_REQUIRED: '登录状态无效，请刷新页面后重试。',
+  AUTH_REQUIRED: '登录状态已失效，请重新登录',
   WATCH_ALERT_NOTIFICATIONS_DISABLED: 'Watch / Alert 功能当前未启用。',
   WATCH_ALERT_V1_DISABLED: 'Watch / Alert 功能当前未启用。',
   WATCH_RUN_ALREADY_RUNNING: '监控任务正在运行，请稍后再试。',
@@ -33,13 +32,29 @@ const ERROR_MESSAGES: Record<string, string> = {
   WATCH_TARGET_NOT_FOUND: '记录不存在或已被删除。',
 }
 
-function getSessionId(): string {
+function getStoredSessionId(): string | null {
   if (typeof window === 'undefined') {
-    return DEFAULT_SESSION_ID
+    return null
   }
 
   const stored = window.localStorage.getItem(SESSION_STORAGE_KEY)?.trim()
-  return stored || DEFAULT_SESSION_ID
+  return stored || null
+}
+
+export function hasWatchAlertSession() {
+  return Boolean(getStoredSessionId())
+}
+
+function createAuthRequiredError() {
+  const status = 401
+  const code = 'AUTH_REQUIRED'
+  const message = 'Authentication required'
+  return new WatchAlertApiError({
+    status,
+    code,
+    message,
+    userMessage: getUserMessage(status, code, message),
+  })
 }
 
 function createUrl(path: string, query?: Record<string, string | number | undefined>) {
@@ -64,7 +79,7 @@ function getUserMessage(status: number, code: string, message: string) {
     return ERROR_MESSAGES[code]
   }
   if (status === 401) {
-    return '登录状态无效，请刷新页面后重试。'
+    return '登录状态已失效，请重新登录'
   }
   if (status === 404) {
     return '记录不存在或已被删除。'
@@ -127,8 +142,12 @@ async function request<T>(
   } = {},
 ): Promise<T> {
   const { query, parseJson = true, ...requestInit } = init
+  const sessionId = getStoredSessionId()
+  if (!sessionId) {
+    throw createAuthRequiredError()
+  }
   const headers = new Headers(requestInit.headers)
-  headers.set('x-session-id', getSessionId())
+  headers.set('x-session-id', sessionId)
   if (requestInit.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }

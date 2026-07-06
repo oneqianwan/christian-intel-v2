@@ -15,6 +15,36 @@ function assertMatch(condition, message) {
   }
 }
 
+function walkFiles(dirPath) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...walkFiles(fullPath))
+      continue
+    }
+    files.push(fullPath)
+  }
+  return files
+}
+
+function scanForBannedIdentity(searchRoot) {
+  const allowExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'])
+  const banned = /\bsession-1\b|\buser-1\b|\btest-user\b|\bdefault-user\b|\banonymous\b|\bguest\b/i
+  const matches = []
+
+  for (const filePath of walkFiles(searchRoot)) {
+    if (!allowExtensions.has(path.extname(filePath))) continue
+    const source = fs.readFileSync(filePath, 'utf8')
+    if (banned.test(source)) {
+      matches.push(path.relative(repoRoot, filePath))
+    }
+  }
+
+  assertMatch(matches.length === 0, `Banned default identity found in: ${matches.join(', ')}`)
+}
+
 const notificationBellPath = 'frontend/src/components/NotificationBell.tsx'
 const alertsPagePath = 'frontend/src/pages/AlertsPage.tsx'
 const appPath = 'frontend/src/App.tsx'
@@ -31,6 +61,17 @@ const appSource = read(appPath)
 const sidebarSource = read(sidebarPath)
 const apiSource = read(apiPath)
 const packageSource = read(packagePath)
+
+scanForBannedIdentity(path.join(repoRoot, 'frontend', 'src'))
+scanForBannedIdentity(path.join(repoRoot, 'frontend', 'scripts'))
+assertMatch(!/\buser_id\b/.test(apiSource), 'Watch/Alert API client must not send or mention user_id')
+assertMatch(apiSource.includes('export function hasWatchAlertSession'), 'API client must expose hasWatchAlertSession()')
+assertMatch(
+  /const sessionId = getStoredSessionId\(\)[\s\S]*if \(!sessionId\)[\s\S]*throw createAuthRequiredError\(\)/.test(
+    apiSource,
+  ),
+  'API client must block unauthenticated requests before fetch()',
+)
 
 assertMatch(appSource.includes('path="/alerts"'), 'Alerts route must exist in App.tsx')
 assertMatch(sidebarSource.includes('Alerts') && sidebarSource.includes("navigate('/alerts')"), 'Alerts nav entry must exist')
@@ -49,13 +90,17 @@ assertMatch(
   'NotificationBell must not poll when feature flag is disabled',
 )
 assertMatch(bellSource.includes('getUnreadAlertCount'), 'NotificationBell must use getUnreadAlertCount')
+assertMatch(
+  bellSource.includes('hasWatchAlertSession') && bellSource.includes('if (!hasWatchAlertSession())'),
+  'NotificationBell must avoid unread-count polling when unauthenticated',
+)
 assertMatch(alertsPageSource.includes('listAlerts'), 'AlertsPage must use listAlerts')
 assertMatch(alertsPageSource.includes('markAlertRead'), 'AlertsPage must use markAlertRead')
 assertMatch(alertsPageSource.includes('dismissAlert'), 'AlertsPage must use dismissAlert')
 assertMatch(alertsPageSource.includes('markAllAlertsRead'), 'AlertsPage must use markAllAlertsRead')
 assertMatch(!/\buser_id\b/.test(bellSource + alertsPageSource), 'Alerts UI must not use user_id')
 assertMatch(!/items\.length\s*[<>!=]=?\s*\d+\s*\?\s*['"`]99/.test(bellSource), 'Unread badge must not be hardcoded')
-assertMatch(!/setUnreadCount\(\s*\d+\s*\)/.test(bellSource), 'Unread count must not be hardcoded')
+assertMatch(!/setUnreadCount\(\s*(?:[1-9]\d*)\s*\)/.test(bellSource), 'Unread count must not be hardcoded')
 assertMatch(!bellSource.includes('markAllAlertsRead'), 'Clicking NotificationBell must not trigger read-all')
 assertMatch(
   /\/\^https\?:\\\/\\\/i\.test\(value\)/.test(alertsPageSource) || alertsPageSource.includes('/^https?:\\/\\//i.test(value)'),

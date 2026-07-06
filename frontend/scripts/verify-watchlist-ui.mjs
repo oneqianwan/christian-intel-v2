@@ -15,13 +15,54 @@ function assertMatch(condition, message) {
   }
 }
 
+function walkFiles(dirPath) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+  const files = []
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name)
+    if (entry.isDirectory()) {
+      files.push(...walkFiles(fullPath))
+      continue
+    }
+    files.push(fullPath)
+  }
+  return files
+}
+
+function scanForBannedIdentity(searchRoot) {
+  const allowExtensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'])
+  const banned = /\bsession-1\b|\buser-1\b|\btest-user\b|\bdefault-user\b|\banonymous\b|\bguest\b/i
+  const matches = []
+
+  for (const filePath of walkFiles(searchRoot)) {
+    if (!allowExtensions.has(path.extname(filePath))) continue
+    const source = fs.readFileSync(filePath, 'utf8')
+    if (banned.test(source)) {
+      matches.push(path.relative(repoRoot, filePath))
+    }
+  }
+
+  assertMatch(matches.length === 0, `Banned default identity found in: ${matches.join(', ')}`)
+}
+
 const watchButtonSource = read('frontend/src/components/WatchButton.tsx')
 const signalListSource = read('frontend/src/components/SignalList.tsx')
 const watchlistPageSource = read('frontend/src/pages/WatchlistPage.tsx')
 const appSource = read('frontend/src/App.tsx')
 const sidebarSource = read('frontend/src/components/Sidebar.tsx')
 const orgDetailSource = read('frontend/src/pages/OrgDetailPage.tsx')
+const apiSource = read('frontend/src/api/watchAlerts.ts')
 const packageSource = read('frontend/package.json')
+
+scanForBannedIdentity(path.join(repoRoot, 'frontend', 'src'))
+scanForBannedIdentity(path.join(repoRoot, 'frontend', 'scripts'))
+assertMatch(!/DEFAULT_SESSION_ID/.test(apiSource), 'Watch/Alert API client must not define a default session id')
+assertMatch(
+  /const sessionId = getStoredSessionId\(\)[\s\S]*if \(!sessionId\)[\s\S]*throw createAuthRequiredError\(\)/.test(
+    apiSource,
+  ),
+  'Watch/Alert API client must block unauthenticated requests before fetch()',
+)
 
 assertMatch(
   /export function WatchButton\(\{ entityId, entityType \}: WatchButtonProps\)/.test(watchButtonSource),
