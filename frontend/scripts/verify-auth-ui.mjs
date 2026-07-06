@@ -46,9 +46,15 @@ for (const file of requiredFiles) {
 
 grep('src/App.tsx', /path="\/login"/, 'Missing /login route')
 grep('src/App.tsx', /path="\/settings\/security"/, 'Missing /settings/security route')
+grep('src/App.tsx', /<AuthGuard requireEnabled><SecuritySettingsPage \/><\/AuthGuard>/, 'Security settings route must remain protected by AuthGuard')
 grep('src/api/auth.ts', /credentials:\s*'include'/, 'Auth API must use credentials include')
 grep('src/main.tsx', /<AuthProvider>/, 'App must mount AuthProvider')
 grep('src/components/Sidebar.tsx', /UserMenu/, 'Sidebar must include UserMenu')
+grep('src/pages/SecuritySettingsPage.tsx', /data-testid="security-settings-scroll-container"/, 'Security settings page must expose a scroll container marker')
+grep('src/pages/SecuritySettingsPage.tsx', /overflowY:\s*'auto'/, 'Security settings page must provide vertical scrolling')
+grep('src/pages/SecuritySettingsPage.tsx', /height:\s*'100%'/, 'Security settings page must fill the available app height')
+grep('src/pages/SecuritySettingsPage.tsx', /padding:\s*'24px 24px 48px'/, 'Security settings page must preserve bottom padding for actions')
+grepNot('src/pages/SecuritySettingsPage.tsx', /innerHeight|clientHeight|visualViewport|resize listener|addEventListener\(\s*['"]resize['"]|setInterval|requestAnimationFrame/, 'Security settings page must not use viewport JavaScript hacks')
 
 const authSourceFiles = [
   'src/api/auth.ts',

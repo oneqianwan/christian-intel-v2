@@ -129,7 +129,16 @@ export function SecuritySettingsPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc', padding: '24px' }}>
+    <div
+      data-testid="security-settings-scroll-container"
+      style={{
+        height: '100%',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        background: '#f8fafc',
+        padding: '24px 24px 48px',
+      }}
+    >
       <div style={{ maxWidth: '820px', margin: '0 auto', display: 'grid', gap: '20px' }}>
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '24px' }}>
           <h1 style={{ marginTop: 0, marginBottom: '10px', fontSize: '28px', color: '#0f172a' }}>安全设置</h1>

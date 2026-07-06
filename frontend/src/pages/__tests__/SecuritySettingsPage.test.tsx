@@ -58,6 +58,19 @@ describe('SecuritySettingsPage', () => {
     expect(screen.getByText('admin')).toBeInTheDocument()
   })
 
+  it('提供页面级滚动容器，且底部操作按钮仍存在', () => {
+    renderSecurityPage()
+
+    const scrollContainer = screen.getByTestId('security-settings-scroll-container')
+    expect(scrollContainer).toHaveStyle({
+      height: '100%',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+    })
+    expect(screen.getByRole('button', { name: '修改密码' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退出所有设备' })).toBeInTheDocument()
+  })
+
   it('短密码和确认不一致会在前端被拒绝', async () => {
     const changePassword = vi.fn()
     renderSecurityPage(createUseAuthValue({ changePassword }))

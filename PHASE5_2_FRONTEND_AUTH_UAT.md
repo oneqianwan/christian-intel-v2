@@ -305,25 +305,26 @@ npm run build
   - email: `phase52-admin@example.com`
   - role: `super_admin`
 - Verified:
-  - login page / route guard behavior was browser-checked earlier in session
+  - ManualLoginFlow=PASS
+  - SessionRestoreFlow=PASS
+  - UserMenuFlow=PASS
+  - LogoutFlow=PASS
+  - ReloginFlow=PASS
+  - ChangePasswordFlow=PASS
+  - PasswordChangeForcedLogout=PASS
+  - OldPasswordRejected=PASS
+  - NewPasswordAccepted=PASS
+  - LogoutAllFlow=PASS
+  - SessionNotRestoredAfterLogoutAll=PASS
   - login API accepted the test admin and set HttpOnly cookie
   - user payload shape matched backend contract
   - route protection logic for security page exists
 - Note:
-  - browser preview path was intermittently inaccessible in this environment (`chrome-error://chromewebdata/`)
-  - full authenticated browser walkthrough was therefore LIMITED, not full PASS
-  - skipped browser-only steps are documented instead of treated as execution deadlock
-- Browser-only steps not fully completed:
-  - successful manual login with the temporary admin
-  - refresh-based authenticated restore after successful browser login
-  - authenticated user-menu display verification after successful browser login
-  - successful manual logout after authenticated browser login
-  - manual change-password success path
-  - manual post-change forced logout verification
-  - manual old-password failure verification
-  - manual new-password login verification
-  - manual logout-all success verification
-  - manual `/auth/me` unauthenticated verification after logout-all
+  - first manual UAT found a layout defect: `SecuritySettingsPage` could not scroll to the bottom at the current browser window height
+  - user temporarily completed the security flows by reducing browser zoom
+  - this follow-up fix changes the page layout so the security screen provides its own vertical scroll container and bottom padding
+  - after this fix, the user still needs to reconfirm at `100%` browser zoom that the page scrolls naturally without shrinking the viewport
+  - SecuritySettingsScrollManualRetest=PENDING
 
 ## Security Check
 
@@ -370,13 +371,32 @@ npm run build
 - `frontend/src/pages/__tests__/SecuritySettingsPage.test.tsx`
 - `frontend/scripts/verify-auth-ui.mjs`
 
+## Boundary Check
+
+- Current `git status --short` / `git diff --name-only` only show:
+  - `PHASE5_2_FRONTEND_AUTH_UAT.md`
+  - `frontend/scripts/verify-auth-ui.mjs`
+  - `frontend/src/pages/SecuritySettingsPage.tsx`
+  - `frontend/src/pages/__tests__/SecuritySettingsPage.test.tsx`
+- All four files are within the allowed Phase 5.2D scope
+- Confirmed test path is:
+  - `frontend/src/pages/__tests__/SecuritySettingsPage.test.tsx`
+  - not a malformed directory name with extra spaces
+- No unexpected changed files were found under:
+  - `backend/*`
+  - Watch/Alert files
+  - Chat files
+- Previous `BoundaryCheck=FAIL` was caused by incorrectly treating pre-existing repository artifacts such as `backend/_db_backups/` and legacy log/tmp/image files as if they were changes introduced by this task
+- Correct conclusion for this task's actual changed-file boundary is:
+  - `BoundaryCheck=PASS`
+
 ## Known Limitations
 
 - Current phase does not force full-application login by default
 - `VITE_AUTH_REQUIRED` default remains `false`
 - Watch/Alert are not yet migrated to formal user auth
 - Chat is not yet isolated by formal user ownership
-- Browser preview connectivity in this agent environment may intermittently fail; when it does, browser walkthrough is skipped and documented instead of blocking delivery
+- Security settings scroll behavior requires one final manual retest at `100%` browser zoom after this layout fix
 - Full production rollout with global auth requirement should wait until Phase 5.3 / 5.4
 
 ## Rollback
