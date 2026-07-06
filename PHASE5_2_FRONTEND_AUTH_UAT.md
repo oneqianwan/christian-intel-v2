@@ -4,7 +4,7 @@
 
 - ProjectDir: `C:\Users\baiwan\christian-intel-v2`
 - Branch: `phase5/auth-rbac-admin-v1`
-- BaselineCommit: `aa3adbd`
+- BaselineCommit: `2f691c3`
 
 ## Auth Feature Flags
 
@@ -316,15 +316,21 @@ npm run build
   - NewPasswordAccepted=PASS
   - LogoutAllFlow=PASS
   - SessionNotRestoredAfterLogoutAll=PASS
+  - ManualBrowserUAT=PASS
   - login API accepted the test admin and set HttpOnly cookie
   - user payload shape matched backend contract
   - route protection logic for security page exists
 - Note:
   - first manual UAT found a layout defect: `SecuritySettingsPage` could not scroll to the bottom at the current browser window height
-  - user temporarily completed the security flows by reducing browser zoom
-  - this follow-up fix changes the page layout so the security screen provides its own vertical scroll container and bottom padding
-  - after this fix, the user still needs to reconfirm at `100%` browser zoom that the page scrolls naturally without shrinking the viewport
-  - SecuritySettingsScrollManualRetest=PENDING
+  - user temporarily completed the first security-flow verification by reducing browser zoom
+  - the scroll/layout fix was delivered in commit `2f691c3`
+  - user retested in a real browser at `100%` zoom with both frontend and backend using `127.0.0.1`
+  - the security page now scrolls normally without using `Ctrl+-`
+  - the password-change section is visible and reachable
+  - the logout-all section is visible and reachable
+  - the page bottom is no longer clipped
+  - SecuritySettingsScrollManualRetest=PASS
+  - Phase 5.2 real-browser UAT is now fully passed end-to-end
 
 ## Security Check
 
@@ -396,7 +402,7 @@ npm run build
 - `VITE_AUTH_REQUIRED` default remains `false`
 - Watch/Alert are not yet migrated to formal user auth
 - Chat is not yet isolated by formal user ownership
-- Security settings scroll behavior requires one final manual retest at `100%` browser zoom after this layout fix
+- Security settings scroll retest at `100%` browser zoom is complete and passed
 - Full production rollout with global auth requirement should wait until Phase 5.3 / 5.4
 
 ## Rollback
