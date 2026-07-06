@@ -1,15 +1,24 @@
-const API_BASE = 'http://localhost:8000/api'
+const DEFAULT_API_BASE_URL = 'http://127.0.0.1:8000/api'
 const WELCOME_REPLY_TEXT = '你好！我是 CIO 情报助手。请问你想查询哪家机构的评分或投资关系？'
 const normalizeWelcomeText = (value: string) => value.replace(/\s+/g, '')
 
+export function getApiBaseUrl() {
+  return ((import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || DEFAULT_API_BASE_URL).replace(/\/+$/, '')
+}
+
+export function buildApiUrl(path: string) {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `${getApiBaseUrl()}${normalizedPath}`
+}
+
 export async function fetchConversations() {
-  const r = await fetch(`${API_BASE}/conversations`)
+  const r = await fetch(buildApiUrl('/conversations'))
   return r.json()
 }
 
 export async function createConversation(title?: string) {
   const body = JSON.stringify({ title: title || '新会话' })
-  const r = await fetch(`${API_BASE}/conversations`, {
+  const r = await fetch(buildApiUrl('/conversations'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: body,
@@ -18,7 +27,7 @@ export async function createConversation(title?: string) {
 }
 
 export async function fetchMessages(conversationId: string) {
-  const r = await fetch(`${API_BASE}/conversations/${conversationId}/messages`)
+  const r = await fetch(buildApiUrl(`/conversations/${conversationId}/messages`))
   return r.json()
 }
 
@@ -28,7 +37,7 @@ export async function sendChatStream(
   onEvent: (type: string, data: any) => void,
   signal?: AbortSignal
 ) {
-  const r = await fetch(`${API_BASE}/chat/stream`, {
+  const r = await fetch(buildApiUrl('/chat/stream'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, conversation_id: conversationId }),

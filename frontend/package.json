@@ -10,7 +10,9 @@
     "check:watchlist-ui": "node scripts/verify-watchlist-ui.mjs",
     "check:alerts-ui": "node scripts/verify-alerts-ui.mjs",
     "check:watch-alert-auth": "node scripts/verify-watch-alert-auth-boundary.mjs",
+    "check:auth-ui": "node scripts/verify-auth-ui.mjs",
     "lint": "oxlint",
+    "test:auth": "vitest run src/auth/__tests__ src/pages/__tests__",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -21,13 +23,18 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^27.0.0",
     "oxlint": "^1.69.0",
     "playwright": "^1.61.1",
     "typescript": "~6.0.2",
-    "vite": "^8.1.0"
+    "vite": "^8.1.0",
+    "vitest": "^3.2.4"
   }
 }

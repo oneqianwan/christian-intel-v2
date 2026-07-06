@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useConversationStore } from '../stores/conversationStore'
-import { fetchConversations, createConversation } from '../services/api'
+import { buildApiUrl, createConversation, fetchConversations } from '../services/api'
 import type { Conversation } from '../stores/conversationStore'
 import { isWatchAlertUiEnabled } from '../api/watchAlerts'
 import { NotificationBell } from './NotificationBell'
-
-const API_BASE = 'http://localhost:8000/api'
+import { UserMenu } from './UserMenu'
 
 function Sidebar() {
   const navigate = useNavigate()
@@ -51,7 +50,7 @@ function Sidebar() {
     if (!title) return
 
     try {
-      await fetch(`${API_BASE}/conversations/${convId}`, {
+      await fetch(buildApiUrl(`/conversations/${convId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -66,7 +65,7 @@ function Sidebar() {
 
   const handlePin = async (conv: Conversation) => {
     try {
-      await fetch(`${API_BASE}/conversations/${conv.id}/pin`, {
+      await fetch(buildApiUrl(`/conversations/${conv.id}/pin`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pinned: !conv.is_pinned }),
@@ -88,7 +87,7 @@ function Sidebar() {
     }
 
     try {
-      await fetch(`${API_BASE}/conversations/${conv.id}`, { method: 'DELETE' })
+      await fetch(buildApiUrl(`/conversations/${conv.id}`), { method: 'DELETE' })
       setMenuOpen(null)
       if (currentId === conv.id) {
         setCurrentId(null)
@@ -322,6 +321,7 @@ function Sidebar() {
           </div>
         ))}
       </div>
+      <UserMenu />
     </div>
   )
 }
