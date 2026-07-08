@@ -1,8 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { flushSync } from 'react-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../auth/useAuth'
+import { getChatIdentityMode, getChatInvalidConfigMessage } from '../features/chat/identity'
+import { registerChatAbortHandler } from '../features/chat/cleanup'
 import { useConversationStore } from '../stores/conversationStore'
 import { useMessageStore } from '../stores/messageStore'
-import { sendChatStream, fetchMessages, createConversation } from '../services/api'
+import { ChatApiError, buildApiUrl, sendChatStream, fetchMessages, createConversation } from '../services/api'
 import GlobalIntelCard from './GlobalIntelCard'
 import AgentAlerts from './AgentAlerts'
 import { CollectionPanel } from './CollectionPanel'
@@ -532,8 +536,16 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   } as const
 
   const assistantLogoSrc = '/logo-tight-b.png'
-  const { currentId, addConversation } = useConversationStore()
+  const { currentId, addConversation, setCurrentId } = useConversationStore()
   const { addMessage, getMessages } = useMessageStore()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const auth = useAuth()
+  const chatIdentityMode = getChatIdentityMode()
+  const authenticatedMode = chatIdentityMode === 'authenticated-user'
+  const invalidMode = chatIdentityMode === 'invalid'
+  const authUserKey = auth.user?.public_id ?? null
+  const canUseChatApi = !authenticatedMode || auth.status === 'authenticated'
   const [input, setInput] = useState('')
   const [lastQuery, setLastQuery] = useState('')
   const [bookmarkedItems, setBookmarkedItems] = useState<Set<string>>(new Set())
@@ -555,8 +567,47 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   const streamContentRef = useRef('')
   const isProcessingRef = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const activeUserKeyRef = useRef<string | null>(authUserKey)
 
   const messages = currentId ? getMessages(currentId) : []
+
+  useEffect(() => {
+    activeUserKeyRef.current = authUserKey
+  }, [authUserKey])
+
+  const abortInFlight = () => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    setIsLoading(false)
+    setIsThinking(false)
+    setCurrentTool(null)
+    streamContentRef.current = ''
+    setStreamingContent('')
+    isProcessingRef.current = false
+  }
+
+  useEffect(() => {
+    if (!authenticatedMode) {
+      return
+    }
+    abortInFlight()
+    setInput('')
+    setLastQuery('')
+    setSearchQuery('')
+    setSearchResults([])
+    setShowSearch(false)
+    setSearchLoading(false)
+    setBookmarkedItems(new Set())
+    setUserScrolled(false)
+    userScrolledRef.current = false
+    forceScrollRef.current = false
+  }, [authUserKey, authenticatedMode])
+
+  useEffect(() => {
+    return registerChatAbortHandler(() => {
+      abortInFlight()
+    })
+  }, [])
 
   useEffect(() => {
     const lastWelcomeMessage = [...messages].reverse().find((msg) =>
@@ -671,7 +722,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
 
   const handleCreateInvestorTask = async (investorName: string) => {
     try {
-      const res = await fetch('http://localhost:8000/api/tasks', {
+      const requestInit: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -679,7 +730,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
           description: `通过投资方匹配推荐，需跟进联系 ${investorName}`,
           priority: 'high',
         }),
-      })
+      }
+      if (authenticatedMode) {
+        requestInit.credentials = 'include'
+      }
+      const res = await fetch(buildApiUrl('/tasks'), requestInit)
       const data = await res.json()
 
       if (data.status === 'created') {
@@ -757,22 +812,61 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   }, [messages])
 
   useEffect(() => {
+    if (!currentId) {
+      return
+    }
+
+    if (!canUseChatApi) {
+      return
+    }
+
+    const requestUserKey = activeUserKeyRef.current
+    if (authenticatedMode && !requestUserKey) {
+      return
+    }
+
+    if (authenticatedMode && auth.status !== 'authenticated') {
+      return
+    }
+
+    if (authenticatedMode && requestUserKey !== activeUserKeyRef.current) {
+      return
+    }
+
     if (currentId) {
       fetchMessages(currentId).then((list: any[]) => {
+        if (authenticatedMode && requestUserKey !== activeUserKeyRef.current) {
+          return
+        }
         list.forEach((m) => useMessageStore.getState().addMessage(currentId, {
           id: m.id, role: m.role, content: m.content || '',
           sources: m.sources || [], delivery_type: m.delivery_type, status: m.status, scope: m.scope,
         }))
+      }).catch(async (error) => {
+        if (error instanceof ChatApiError && error.status === 401) {
+          await auth.refreshUser()
+          return
+        }
+        if (error instanceof ChatApiError && error.status === 404) {
+          setCurrentId(null)
+          return
+        }
+        console.error('加载消息失败:', error)
       })
     }
-  }, [currentId])
+  }, [authenticatedMode, auth, canUseChatApi, currentId, setCurrentId])
 
   useEffect(() => {
     if (!currentId) return
+    if (!canUseChatApi) return
 
     const syncMessages = async () => {
       try {
+        const requestUserKey = activeUserKeyRef.current
         const list = await fetchMessages(currentId)
+        if (authenticatedMode && requestUserKey !== activeUserKeyRef.current) {
+          return
+        }
         list.forEach((m: any) =>
           useMessageStore.getState().addMessage(currentId, {
             id: m.id,
@@ -785,13 +879,21 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
           })
         )
       } catch (e) {
+        if (e instanceof ChatApiError && e.status === 401) {
+          await auth.refreshUser()
+          return
+        }
+        if (e instanceof ChatApiError && e.status === 404) {
+          setCurrentId(null)
+          return
+        }
         console.error('同步消息失败:', e)
       }
     }
 
     const timer = window.setInterval(syncMessages, 2000)
     return () => window.clearInterval(timer)
-  }, [currentId])
+  }, [authenticatedMode, auth, canUseChatApi, currentId, setCurrentId])
 
   useEffect(() => {
     setLastQuery('')
@@ -822,8 +924,21 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
 
   useEffect(() => {
     const loadBookmarks = async () => {
+      if (invalidMode) {
+        return
+      }
+      if (!canUseChatApi) {
+        return
+      }
+      if (authenticatedMode && auth.status !== 'authenticated') {
+        return
+      }
       try {
-        const resp = await fetch('http://localhost:8000/api/bookmarks')
+        const requestInit: RequestInit = {}
+        if (authenticatedMode) {
+          requestInit.credentials = 'include'
+        }
+        const resp = await fetch(buildApiUrl('/bookmarks'), requestInit)
         const data = await resp.json()
         const ids = new Set<string>((data || []).map((item: any) => item.item_id).filter(Boolean))
         setBookmarkedItems(ids)
@@ -832,7 +947,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
       }
     }
     loadBookmarks()
-  }, [])
+  }, [auth.status, authenticatedMode, canUseChatApi, invalidMode])
 
   const detectCountry = (query: string): string => {
     const q = (query || '').toLowerCase()
@@ -846,12 +961,14 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   const exportBrief = async (convId: string | null) => {
     if (!convId || !lastQuery) return
     const country = detectCountry(lastQuery)
-    const url = `http://localhost:8000/api/export/pdf?query=${encodeURIComponent(lastQuery)}&country=${encodeURIComponent(country)}`
+    const url = new URL(buildApiUrl('/export/pdf'))
+    url.searchParams.append('query', lastQuery)
+    url.searchParams.append('country', country)
     window.open(url, '_blank')
   }
 
   const findItemIdByTitle = async (title: string) => {
-    const url = new URL('http://localhost:8000/api/search')
+    const url = new URL(buildApiUrl('/search'))
     url.searchParams.append('q', title)
     const country = detectCountry(lastQuery)
     if (country) url.searchParams.append('country', country)
@@ -885,13 +1002,15 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
         return
       }
 
-      const url = new URL('http://localhost:8000/api/bookmarks')
+      const url = new URL(buildApiUrl('/bookmarks'))
       url.searchParams.append('item_id', resolvedId)
       url.searchParams.append('note', title)
 
-      await fetch(url.toString(), {
-        method: 'POST',
-      })
+      const requestInit: RequestInit = { method: 'POST' }
+      if (authenticatedMode) {
+        requestInit.credentials = 'include'
+      }
+      await fetch(url.toString(), requestInit)
 
       setBookmarkedItems((prev) => {
         const next = new Set(prev)
@@ -908,7 +1027,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
     if (!searchQuery.trim()) return
     try {
       setSearchLoading(true)
-      const url = new URL('http://localhost:8000/api/search')
+      const url = new URL(buildApiUrl('/search'))
       url.searchParams.append('q', searchQuery.trim())
 
       const resp = await fetch(url.toString())
@@ -927,6 +1046,23 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
   const handleSend = async (overrideInput?: string) => {
     const trimmed = (overrideInput ?? input).trim()
     if (!trimmed) return
+    if (invalidMode) {
+      window.alert(getChatInvalidConfigMessage())
+      return
+    }
+    if (authenticatedMode && auth.status === 'loading') {
+      window.alert('正在检查登录状态，请稍候。')
+      return
+    }
+    if (authenticatedMode && auth.status !== 'authenticated') {
+      navigate('/login', {
+        state: {
+          from: location.pathname,
+          message: '登录后可使用 Chat 功能。',
+        },
+      })
+      return
+    }
     if (isProcessingRef.current || isLoading || isThinking) return
     isProcessingRef.current = true
 
@@ -974,11 +1110,15 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
         })
 
         try {
-          const r = await fetch('http://localhost:8000/api/analyze-url', {
+          const requestInit: RequestInit = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url: trimmed }),
-          })
+          }
+          if (authenticatedMode) {
+            requestInit.credentials = 'include'
+          }
+          const r = await fetch(buildApiUrl('/analyze-url'), requestInit)
           const result = await r.json()
 
           let content = `## 🔗 链接分析报告\n\n`
@@ -1040,9 +1180,13 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
       abortControllerRef.current?.abort()
       const controller = new AbortController()
       abortControllerRef.current = controller
+      const streamUserKey = activeUserKeyRef.current
 
       try {
         await sendChatStream(userMsg.content, convId, (type, data) => {
+          if (authenticatedMode && streamUserKey !== activeUserKeyRef.current) {
+            return
+          }
           if (type === 'thinking') {
             setIsThinking(true)
             setCurrentTool(null)
@@ -1155,6 +1299,18 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
         setCurrentTool(null)
         if (error?.name === 'AbortError') {
           setStreamingContent('已中断')
+        } else if (error instanceof ChatApiError) {
+          if (error.status === 401) {
+            void auth.refreshUser()
+            setStreamingContent('登录状态已失效，请重新登录。')
+          } else if (error.status === 404) {
+            setCurrentId(null)
+            setStreamingContent('会话不存在或已无权限访问。')
+          } else if (error.status === 503) {
+            setStreamingContent('Chat 功能暂不可用。')
+          } else {
+            setStreamingContent('请求失败，请重试。')
+          }
         } else {
           setStreamingContent('网络错误，请重试。')
         }
@@ -1163,6 +1319,29 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
         setIsThinking(false)
         setCurrentTool(null)
       }
+    } catch (error) {
+      if (error instanceof ChatApiError) {
+        if (error.status === 401) {
+          void auth.refreshUser()
+          navigate('/login', {
+            state: {
+              from: location.pathname,
+              message: '登录状态已失效，请重新登录后继续。',
+            },
+          })
+          return
+        }
+        if (error.status === 404) {
+          setCurrentId(null)
+          return
+        }
+        if (error.status === 503) {
+          window.alert('Chat 功能暂不可用。')
+          return
+        }
+      }
+      console.error('发送失败:', error)
+      window.alert('发送失败，请重试。')
     } finally {
       isProcessingRef.current = false
     }
@@ -1213,6 +1392,58 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
       e.preventDefault()
       handleSend()
     }
+  }
+
+  if (invalidMode) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px' }}>
+        <div style={{ width: '100%', maxWidth: 520 }}>
+          {renderFeedbackCard('配置错误', getChatInvalidConfigMessage(), 'error')}
+        </div>
+      </div>
+    )
+  }
+
+  if (authenticatedMode && auth.status === 'loading') {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px' }}>
+        <div style={{ width: '100%', maxWidth: 520 }}>
+          {renderFeedbackCard('检查登录状态中', '正在恢复登录会话，请稍候。', 'info')}
+        </div>
+      </div>
+    )
+  }
+
+  if (authenticatedMode && auth.status !== 'authenticated') {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', gap: '16px' }}>
+        <div style={{ width: '100%', maxWidth: 520 }}>
+          {renderFeedbackCard('需要登录', '登录后可使用 Chat / Conversation 功能。', 'warning')}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            navigate('/login', {
+              state: {
+                from: location.pathname,
+                message: '登录后可使用 Chat 功能。',
+              },
+            })
+          }}
+          style={{
+            padding: '10px 16px',
+            borderRadius: '10px',
+            border: '1px solid #d0d0d0',
+            background: '#fff',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: 600,
+          }}
+        >
+          去登录
+        </button>
+      </div>
+    )
   }
 
   if (!currentId) {
@@ -1474,7 +1705,12 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                       📄 导出PDF
                     </button>
                     <button
-                      onClick={() => window.open(`http://localhost:8000/api/export/html?query=${encodeURIComponent(lastQuery)}&country=${encodeURIComponent(detectCountry(lastQuery))}`, '_blank')}
+                      onClick={() => {
+                        const url = new URL(buildApiUrl('/export/html'))
+                        url.searchParams.append('query', lastQuery)
+                        url.searchParams.append('country', detectCountry(lastQuery))
+                        window.open(url.toString(), '_blank')
+                      }}
                       disabled={!lastQuery}
                       style={{
                         padding: '6px 14px',

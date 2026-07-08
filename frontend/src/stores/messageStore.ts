@@ -16,6 +16,7 @@ interface MessageStore {
   messages: Record<string, Message[]>
   addMessage: (convId: string, msg: Message) => void
   getMessages: (convId: string) => Message[]
+  reset: () => void
 }
 
 export const useMessageStore = create<MessageStore>((set, get) => ({
@@ -77,4 +78,5 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     }
   }),
   getMessages: (convId) => get().messages[convId] || [],
+  reset: () => set({ messages: {} }),
 }))

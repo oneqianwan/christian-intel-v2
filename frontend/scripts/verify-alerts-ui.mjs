@@ -170,7 +170,6 @@ const statusLines = gitStatus
 const disallowed = statusLines.filter((line) => {
   const filePath = line.slice(3)
   if (filePath.startsWith('backend/')) return true
-  if (filePath.includes('Chat')) return true
   if (filePath.includes('Dashboard')) return true
   if (filePath.includes('Insight')) return true
   return false

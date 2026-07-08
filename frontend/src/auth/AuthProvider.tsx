@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   AuthApiError,
   changePassword as changePasswordRequest,
@@ -15,6 +15,8 @@ import type {
 } from '../types/auth'
 import { AuthContext, type AuthContextValue } from './AuthContext'
 import { isAuthUiEnabled } from './flags'
+import { clearChatState } from '../features/chat/cleanup'
+import { getChatIdentityMode } from '../features/chat/identity'
 
 type AuthState = {
   status: AuthStatus
@@ -90,6 +92,21 @@ type AuthProviderProps = {
 export function AuthProvider({ children }: AuthProviderProps) {
   const authUiEnabled = isAuthUiEnabled()
   const [state, setState] = useState<AuthState>(() => normalizeEnabledState(authUiEnabled))
+  const previousChatUserKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (getChatIdentityMode() !== 'authenticated-user') {
+      previousChatUserKeyRef.current = state.user?.public_id ?? null
+      return
+    }
+
+    const currentKey = state.user?.public_id ?? null
+    const previousKey = previousChatUserKeyRef.current
+    if (previousKey !== currentKey) {
+      clearChatState()
+      previousChatUserKeyRef.current = currentKey
+    }
+  }, [state.user?.public_id])
 
   const applyBootstrapResult = useCallback((result: SessionBootstrapResult) => {
     if (result.status === 'authenticated') {

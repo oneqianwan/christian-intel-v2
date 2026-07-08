@@ -15,6 +15,7 @@ interface ConversationStore {
   setConversations: (list: Conversation[]) => void
   setCurrentId: (id: string | null) => void
   addConversation: (conv: Conversation) => void
+  reset: () => void
 }
 
 export const useConversationStore = create<ConversationStore>((set) => ({
@@ -26,4 +27,5 @@ export const useConversationStore = create<ConversationStore>((set) => ({
     conversations: [conv, ...s.conversations],
     currentId: conv.id,
   })),
+  reset: () => set({ conversations: [], currentId: null }),
 }))

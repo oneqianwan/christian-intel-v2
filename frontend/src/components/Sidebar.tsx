@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
+import { getChatIdentityMode, getChatInvalidConfigMessage } from '../features/chat/identity'
 import { getWatchAlertIdentityMode, isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
 import { useConversationStore } from '../stores/conversationStore'
-import { buildApiUrl, createConversation, fetchConversations } from '../services/api'
+import {
+  ChatApiError,
+  createConversation,
+  deleteConversation,
+  fetchConversations,
+  updateConversationPinned,
+  updateConversationTitle,
+} from '../services/api'
 import type { Conversation } from '../stores/conversationStore'
 import { NotificationBell } from './NotificationBell'
 import { UserMenu } from './UserMenu'
@@ -11,7 +19,7 @@ import { UserMenu } from './UserMenu'
 function Sidebar() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { status } = useAuth()
+  const { status, refreshUser } = useAuth()
   const { conversations, currentId, setConversations, setCurrentId, addConversation } = useConversationStore()
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -19,17 +27,40 @@ function Sidebar() {
   const [hoverId, setHoverId] = useState<string | null>(null)
   const showWatchlistNav = isWatchAlertUiEnabled()
   const watchAlertIdentityMode = getWatchAlertIdentityMode()
+  const chatIdentityMode = getChatIdentityMode()
   const watchlistActive = location.pathname.startsWith('/watchlist')
   const alertsActive = location.pathname.startsWith('/alerts')
 
   const loadConversations = async () => {
-    const list = await fetchConversations()
-    setConversations(list)
+    if (chatIdentityMode === 'invalid') {
+      setConversations([])
+      setCurrentId(null)
+      return
+    }
+
+    if (chatIdentityMode === 'authenticated-user' && status !== 'authenticated') {
+      setConversations([])
+      setCurrentId(null)
+      return
+    }
+
+    try {
+      const list = await fetchConversations()
+      setConversations(list)
+    } catch (error) {
+      if (error instanceof ChatApiError && error.status === 401) {
+        await refreshUser()
+        setConversations([])
+        setCurrentId(null)
+        return
+      }
+      console.error('加载会话列表失败:', error)
+    }
   }
 
   useEffect(() => {
-    loadConversations()
-  }, [])
+    void loadConversations()
+  }, [chatIdentityMode, status])
 
   useEffect(() => {
     const handleOutsideClick = () => setMenuOpen(null)
@@ -38,8 +69,38 @@ function Sidebar() {
   }, [])
 
   const handleNewChat = async () => {
-    const conv = await createConversation()
-    addConversation(conv)
+    if (chatIdentityMode === 'invalid') {
+      window.alert(getChatInvalidConfigMessage())
+      return
+    }
+
+    if (chatIdentityMode === 'authenticated-user' && status !== 'authenticated') {
+      navigate('/login', {
+        state: {
+          from: location.pathname,
+          message: '登录后可使用 Chat 功能。',
+        },
+      })
+      return
+    }
+
+    try {
+      const conv = await createConversation()
+      addConversation(conv)
+    } catch (error) {
+      if (error instanceof ChatApiError && error.status === 401) {
+        await refreshUser()
+        navigate('/login', {
+          state: {
+            from: location.pathname,
+            message: '登录状态已失效，请重新登录后继续。',
+          },
+        })
+        return
+      }
+      console.error('创建会话失败:', error)
+      window.alert('创建会话失败')
+    }
   }
 
   const handleEdit = (conv: Conversation) => {
@@ -53,11 +114,7 @@ function Sidebar() {
     if (!title) return
 
     try {
-      await fetch(buildApiUrl(`/conversations/${convId}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      })
+      await updateConversationTitle(convId, title)
       setEditingId(null)
       setEditTitle('')
       await loadConversations()
@@ -68,11 +125,7 @@ function Sidebar() {
 
   const handlePin = async (conv: Conversation) => {
     try {
-      await fetch(buildApiUrl(`/conversations/${conv.id}/pin`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pinned: !conv.is_pinned }),
-      })
+      await updateConversationPinned(conv.id, !conv.is_pinned)
       setMenuOpen(null)
       await loadConversations()
     } catch (e) {
@@ -90,7 +143,7 @@ function Sidebar() {
     }
 
     try {
-      await fetch(buildApiUrl(`/conversations/${conv.id}`), { method: 'DELETE' })
+      await deleteConversation(conv.id)
       setMenuOpen(null)
       if (currentId === conv.id) {
         setCurrentId(null)
