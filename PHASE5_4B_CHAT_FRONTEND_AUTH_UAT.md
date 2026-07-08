@@ -234,13 +234,27 @@
 
 ### Phase 5.4B-2 浏览器复测
 
-- ManualBrowserRetest=LIMITED
-- LogoutReloginRedErrorManualRetest=PENDING
-- 说明：本次修复属于浏览器可视化反馈问题，需用户按复现路径复测确认：
-  - logout 后重新登录不再出现红色“操作失败”
-  - 同一用户历史会话仍恢复
-  - 发送消息仍正常
-  - 刷新仍正常
+- 用户真实浏览器复测时间：`2026-07-08`
+- ManualBrowserRetest=PASS
+- LogoutReloginRedErrorManualRetest=PASS
+- RedErrorAfterLogoutRelogin=PASS
+- SameUserConversationRestore=PASS
+- ChatSendStillWorks=PASS
+- BrainReplyWorks=PASS
+- 真实复测结果：
+  - 重新登录后红色“操作失败，请稍后重试”已消失
+  - 发送 Chat 消息正常
+  - Brain 可以正常回复
+  - F5 刷新后当前聊天仍在
+  - 退出登录后再次登录，左侧历史会话仍在
+  - 点进历史会话后，消息内容仍在
+  - 数据库核验：`conversations=1`、`messages=2`
+- 性能观察：
+  - Chat / Brain response time felt slow, but functional and not blocking Phase 5.4B.
+- 临时文件清理：
+  - `phase5_chat_uat.db deleted`
+  - `_db_backups deleted`
+- Phase 5.4B browser UAT final status: `PASS`
 
 ## 回滚方案
 
