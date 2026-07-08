@@ -3,7 +3,7 @@
 ## Scope
 
 - Branch: `phase5/auth-rbac-admin-v1`
-- Baseline Commit: `7a1c18d65f724b96f505b48b4e488dffd1051910`
+- Baseline Commit: `3d191c8`
 - Phase Goal: migrate Watch / Alert frontend to authenticated Cookie mode behind a dedicated feature flag, while preserving Phase 4 legacy-session rollback mode.
 - Backend Changes: none
 - Chat Migration: not included in this phase
@@ -221,19 +221,71 @@
 
 ## Local Browser UAT
 
-- Status: `LIMITED`
-- Reason:
-  - This run completed static checks, unit tests, and production build.
-  - Browser automation against a temporary backend, test admin bootstrap, and header inspection was not completed in this run.
-- Required Phase 5.3C follow-up:
-  - dual-user browser isolation validation
-  - legacy data migration verification
-- Important:
+- Status: `PASS_WITH_NOTED_LIMITATIONS`
+- Browser environment verified by user:
+  - Backend: `127.0.0.1:8000`
+  - Frontend: `127.0.0.1:5174`
+  - Backend database: `sqlite:///C:/Users/baiwan/christian-intel-v2/phase5_watch_alert_uat.db`
+  - Backend flags:
+    - `AUTH_V1_ENABLED=true`
+    - `AUTH_COOKIE_REQUIRED=false`
+    - `AUTH_COOKIE_SECURE=false`
+    - `WATCH_ALERT_V1_ENABLED=true`
+    - `WATCH_ALERT_NOTIFICATIONS_ENABLED=true`
+    - `WATCH_ALERT_USER_OWNERSHIP_ENABLED=true`
+    - `WATCH_ALERT_SCHEDULER_ENABLED=false`
+    - `AUTH_CORS_ALLOW_ORIGINS=http://127.0.0.1:5174`
+  - Frontend flags:
+    - `VITE_AUTH_V1_ENABLED=true`
+    - `VITE_AUTH_REQUIRED=false`
+    - `VITE_WATCH_ALERT_UI_ENABLED=true`
+    - `VITE_WATCH_ALERT_USER_OWNERSHIP_ENABLED=true`
+    - `VITE_API_BASE_URL=http://127.0.0.1:8000/api`
+- Core browser flow passed:
+  - Unauthenticated home page still opens normally with no forced login.
+  - Unauthenticated Chat remains usable and `新会话` still works.
+  - Unauthenticated organization detail page opens normally.
+  - `WatchButton` shows `Login required` and `登录后关注` while unauthenticated.
+  - Unauthenticated `WatchButton` does not create a Watch.
+  - Clicking `登录后关注` navigates to `/login`.
+  - Login with `uat-admin@example.com` succeeds and returns to the Victory Philippines organization detail page.
+  - `WatchButton` becomes actionable after login.
+  - Creating a Watch succeeds and the button state changes to `Watching / Pause / Run Now / Remove`.
+  - Refreshing the organization detail page preserves the `Watching` state.
+  - `Watchlist` opens successfully and shows the current user's Victory Philippines Watch.
+  - Watchlist data verified:
+    - `status=active`
+    - `frequency=daily`
+    - `entity_id=uat-victory-philippines`
+  - `Run Now` succeeds.
+  - `last_checked_at` updates.
+  - `last_success_at` updates.
+  - `consecutive_failures=0`.
+  - `View Signals` opens successfully.
+  - `SignalList` shows no red error state.
+  - `SignalList` shows `No signals yet`, which matches the temporary UAT organization expectation.
+  - `Alerts` page opens successfully with no red error state.
+- Configuration issue found and resolved during UAT:
+  - Initial backend startup omitted `WATCH_ALERT_V1_ENABLED=true` and `WATCH_ALERT_NOTIFICATIONS_ENABLED=true`.
+  - This caused `/api/alerts/unread-count` to return `503` with `WATCH_ALERT_NOTIFICATIONS_DISABLED`.
+  - After restarting with the complete Watch / Alert backend flags, `NotificationBell` recovered and `/api/alerts/unread-count` no longer returned `WATCH_ALERT_NOTIFICATIONS_DISABLED`.
+  - After aligning backend / frontend ports to `8000 / 5174`, the old Chat proxy error disappeared.
+- Manual retest limits recorded honestly:
+  - Logout cleanup was not manually re-tested in this browser pass.
+  - `/watchlist` redirect after logout was not manually re-tested in this browser pass.
+  - `NotificationBell` stop-polling after logout was not manually re-tested in this browser pass.
+  - User-switch cleanup was not manually re-tested in this browser pass.
+  - These areas are covered by Phase 5.3B automated tests.
+  - Phase 5.3C will re-test logout cleanup, user switching, dual-user isolation, and final browser UAT.
+- Conclusion:
+  - The core Watch / Alert Cookie login UI flow has passed real browser validation.
+  - Phase 5.3B can proceed to Phase 5.3C.
   - Do not mark production-ready default-on for authenticated Watch / Alert mode before Phase 5.3C browser validation is completed.
 
 ## Known Limits
 
-- Manual browser UAT for single-user Cookie headers is still pending / limited in this run.
+- Logout and user-switch cleanup were not manually re-tested in this browser pass.
+- Those cleanup paths are covered by existing Phase 5.3B automated tests.
 - Dual-user browser isolation is explicitly deferred to Phase 5.3C.
 - No automatic migration or claim of legacy anonymous Watch data is performed.
 
