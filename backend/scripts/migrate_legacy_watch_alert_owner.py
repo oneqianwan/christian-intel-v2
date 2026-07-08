@@ -5,6 +5,7 @@ import os
 import sys
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import or_
@@ -35,6 +36,10 @@ class MigrationPlan:
     watch_target_ids: set[str]
     eligible_watch_target_ids: set[str]
     conflicting_watch_target_ids: set[str]
+    merged_watch_target_ids: set[str]
+    merged_watch_target_map: dict[str, str]
+    signal_ids_to_verify: set[str]
+    alert_ids_to_verify: set[str]
     watch_targets: TableStats
     signals: TableStats
     alerts: TableStats
@@ -98,15 +103,25 @@ def _find_target_user(db, auth_models, email: str):
     return user
 
 
-def _collect_table_stats(records, *, target_user_id: str, force_conflict_ids: set[str] | None = None, id_getter=None) -> TableStats:
+def _collect_table_stats(
+    records,
+    *,
+    target_user_id: str,
+    force_conflict_ids: set[str] | None = None,
+    force_skip_ids: set[str] | None = None,
+    id_getter=None,
+) -> TableStats:
     matched = updated = skipped = conflicts = 0
     forced_conflicts = force_conflict_ids or set()
+    forced_skips = force_skip_ids or set()
     for record in records:
         matched += 1
         record_id = str(id_getter(record) if id_getter else getattr(record, "id", ""))
         owner_user_id = str(getattr(record, "owner_user_id", "") or "").strip()
         if record_id and record_id in forced_conflicts:
             conflicts += 1
+        elif record_id and record_id in forced_skips:
+            skipped += 1
         elif not owner_user_id:
             updated += 1
         elif owner_user_id == target_user_id:
@@ -119,18 +134,50 @@ def _collect_table_stats(records, *, target_user_id: str, force_conflict_ids: se
 def _build_plan(db, watch_models, *, legacy_session_id: str, target_user_id: str) -> MigrationPlan:
     watch_targets = (
         db.query(watch_models.WatchTarget)
-        .filter(watch_models.WatchTarget.user_id == legacy_session_id)
+        .filter(
+            watch_models.WatchTarget.user_id == legacy_session_id,
+            watch_models.WatchTarget.deleted_at.is_(None),
+        )
         .all()
     )
     watch_target_ids = {str(item.id) for item in watch_targets}
+    legacy_watch_targets_without_owner = [
+        item for item in watch_targets if not str(item.owner_user_id or "").strip()
+    ]
+    existing_owned_targets = []
+    legacy_entity_ids = {str(item.entity_id) for item in legacy_watch_targets_without_owner if str(item.entity_id or "").strip()}
+    if legacy_entity_ids:
+        existing_owned_targets = (
+            db.query(watch_models.WatchTarget)
+            .filter(
+                watch_models.WatchTarget.owner_user_id == str(target_user_id),
+                watch_models.WatchTarget.deleted_at.is_(None),
+                watch_models.WatchTarget.entity_id.in_(sorted(legacy_entity_ids)),
+            )
+            .all()
+        )
+    existing_owned_target_by_key = {
+        (str(item.entity_id), str(item.entity_type)): str(item.id) for item in existing_owned_targets
+    }
     conflicting_watch_target_ids = {
         str(item.id)
         for item in watch_targets
         if str(item.owner_user_id or "").strip()
         and str(item.owner_user_id) != str(target_user_id)
     }
-    eligible_watch_target_ids = watch_target_ids - conflicting_watch_target_ids
-    watch_target_stats = _collect_table_stats(watch_targets, target_user_id=target_user_id)
+    merged_watch_target_map = {
+        str(item.id): existing_owned_target_by_key[(str(item.entity_id), str(item.entity_type))]
+        for item in legacy_watch_targets_without_owner
+        if (str(item.entity_id), str(item.entity_type)) in existing_owned_target_by_key
+        and existing_owned_target_by_key[(str(item.entity_id), str(item.entity_type))] != str(item.id)
+    }
+    merged_watch_target_ids = set(merged_watch_target_map)
+    eligible_watch_target_ids = watch_target_ids - conflicting_watch_target_ids - merged_watch_target_ids
+    watch_target_stats = _collect_table_stats(
+        watch_targets,
+        target_user_id=target_user_id,
+        force_skip_ids=merged_watch_target_ids,
+    )
 
     signals = []
     if watch_target_ids:
@@ -148,6 +195,11 @@ def _build_plan(db, watch_models, *, legacy_session_id: str, target_user_id: str
             if str(signal.watch_target_id or "") in conflicting_watch_target_ids
         },
     )
+    signal_ids_to_verify = {
+        str(signal.id)
+        for signal in signals
+        if str(signal.watch_target_id or "") not in conflicting_watch_target_ids
+    }
 
     alerts = []
     if watch_target_ids:
@@ -173,11 +225,20 @@ def _build_plan(db, watch_models, *, legacy_session_id: str, target_user_id: str
             if str(alert.watch_target_id or "") in conflicting_watch_target_ids
         },
     )
+    alert_ids_to_verify = {
+        str(alert.id)
+        for alert in alerts
+        if str(alert.watch_target_id or "") not in conflicting_watch_target_ids
+    }
 
     return MigrationPlan(
         watch_target_ids=watch_target_ids,
         eligible_watch_target_ids=eligible_watch_target_ids,
         conflicting_watch_target_ids=conflicting_watch_target_ids,
+        merged_watch_target_ids=merged_watch_target_ids,
+        merged_watch_target_map=merged_watch_target_map,
+        signal_ids_to_verify=signal_ids_to_verify,
+        alert_ids_to_verify=alert_ids_to_verify,
         watch_targets=watch_target_stats,
         signals=signal_stats,
         alerts=alert_stats,
@@ -214,6 +275,55 @@ def _apply_plan(db, watch_models, *, plan: MigrationPlan, target_user_id: str, l
             )
             .update({watch_models.Alert.owner_user_id: normalized_target_user_id}, synchronize_session=False)
         )
+    if plan.merged_watch_target_map:
+        merged_at = datetime.utcnow()
+        for legacy_watch_target_id, target_watch_target_id in sorted(plan.merged_watch_target_map.items()):
+            (
+                db.query(watch_models.Signal)
+                .filter(
+                    watch_models.Signal.watch_target_id == legacy_watch_target_id,
+                    watch_models.Signal.owner_user_id.is_(None),
+                )
+                .update(
+                    {
+                        watch_models.Signal.owner_user_id: normalized_target_user_id,
+                        watch_models.Signal.watch_target_id: target_watch_target_id,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            (
+                db.query(watch_models.Alert)
+                .filter(
+                    or_(
+                        watch_models.Alert.user_id == legacy_session_id,
+                        watch_models.Alert.watch_target_id == legacy_watch_target_id,
+                    ),
+                    watch_models.Alert.owner_user_id.is_(None),
+                )
+                .update(
+                    {
+                        watch_models.Alert.owner_user_id: normalized_target_user_id,
+                        watch_models.Alert.watch_target_id: target_watch_target_id,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            (
+                db.query(watch_models.WatchTarget)
+                .filter(
+                    watch_models.WatchTarget.id == legacy_watch_target_id,
+                    watch_models.WatchTarget.owner_user_id.is_(None),
+                    watch_models.WatchTarget.deleted_at.is_(None),
+                )
+                .update(
+                    {
+                        watch_models.WatchTarget.owner_user_id: normalized_target_user_id,
+                        watch_models.WatchTarget.deleted_at: merged_at,
+                    },
+                    synchronize_session=False,
+                )
+            )
 
 
 def _verify_consistency(db, watch_models, *, plan: MigrationPlan, target_user_id: str, legacy_session_id: str) -> None:
@@ -241,18 +351,44 @@ def _verify_consistency(db, watch_models, *, plan: MigrationPlan, target_user_id
         if missing_signals:
             raise MigrationError("SIGNAL_CONSISTENCY_FAILED", "Signal ownership consistency check failed")
 
-    alert_query = db.query(watch_models.Alert.id).filter(
-        or_(
-            watch_models.Alert.user_id == legacy_session_id,
-            watch_models.Alert.watch_target_id.in_(sorted(plan.eligible_watch_target_ids or set())),
-        ),
-        watch_models.Alert.owner_user_id != normalized_target_user_id,
-    )
-    if plan.conflicting_watch_target_ids:
-        alert_query = alert_query.filter(
-            watch_models.Alert.watch_target_id.notin_(sorted(plan.conflicting_watch_target_ids))
+    if plan.merged_watch_target_ids:
+        missing_merged_watch_targets = (
+            db.query(watch_models.WatchTarget.id)
+            .filter(
+                watch_models.WatchTarget.id.in_(sorted(plan.merged_watch_target_ids)),
+                or_(
+                    watch_models.WatchTarget.owner_user_id != normalized_target_user_id,
+                    watch_models.WatchTarget.deleted_at.is_(None),
+                ),
+            )
+            .count()
         )
-    missing_alerts = alert_query.count()
+        if missing_merged_watch_targets:
+            raise MigrationError("WATCH_TARGET_MERGE_FAILED", "Merged watch target consistency check failed")
+
+    missing_signals_by_id = 0
+    if plan.signal_ids_to_verify:
+        missing_signals_by_id = (
+            db.query(watch_models.Signal.id)
+            .filter(
+                watch_models.Signal.id.in_(sorted(plan.signal_ids_to_verify)),
+                watch_models.Signal.owner_user_id != normalized_target_user_id,
+            )
+            .count()
+        )
+    if missing_signals_by_id:
+        raise MigrationError("SIGNAL_CONSISTENCY_FAILED", "Signal ownership consistency check failed")
+
+    missing_alerts = 0
+    if plan.alert_ids_to_verify:
+        missing_alerts = (
+            db.query(watch_models.Alert.id)
+            .filter(
+                watch_models.Alert.id.in_(sorted(plan.alert_ids_to_verify)),
+                watch_models.Alert.owner_user_id != normalized_target_user_id,
+            )
+            .count()
+        )
     if missing_alerts:
         raise MigrationError("ALERT_CONSISTENCY_FAILED", "Alert ownership consistency check failed")
 

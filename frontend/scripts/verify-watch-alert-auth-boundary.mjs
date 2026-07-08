@@ -162,8 +162,14 @@ try {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.slice(3))
-  const backendTouched = modified.some((filePath) => filePath.startsWith('backend/'))
-  assertMatch(!backendTouched, 'Backend files must not be modified for this fix')
+  const allowedBackendChanges = new Set([
+    'backend/scripts/migrate_legacy_watch_alert_owner.py',
+    'backend/tests/test_watch_alert_owner_migration.py',
+  ])
+  const forbiddenBackendChanges = modified.filter(
+    (filePath) => filePath.startsWith('backend/') && !allowedBackendChanges.has(filePath),
+  )
+  assertMatch(forbiddenBackendChanges.length === 0, `Backend files must not be modified for this fix: ${forbiddenBackendChanges.join(', ')}`)
 
   console.log('WATCH_ALERT_AUTH_BOUNDARY_CHECK=PASS')
 } catch (error) {

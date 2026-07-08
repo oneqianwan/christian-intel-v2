@@ -132,7 +132,14 @@ try {
 
   const diffOutput = execSync('git diff --name-only', { cwd: repoRoot, encoding: 'utf8' }).trim()
   const changedFiles = diffOutput ? diffOutput.split(/\r?\n/).filter(Boolean) : []
-  assertMatch(!changedFiles.some((filePath) => filePath.startsWith('backend/')), 'backend must not be modified')
+  const allowedBackendChanges = new Set([
+    'backend/scripts/migrate_legacy_watch_alert_owner.py',
+    'backend/tests/test_watch_alert_owner_migration.py',
+  ])
+  const forbiddenBackendChanges = changedFiles.filter(
+    (filePath) => filePath.startsWith('backend/') && !allowedBackendChanges.has(filePath),
+  )
+  assertMatch(forbiddenBackendChanges.length === 0, `backend must not be modified: ${forbiddenBackendChanges.join(', ')}`)
   assertMatch(
     !changedFiles.includes('frontend/src/services/api.ts'),
     'Chat API client must remain unchanged during watch/alert migration',

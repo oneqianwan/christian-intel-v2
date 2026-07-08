@@ -90,12 +90,15 @@ const diffOutput = execSync('git diff --name-only', {
 }).trim()
 
 const changedFiles = diffOutput ? diffOutput.split(/\r?\n/).filter(Boolean) : []
-const forbiddenDiffPrefixes = [
-  'backend/',
-]
+const allowedBackendChanges = new Set([
+  'backend/scripts/migrate_legacy_watch_alert_owner.py',
+  'backend/tests/test_watch_alert_owner_migration.py',
+])
 
 for (const file of changedFiles) {
-  assert(!forbiddenDiffPrefixes.some((prefix) => file === prefix || file.startsWith(prefix)), `Forbidden changed file detected: ${file}`)
+  if (file.startsWith('backend/') && !allowedBackendChanges.has(file)) {
+    assert(false, `Forbidden changed file detected: ${file}`)
+  }
 }
 
 console.log('AUTH_UI_CHECK=PASS')

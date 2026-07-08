@@ -400,3 +400,62 @@ def test_07_conflicting_owner_is_reported_and_not_overwritten(tmp_path):
     assert "ALERTS matched=1 updated=0 skipped=0 conflicts=1" in result.stdout
     assert state["watch_targets"][0][2] == str(other_user.id)
     assert state["watch_targets"][0][2] != str(target_user.id)
+
+
+def test_08_apply_merges_legacy_chain_when_target_already_owns_same_entity(tmp_path):
+    db_path = tmp_path / "watch_alert_owner_merge_existing_target.db"
+    _, database, auth_models, watch_models, auth_service = _bootstrap_runtime(db_path)
+    target_user = _seed_user(database, auth_models, auth_service, email="target@example.com", password="StrongPass123!")
+    legacy_watch_id, legacy_signal_id, legacy_alert_id = _seed_legacy_watch_chain(
+        database,
+        watch_models,
+        legacy_session_id="legacy-a",
+        entity_id="org-a",
+    )
+
+    session = database.SessionLocal()
+    try:
+        existing_watch = watch_models.WatchTarget(
+            user_id="current-user-session",
+            owner_user_id=str(target_user.id),
+            entity_id="org-a",
+            entity_type="organization",
+            status="active",
+            frequency="daily",
+        )
+        session.add(existing_watch)
+        session.commit()
+        session.refresh(existing_watch)
+        existing_watch_id = str(existing_watch.id)
+    finally:
+        session.close()
+
+    result = _run_cli(
+        db_path,
+        "--email",
+        "target@example.com",
+        "--legacy-session-id",
+        "legacy-a",
+        "--apply",
+    )
+
+    session = database.SessionLocal()
+    try:
+        migrated_watch = session.query(watch_models.WatchTarget).filter(watch_models.WatchTarget.id == legacy_watch_id).one()
+        migrated_signal = session.query(watch_models.Signal).filter(watch_models.Signal.id == legacy_signal_id).one()
+        migrated_alert = session.query(watch_models.Alert).filter(watch_models.Alert.id == legacy_alert_id).one()
+    finally:
+        session.close()
+        database.engine.dispose()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "WATCH_TARGETS matched=1 updated=0 skipped=1 conflicts=0" in result.stdout
+    assert "SIGNALS matched=1 updated=1 skipped=0 conflicts=0" in result.stdout
+    assert "ALERTS matched=1 updated=1 skipped=0 conflicts=0" in result.stdout
+    assert "CONSISTENCY_CHECK=PASS" in result.stdout
+    assert migrated_watch.owner_user_id == str(target_user.id)
+    assert migrated_watch.deleted_at is not None
+    assert migrated_signal.owner_user_id == str(target_user.id)
+    assert migrated_signal.watch_target_id == existing_watch_id
+    assert migrated_alert.owner_user_id == str(target_user.id)
+    assert migrated_alert.watch_target_id == existing_watch_id
