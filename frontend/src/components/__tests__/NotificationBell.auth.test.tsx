@@ -89,4 +89,15 @@ describe('NotificationBell authenticated-user mode', () => {
     await waitFor(() => expect(authState.refreshUser).toHaveBeenCalledTimes(1))
     expect(mockedGetUnreadAlertCount).toHaveBeenCalledTimes(1)
   })
+
+  it('ignores aborted polling requests without showing the generic red error', async () => {
+    authState.status = 'authenticated'
+    authState.user = { public_id: 'user-a' }
+    mockedGetUnreadAlertCount.mockRejectedValue(new DOMException('aborted', 'AbortError'))
+
+    renderBell()
+
+    await waitFor(() => expect(mockedGetUnreadAlertCount).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('操作失败，请稍后重试')).not.toBeInTheDocument()
+  })
 })

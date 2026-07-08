@@ -118,6 +118,13 @@ export function NotificationBell() {
         return
       }
 
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+      if (typeof error === 'object' && error && 'name' in error && (error as any).name === 'AbortError') {
+        return
+      }
+
       const message = getUnreadErrorMessage(error)
       setHasLoaded(true)
       setInlineMessage(message)

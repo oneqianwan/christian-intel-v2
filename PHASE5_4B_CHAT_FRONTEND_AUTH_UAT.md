@@ -3,11 +3,11 @@
 ## Baseline
 
 - Branch: `phase5/auth-rbac-admin-v1`
-- Baseline Commit: `7ef8074e5806b8d1084ae09c04f90b2402b66912`
-- Scope: Frontend Chat / Conversation 正式登录身份接入与状态清理（Phase 5.4B）
+- Baseline Commit: `1bed492157733677c9983024b7b797f86d050d24`
+- Scope: Frontend Chat / Conversation 正式登录身份接入与状态清理（Phase 5.4B）+ Phase 5.4B-2 Hotfix
 - Constraints honored:
   - Backend: 未修改
-  - Watch/Alert 业务文件: 未修改
+  - Watch/Alert：未修改所有权/鉴权/业务逻辑；仅修复 UI 侧登出/切换导致的 AbortError 误报红字
   - 不开启全站强制登录（`VITE_AUTH_REQUIRED` 仍默认 false）
   - 不重构 Brain
 
@@ -182,8 +182,65 @@
 
 ## 浏览器 UAT
 
-- ManualBrowserUAT=LIMITED
-- 说明：本阶段已完成静态检查、单测与 build 验证；浏览器双用户隔离与最终端到端验证按计划留在 Phase 5.4C 执行。
+### Phase 5.4B 用户真实浏览器 UAT（用户已完成）
+
+- 未登录首页正常打开：PASS
+- 未登录 Chat 显示需要登录：PASS
+- 未登录不能直接使用 Chat / Conversation：PASS
+- 左下角显示“登录”：PASS
+- 点击“去登录”后登录成功：PASS
+- 登录后回到 Chat 页面：PASS
+- 左下角显示 Chat UAT Admin：PASS
+- Chat 输入框恢复可用：PASS
+- 登录后发送消息成功：PASS
+- 同一会话内继续发送第二条消息成功：PASS
+- 第二条消息收到 OK 回复：PASS
+- 刷新页面后聊天内容仍在：PASS
+- 刷新后无红色错误：PASS
+- 退出登录后回到登录页面：PASS
+- 同一用户重新登录后，之前聊天记录仍在：PASS
+
+### Phase 5.4B-2 发现问题
+
+- 现象：同一用户退出登录后再次登录，页面会短暂出现红色提示“操作失败，请稍后重试”；刷新页面后消失
+- 影响：属于真实 UX 缺陷，Phase 5.4C 前必须修复
+
+### Phase 5.4B-2 Root Cause（真实根因）
+
+- 根因：Sidebar 的 Alerts 通知入口组件 NotificationBell 在登出/切换身份时会 `abort()` 正在进行的 unread-count 轮询请求；该请求抛出 `AbortError`（DOMException），未被组件 catch 过滤，落入兜底文案分支显示“操作失败，请稍后重试”
+- 证据：
+  - 兜底文案位置：[NotificationBell.tsx](file:///C:/Users/baiwan/christian-intel-v2/frontend/src/components/NotificationBell.tsx)
+  - abort 发生位置：[NotificationBell.tsx](file:///C:/Users/baiwan/christian-intel-v2/frontend/src/components/NotificationBell.tsx)
+  - AbortError 未过滤导致兜底文案：[NotificationBell.tsx](file:///C:/Users/baiwan/christian-intel-v2/frontend/src/components/NotificationBell.tsx)
+
+### Phase 5.4B-2 Fix（不掩盖真实错误的最小修复）
+
+- 修复：NotificationBell 在 catch 中识别 `AbortError` 并直接 return，不写入 `inlineMessage`
+- 结果：登出/重登（或身份切换）触发的“预期 abort”不再显示通用红字；非 abort 的真实错误（401/429/503/网络错误）仍会按原逻辑显示
+
+### Phase 5.4B-2 自动化回归（均 Exit Code 0）
+
+- `npm run check:chat-user-auth` -> `CHAT_USER_AUTH_UI_CHECK=PASS`
+- `npm run test:chat-user-auth` -> 13 passed, 0 failed
+- `npm run check:auth-ui` -> `AUTH_UI_CHECK=PASS`
+- `npm run test:auth` -> 35 passed, 0 failed
+- `npm run check:watch-alert-contract` -> `WATCH_ALERT_CONTRACT_CHECK=PASS`
+- `npm run check:watchlist-ui` -> `WATCHLIST_UI_CHECK=PASS`
+- `npm run check:alerts-ui` -> `ALERTS_UI_CHECK=PASS`
+- `npm run check:watch-alert-auth` -> `WATCH_ALERT_AUTH_BOUNDARY_CHECK=PASS`
+- `npm run check:watch-alert-user-auth` -> `WATCH_ALERT_USER_AUTH_UI_CHECK=PASS`
+- `npm run test:watch-alert-user-auth` -> 23 passed, 0 failed
+- `npm run build` -> PASS
+
+### Phase 5.4B-2 浏览器复测
+
+- ManualBrowserRetest=LIMITED
+- LogoutReloginRedErrorManualRetest=PENDING
+- 说明：本次修复属于浏览器可视化反馈问题，需用户按复现路径复测确认：
+  - logout 后重新登录不再出现红色“操作失败”
+  - 同一用户历史会话仍恢复
+  - 发送消息仍正常
+  - 刷新仍正常
 
 ## 回滚方案
 
@@ -210,4 +267,5 @@
 - `frontend/src/api/__tests__/chatAuth.test.ts`
 - `frontend/src/components/__tests__/ChatArea.auth.test.tsx`
 - `frontend/src/stores/__tests__/chatAuthState.test.ts`
-
+- `frontend/src/components/NotificationBell.tsx`
+- `frontend/src/components/__tests__/NotificationBell.auth.test.tsx`

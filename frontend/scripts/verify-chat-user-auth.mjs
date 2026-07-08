@@ -125,7 +125,6 @@ try {
       filePath === 'frontend/src/api/watchAlerts.ts' ||
       filePath === 'frontend/src/features/watchAlerts/identity.ts' ||
       filePath === 'frontend/src/components/WatchButton.tsx' ||
-      filePath === 'frontend/src/components/NotificationBell.tsx' ||
       filePath === 'frontend/src/pages/WatchlistPage.tsx' ||
       filePath === 'frontend/src/pages/AlertsPage.tsx',
   )
@@ -137,4 +136,3 @@ try {
   console.error(error instanceof Error ? error.message : String(error))
   process.exitCode = 1
 }
-
