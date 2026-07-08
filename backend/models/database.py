@@ -635,10 +635,14 @@ class Conversation(Base):
     __tablename__ = "conversations"
     id = Column(String, primary_key=True)
     title = Column(String, nullable=False, default="新会话")
+    owner_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_pinned = Column(Boolean, default=False)
     pinned_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    __table_args__ = (
+        Index("ix_conversations_owner_user_id_updated_at", "owner_user_id", "updated_at"),
+    )
 
 class Message(Base):
     __tablename__ = "messages"
@@ -651,6 +655,9 @@ class Message(Base):
     delivery_type = Column(String, default="text")
     status = Column(String, default="completed")
     created_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),
+    )
 
 class KnowledgeEntity(Base):
     __tablename__ = "knowledge_entities"
@@ -1575,11 +1582,34 @@ def _ensure_schema_compatibility():
                 conn.execute(text("UPDATE api_configs SET api_key = NULL WHERE api_key IS NOT NULL"))
 
         if "conversations" in table_names:
-            conversation_columns = {column["name"] for column in inspector.get_columns("conversations")}
-            if "is_pinned" not in conversation_columns:
-                conn.execute(text("ALTER TABLE conversations ADD COLUMN is_pinned BOOLEAN DEFAULT FALSE NOT NULL"))
-            if "pinned_at" not in conversation_columns:
-                conn.execute(text("ALTER TABLE conversations ADD COLUMN pinned_at TIMESTAMP NULL"))
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "conversations",
+                [
+                    ("owner_user_id", "VARCHAR REFERENCES users(id)"),
+                    ("is_pinned", "BOOLEAN DEFAULT FALSE NOT NULL"),
+                    ("pinned_at", "TIMESTAMP NULL"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "conversations",
+                [
+                    ("ix_conversations_owner_user_id_updated_at", ("owner_user_id", "updated_at")),
+                ],
+            )
+
+        if "messages" in table_names:
+            _ensure_indexes(
+                conn,
+                inspector,
+                "messages",
+                [
+                    ("ix_messages_conversation_id_created_at", ("conversation_id", "created_at")),
+                ],
+            )
 
         if "tasks" in table_names:
             task_columns = {column["name"] for column in inspector.get_columns("tasks")}

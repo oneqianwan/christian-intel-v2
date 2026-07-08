@@ -16,11 +16,15 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from fastapi.exceptions import HTTPException
 from sqlalchemy.orm import Session
 
+from dependencies.chat_auth import get_chat_current_user
+from models.auth import User
 from models.database import Conversation, Message, RequestTrace, emit_db_runtime_debug, get_db
 from models.schemas import ChatRequest
 from services.brain import Brain, think
+from services.chat_ownership import get_conversation_or_404, get_owner_user_id, is_chat_user_ownership_enabled
 from services.trace_center import debug_answer_event, set_trace_print
 from services.welcome_trace import emit_welcome_trace, lookup_welcome_reply_uuid
 
@@ -131,7 +135,13 @@ def _rollback_quietly(db: Session, *, label: str, sql: str = "", exc: Exception 
         _db_persist_trace(f"{label}_ROLLBACK_FAIL", db, sql=sql, exc=rollback_exc, **extra)
 
 
-def _ensure_conversation(db: Session, conversation_id: str, title_seed: str) -> Conversation:
+def _ensure_conversation(
+    db: Session,
+    conversation_id: str,
+    title_seed: str,
+    *,
+    owner_user_id: str | None = None,
+) -> Conversation:
     select_sql = "SELECT * FROM conversations WHERE id = :conversation_id LIMIT 1"
     try:
         _db_persist_trace(
@@ -141,6 +151,12 @@ def _ensure_conversation(db: Session, conversation_id: str, title_seed: str) -> 
             conversation_id=conversation_id,
         )
         conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if is_chat_user_ownership_enabled() and conversation is not None:
+            conversation = get_conversation_or_404(
+                db,
+                conversation_id,
+                owner_user_id=owner_user_id,
+            )
     except Exception as exc:
         _db_persist_trace("SELECT conversation FAIL", db, sql=select_sql, exc=exc, conversation_id=conversation_id)
         raise
@@ -176,7 +192,11 @@ def _ensure_conversation(db: Session, conversation_id: str, title_seed: str) -> 
 
     insert_sql = "INSERT INTO conversations (id, title, is_pinned, pinned_at, created_at, updated_at) VALUES (:id, :title, :is_pinned, :pinned_at, :created_at, :updated_at)"
     try:
-        conversation = Conversation(id=conversation_id, title=(title_seed or "新会话")[:30])
+        conversation = Conversation(
+            id=conversation_id,
+            title=(title_seed or "新会话")[:30],
+            owner_user_id=owner_user_id,
+        )
         _db_persist_trace(
             "INSERT conversation",
             db,
@@ -216,7 +236,19 @@ def _ensure_conversation(db: Session, conversation_id: str, title_seed: str) -> 
     return conversation
 
 
-def _load_history(db: Session, conversation_id: str, limit: int = 20) -> list[dict]:
+def _load_history(
+    db: Session,
+    conversation_id: str,
+    limit: int = 20,
+    *,
+    owner_user_id: str | None = None,
+) -> list[dict]:
+    if is_chat_user_ownership_enabled():
+        get_conversation_or_404(
+            db,
+            conversation_id,
+            owner_user_id=owner_user_id,
+        )
     messages = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -331,7 +363,13 @@ def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict):
         )
 
 
-def _prepare_chat_request(request: ChatRequest, db: Session, *, persist_db: bool = True) -> dict:
+def _prepare_chat_request(
+    request: ChatRequest,
+    db: Session,
+    *,
+    persist_db: bool = True,
+    owner_user_id: str | None = None,
+) -> dict:
     request_id = str(uuid.uuid4())
     conversation_id = request.conversation_id or str(uuid.uuid4())
     user_msg_id = str(uuid.uuid4())
@@ -351,6 +389,13 @@ def _prepare_chat_request(request: ChatRequest, db: Session, *, persist_db: bool
     )
 
     if not persist_db:
+        if is_chat_user_ownership_enabled() and request.conversation_id:
+            _load_history(
+                db,
+                conversation_id,
+                limit=20,
+                owner_user_id=owner_user_id,
+            )
         print(
             "STREAM_DB_PERSIST_DISABLED "
             + _safe_json_dumps(
@@ -368,7 +413,14 @@ def _prepare_chat_request(request: ChatRequest, db: Session, *, persist_db: bool
         }
 
     try:
-        _ensure_conversation(db, conversation_id, request.message)
+        _ensure_conversation(
+            db,
+            conversation_id,
+            request.message,
+            owner_user_id=owner_user_id,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         _rollback_quietly(
             db,
@@ -387,9 +439,17 @@ def _prepare_chat_request(request: ChatRequest, db: Session, *, persist_db: bool
                 }
             )
         )
+        raise
 
     try:
-        history = _load_history(db, conversation_id, limit=20)
+        history = _load_history(
+            db,
+            conversation_id,
+            limit=20,
+            owner_user_id=owner_user_id,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         _rollback_quietly(
             db,
@@ -407,7 +467,7 @@ def _prepare_chat_request(request: ChatRequest, db: Session, *, persist_db: bool
                 }
             )
         )
-        history = []
+        raise
 
     message_sql = "INSERT INTO messages (id, conversation_id, role, content, entities_mentioned) VALUES (:id, :conversation_id, :role, :content, :entities_mentioned)"
     try:
@@ -459,6 +519,7 @@ def _prepare_chat_request(request: ChatRequest, db: Session, *, persist_db: bool
                 }
             )
         )
+        raise
 
     return {
         "request_id": request_id,
@@ -475,6 +536,7 @@ def _finalize_delivery(
     sources: list | None = None,
     *,
     persist_db: bool = True,
+    owner_user_id: str | None = None,
 ):
     assistant_msg_id = str(uuid.uuid4())
     status, delivery_type = _infer_delivery(reply)
@@ -513,6 +575,12 @@ def _finalize_delivery(
         )
     else:
         try:
+            if is_chat_user_ownership_enabled():
+                get_conversation_or_404(
+                    db,
+                    conversation_id,
+                    owner_user_id=owner_user_id,
+                )
             db.add(
                 Message(
                     id=assistant_msg_id,
@@ -524,9 +592,16 @@ def _finalize_delivery(
                     status="completed" if status != "error" else "failed",
                 )
             )
-            conversation = db.query(Conversation).filter(Conversation.id == conversation_id).first()
-            if conversation:
-                conversation.updated_at = datetime.utcnow()
+            conversation = (
+                get_conversation_or_404(
+                    db,
+                    conversation_id,
+                    owner_user_id=owner_user_id,
+                )
+                if is_chat_user_ownership_enabled()
+                else db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            )
+            conversation.updated_at = datetime.utcnow()
             db.commit()
         except Exception as exc:
             _rollback_quietly(
@@ -581,8 +656,17 @@ def _process_chat_request(request: ChatRequest, db: Session) -> dict:
 
 
 @router.post("/chat/stream")
-async def chat_stream(chat_request: ChatRequest, request: Request, db: Session = Depends(get_db)):
+async def chat_stream(
+    chat_request: ChatRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_chat_current_user),
+):
     try:
+        owner_user_id = get_owner_user_id(current_user)
+        generator_id = f"chat-stream-{uuid.uuid4()}"
+        persist_db = is_chat_user_ownership_enabled()
+        prepared = _prepare_chat_request(chat_request, db, persist_db=persist_db, owner_user_id=owner_user_id)
         try:
             from main import BACKEND_INSTANCE_UUID, BACKEND_PORT
         except Exception:
@@ -591,9 +675,16 @@ async def chat_stream(chat_request: ChatRequest, request: Request, db: Session =
         print(f"BACKEND_INSTANCE_UUID={BACKEND_INSTANCE_UUID}")
         print(f"PID={os.getpid()}")
         print(f"PORT={BACKEND_PORT}")
-        generator_id = f"chat-stream-{uuid.uuid4()}"
         return StreamingResponse(
-            _stream_chat_response(chat_request, request, db, generator_id=generator_id),
+            _stream_chat_response(
+                chat_request,
+                request,
+                db,
+                prepared=prepared,
+                owner_user_id=owner_user_id,
+                persist_db=persist_db,
+                generator_id=generator_id,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -608,8 +699,16 @@ async def chat_stream(chat_request: ChatRequest, request: Request, db: Session =
         raise
 
 
-async def _stream_chat_response(request: ChatRequest, raw_request: Request, db: Session, *, generator_id: str):
-    prepared = _prepare_chat_request(request, db, persist_db=False)
+async def _stream_chat_response(
+    request: ChatRequest,
+    raw_request: Request,
+    db: Session,
+    *,
+    prepared: dict,
+    owner_user_id: str | None,
+    persist_db: bool,
+    generator_id: str,
+):
     request_id = prepared["request_id"]
     conversation_id = prepared["conversation_id"]
     history = prepared["history"]
@@ -708,7 +807,8 @@ async def _stream_chat_response(request: ChatRequest, raw_request: Request, db: 
                 conversation_id=conversation_id,
                 reply=full_content,
                 sources=evidence,
-                persist_db=False,
+                persist_db=persist_db,
+                owner_user_id=owner_user_id,
             )
             finalized["assistant_msg_id"] = assistant_message_id
             welcome_reply_uuid = finalized["delivery"].get("welcome_reply_uuid")
@@ -756,8 +856,17 @@ async def _stream_chat_response(request: ChatRequest, raw_request: Request, db: 
 
 
 @router.post("/chat/simple")
-def chat_simple(request: ChatRequest, db: Session = Depends(get_db)):
-    prepared = _prepare_chat_request(request, db)
+def chat_simple(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_chat_current_user),
+):
+    owner_user_id = get_owner_user_id(current_user)
+    prepared = _prepare_chat_request(
+        request,
+        db,
+        owner_user_id=owner_user_id,
+    )
     request_id = prepared["request_id"]
     try:
         set_trace_print(enabled=True, request_id=request_id)
@@ -770,6 +879,7 @@ def chat_simple(request: ChatRequest, db: Session = Depends(get_db)):
             conversation_id=prepared["conversation_id"],
             reply=reply,
             sources=sources,
+            owner_user_id=owner_user_id,
         )
         return {
             "reply": payload["delivery"]["content"],

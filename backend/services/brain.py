@@ -35,6 +35,7 @@ except ImportError:
     MULTI_AGENT_AVAILABLE = False
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import config
 from services.feature_flags import feature_flag_enabled
 from services.trace_center import debug_answer_event, trace_span
 from services.welcome_trace import emit_welcome_trace, lookup_welcome_reply_uuid
@@ -7216,7 +7217,7 @@ class Brain:
                         db.commit()
                         db.refresh(profile_row)
 
-                if not profile_row:
+                if not profile_row and not bool(getattr(config.settings, "CHAT_USER_OWNERSHIP_ENABLED", False)):
                     profile_row = db.query(UserProfile).order_by(UserProfile.updated_at.desc()).first()
                     if profile_row:
                         resolved_session_id = profile_row.session_id
