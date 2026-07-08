@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from models.database import init_db
 from routers import (
+    admin,
     agent,
     alerts,
     auth,
@@ -56,6 +57,7 @@ async def startup():
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(conversations.router, prefix="/api", tags=["conversations"])
 app.include_router(auth.router, prefix="/api", tags=["auth"])
+app.include_router(admin.router, prefix="/api", tags=["admin"])
 app.include_router(missions.router, prefix="/api", tags=["missions"])
 app.include_router(diagnostics.router, prefix="/api", tags=["diagnostics"])
 app.include_router(url_analysis.router, prefix="/api", tags=["url_analysis"])
