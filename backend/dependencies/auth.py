@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -11,6 +12,9 @@ from models.auth import AuthSession, User
 from models.database import get_db
 from schemas.watch_alert import ApiErrorResponse
 from services.auth_service import hash_session_token, touch_session_last_seen
+
+ROLE_HIERARCHY: tuple[str, ...] = ("viewer", "analyst", "admin", "super_admin")
+ROLE_RANK = {role: index for index, role in enumerate(ROLE_HIERARCHY)}
 
 
 def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
@@ -28,6 +32,40 @@ def require_auth_enabled() -> None:
 def _get_cookie_token(request: Request) -> str:
     cookie_name = str(config.settings.AUTH_COOKIE_NAME or "").strip()
     return str(request.cookies.get(cookie_name) or "")
+
+
+def normalize_role_value(role: str | None) -> str | None:
+    normalized = str(role or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized not in ROLE_RANK:
+        return None
+    return normalized
+
+
+def is_known_role(role: str | None) -> bool:
+    return normalize_role_value(role) is not None
+
+
+def role_at_least(role: str | None, minimum_role: str | None) -> bool:
+    normalized_role = normalize_role_value(role)
+    normalized_minimum = normalize_role_value(minimum_role)
+    if normalized_role is None or normalized_minimum is None:
+        return False
+    return ROLE_RANK[normalized_role] >= ROLE_RANK[normalized_minimum]
+
+
+def _normalize_allowed_roles(*allowed_roles: str) -> tuple[str, ...]:
+    normalized_roles: list[str] = []
+    for role in allowed_roles:
+        normalized_role = normalize_role_value(role)
+        if normalized_role is None:
+            raise ValueError(f"Unknown role: {role}")
+        if normalized_role not in normalized_roles:
+            normalized_roles.append(normalized_role)
+    if not normalized_roles:
+        raise ValueError("At least one allowed role is required")
+    return tuple(normalized_roles)
 
 
 @dataclass(frozen=True)
@@ -126,4 +164,26 @@ def get_current_user_no_touch(context: AuthContext = Depends(get_current_auth_co
 
 
 def require_authenticated_user_no_touch(user: User = Depends(get_current_user_no_touch)) -> User:
+    return user
+
+
+def require_role(*allowed_roles: str) -> Callable[[User], User]:
+    normalized_allowed_roles = _normalize_allowed_roles(*allowed_roles)
+
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        normalized_user_role = normalize_role_value(getattr(user, "role", None))
+        if normalized_user_role is None:
+            _raise_api_error(status.HTTP_403_FORBIDDEN, "ROLE_FORBIDDEN", "Insufficient permissions")
+        if normalized_user_role not in normalized_allowed_roles:
+            _raise_api_error(status.HTTP_403_FORBIDDEN, "ROLE_FORBIDDEN", "Insufficient permissions")
+        return user
+
+    return dependency
+
+
+def require_admin(user: User = Depends(require_role("admin", "super_admin"))) -> User:
+    return user
+
+
+def require_super_admin(user: User = Depends(require_role("super_admin"))) -> User:
     return user
