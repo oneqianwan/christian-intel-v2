@@ -10,6 +10,8 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: '只读用户',
 }
 
+const ADMIN_ROLES = new Set(['super_admin', 'admin'])
+
 function cardStyle() {
   return {
     borderTop: '1px solid #e5e7eb',
@@ -30,6 +32,8 @@ export function UserMenu() {
     }
     return ROLE_LABELS[user.role] || user.role
   }, [user])
+
+  const showAdminEntry = Boolean(user && ADMIN_ROLES.has(user.role))
 
   if (!isAuthUiEnabled() || status === 'disabled') {
     return null
@@ -108,6 +112,25 @@ export function UserMenu() {
           <span style={{ fontSize: '12px', color: '#6366f1', fontWeight: 600 }}>{roleLabel}</span>
         </summary>
         <div style={{ display: 'grid', gap: '10px', marginTop: '12px' }}>
+          {showAdminEntry ? (
+            <button
+              type="button"
+              onClick={() => navigate('/admin')}
+              style={{
+                width: '100%',
+                border: '1px solid #c7d2fe',
+                borderRadius: '10px',
+                padding: '10px 14px',
+                background: '#eef2ff',
+                color: '#4338ca',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontWeight: 700,
+              }}
+            >
+              管理后台
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => navigate('/settings/security')}

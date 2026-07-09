@@ -25,7 +25,7 @@ export function AdminGuard({ children }: AdminGuardProps) {
   if (status === 'error') {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-        <div style={{ maxWidth: '460px', width: '100%', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '28px' }}>
+        <div data-testid="admin-guard-error" style={{ maxWidth: '460px', width: '100%', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '28px' }}>
           <h1 style={{ marginTop: 0, marginBottom: '10px', fontSize: '22px', color: '#0f172a' }}>无法校验管理员权限</h1>
           <p style={{ marginTop: 0, marginBottom: '18px', color: '#475569', lineHeight: 1.7 }}>
             {error?.message || '权限服务暂时不可用，请稍后重试。'}
@@ -65,7 +65,7 @@ export function AdminGuard({ children }: AdminGuardProps) {
   if (!ALLOWED_ADMIN_ROLES.has(user.role)) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: '24px' }}>
-        <div style={{ maxWidth: '480px', width: '100%', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '28px' }}>
+        <div data-testid="admin-guard-forbidden" style={{ maxWidth: '480px', width: '100%', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '18px', padding: '28px' }}>
           <h1 style={{ marginTop: 0, marginBottom: '10px', fontSize: '22px', color: '#0f172a' }}>403 无权限访问</h1>
           <p style={{ marginTop: 0, marginBottom: 0, color: '#475569', lineHeight: 1.7 }}>
             当前页面需要管理员角色。前端 Guard 仅用于界面控制，最终权限边界仍由后端 RBAC 决定。
