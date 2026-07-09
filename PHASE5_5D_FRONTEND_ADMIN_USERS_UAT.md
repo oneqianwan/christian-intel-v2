@@ -6,6 +6,7 @@
 - Scope=`Frontend admin route + AdminGuard wiring + AdminLayout + UsersPage only`
 - BackendChanged=`NO`
 - ManualBrowserUAT=`LIMITED`
+- AdminUsersScrollManualRetest=`PENDING`
 
 ## Files Changed
 - `frontend/package.json`
@@ -51,6 +52,24 @@
 - `super_admin/admin` can revoke sessions within backend permission boundaries
 - Success feedback is preserved after revoke refresh
 - Sensitive fields like `password_hash` and `token` are not rendered
+- Admin layout content region now scrolls vertically without depending on `body` scroll
+
+## Scroll Fix Follow-Up
+- Real browser UAT found that Admin Users page could load data but could not scroll vertically when the user list exceeded viewport height
+- User confirmed that after shrinking browser zoom they could see 4 accounts, so backend loading was normal and the defect was strictly a frontend scrolling issue
+- Root cause:
+  - Global `html, body, #root` are configured with `overflow: hidden`
+  - `AdminLayout` originally rendered a natural-height page but did not provide its own `overflowY: auto` scroll container
+  - As a result, Admin content beyond viewport height was clipped instead of scrollable
+- Fix:
+  - `AdminLayout` now uses a column layout with a dedicated main scroll container
+  - Main content resets `minHeight: 0` and enables `overflowY: auto`
+  - Admin page root stretches within that scroll container instead of relying on body scroll
+  - Table wrapper preserves horizontal scrolling on smaller screens without blocking page-level vertical access
+- Manual follow-up still required:
+  - Admin Users 页面不缩放也可以纵向滚动
+  - 4 个账号都能看到
+  - role/status/revoke sessions 可以继续测试
 
 ## Role Matrix
 
@@ -109,9 +128,9 @@
 
 ## Test Results
 - `cd frontend && npm run check:admin-ui` -> `PASS`
-- `cd frontend && npm run test:admin-ui` -> `24 passed`
+- `cd frontend && npm run test:admin-ui` -> `26 passed`
 - `cd frontend && npm run check:auth-ui` -> `PASS`
-- `cd frontend && npm run test:auth` -> `50 passed`
+- `cd frontend && npm run test:auth` -> `51 passed`
 - `cd frontend && npm run check:chat-user-auth` -> `PASS`
 - `cd frontend && npm run test:chat-user-auth` -> `13 passed`
 - `cd frontend && npm run check:watch-alert-contract` -> `PASS`
@@ -125,7 +144,14 @@
 ## Browser UAT
 - ManualBrowserUAT=`LIMITED`
 - No browser PASS is claimed in this phase
+- Real browser UAT issue recorded:
+  - Admin Users 页面无法纵向滚动
+  - 用户缩小浏览器比例后确认 4 个账号都能加载出来
+- AdminUsersScrollManualRetest=`PENDING`
 - Recommended manual checks:
+  - Admin Users 页面在默认缩放下可以纵向滚动
+  - 4 个账号都能完整看到
+  - role/status/revoke sessions 操作可以继续测试
   - super_admin login -> Admin entry visible
   - admin login -> Admin entry visible but role update hidden
   - analyst/viewer login -> Admin entry hidden

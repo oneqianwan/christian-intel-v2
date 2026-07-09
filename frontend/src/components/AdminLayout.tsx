@@ -24,7 +24,17 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   const navigate = useNavigate()
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc', color: '#0f172a' }}>
+    <div
+      style={{
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#f8fafc',
+        color: '#0f172a',
+        overflow: 'hidden',
+      }}
+    >
       <header
         style={{
           position: 'sticky',
@@ -78,7 +88,25 @@ export function AdminLayout({ children }: AdminLayoutProps) {
           </div>
         </div>
       </header>
-      <main style={{ maxWidth: '1180px', margin: '0 auto', padding: '24px' }}>{children}</main>
+      <main
+        data-testid="admin-layout-scroll-container"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: '1180px',
+            margin: '0 auto',
+            padding: '24px',
+          }}
+        >
+          {children}
+        </div>
+      </main>
     </div>
   )
 }

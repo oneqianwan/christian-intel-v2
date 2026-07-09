@@ -50,6 +50,7 @@ try {
   const adminGuardSource = read('src/auth/AdminGuard.tsx')
   const userMenuSource = read('src/components/UserMenu.tsx')
   const adminApiSource = read('src/api/admin.ts')
+  const adminLayoutSource = read('src/components/AdminLayout.tsx')
   const adminPageSource = read('src/pages/AdminUsersPage.tsx')
   const packageJson = read('package.json')
 
@@ -62,6 +63,11 @@ try {
   grep(adminGuardSource, /ALLOWED_ADMIN_ROLES/, 'AdminGuard must keep explicit admin role allow-list')
   grep(adminGuardSource, /status !== 'authenticated' \|\| !user/, 'AdminGuard must block unauthenticated access')
   grep(adminGuardSource, /403 无权限访问/, 'AdminGuard must provide explicit forbidden UI')
+
+  grep(adminLayoutSource, /data-testid="admin-layout-scroll-container"/, 'AdminLayout must expose a dedicated scroll container')
+  grep(adminLayoutSource, /overflowY:\s*'auto'/, 'AdminLayout scroll container must support vertical scrolling')
+  grep(adminLayoutSource, /minHeight:\s*0/, 'AdminLayout scroll container must reset minHeight to avoid clipping')
+  grep(adminLayoutSource, /overflow:\s*'hidden'/, 'AdminLayout root must prevent body-level overflow leakage')
 
   grep(userMenuSource, /ADMIN_ROLES/, 'UserMenu must keep explicit admin role allow-list')
   grep(userMenuSource, /navigate\('\/admin'\)/, 'UserMenu must navigate to /admin')
@@ -82,6 +88,8 @@ try {
   grep(adminPageSource, /revokeAdminUserSessions/, 'AdminUsersPage must support session revoke')
   grep(adminPageSource, /无权限访问管理后台/, 'AdminUsersPage must show explicit forbidden message')
   grep(adminPageSource, /登录状态已失效|需要登录/, 'AdminUsersPage must handle unauthenticated state')
+  grep(adminPageSource, /data-testid="admin-users-table-scroll"/, 'AdminUsersPage must expose a table scroll wrapper')
+  grep(adminPageSource, /minHeight:\s*'100%'/, 'AdminUsersPage must stretch within the scroll container')
   grepNot(adminPageSource, /password_hash|token/i, 'AdminUsersPage must not render sensitive fields')
 
   assertMatch(packageJson.includes('check:admin-ui'), 'package.json must expose check:admin-ui')

@@ -142,6 +142,50 @@ describe('AdminUsersPage', () => {
     expect(screen.queryByText('should-not-render')).not.toBeInTheDocument()
   })
 
+  it('页面外层与表格区域保留可滚动访问能力，不会因为固定高度直接截断', async () => {
+    mockedUseAuth.mockReturnValue(createUseAuthValue())
+    mockedListAdminUsers.mockResolvedValue({
+      items: [
+        ...sampleUsers,
+        {
+          public_id: 'viewer-public-id',
+          email: 'viewer@example.com',
+          display_name: 'Viewer',
+          role: 'viewer',
+          status: 'active',
+          created_at: '2026-01-04T00:00:00Z',
+          updated_at: '2026-01-04T00:00:00Z',
+          last_login_at: null,
+        },
+        {
+          public_id: 'admin-public-id',
+          email: 'admin2@example.com',
+          display_name: 'Admin Two',
+          role: 'admin',
+          status: 'active',
+          created_at: '2026-01-05T00:00:00Z',
+          updated_at: '2026-01-05T00:00:00Z',
+          last_login_at: null,
+        },
+      ],
+      total: 4,
+      limit: 100,
+      offset: 0,
+    })
+
+    render(<AdminUsersPage />)
+
+    expect(await screen.findByText('viewer@example.com')).toBeInTheDocument()
+    expect(screen.getByText('admin2@example.com')).toBeInTheDocument()
+    expect(screen.getByTestId('admin-users-page')).toHaveStyle({
+      minHeight: '100%',
+    })
+    expect(screen.getByTestId('admin-users-table-scroll')).toHaveStyle({
+      overflowX: 'auto',
+      overflowY: 'visible',
+    })
+  })
+
   it('super_admin 可以看到 role 修改控件并更新角色', async () => {
     mockedUseAuth.mockReturnValue(
       createUseAuthValue({

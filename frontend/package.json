@@ -16,7 +16,7 @@
     "check:admin-ui": "node scripts/verify-admin-ui.mjs",
     "lint": "oxlint",
     "test:auth": "vitest run src/auth/__tests__ src/pages/__tests__",
-    "test:admin-ui": "vitest run src/auth/__tests__/AdminGuard.test.tsx src/api/__tests__/adminApi.test.ts src/components/__tests__/UserMenu.admin.test.tsx src/pages/__tests__/AdminUsersPage.test.tsx",
+    "test:admin-ui": "vitest run src/auth/__tests__/AdminGuard.test.tsx src/api/__tests__/adminApi.test.ts src/components/__tests__/AdminLayout.test.tsx src/components/__tests__/UserMenu.admin.test.tsx src/pages/__tests__/AdminUsersPage.test.tsx",
     "test:chat-user-auth": "vitest run src/features/chat/__tests__ src/api/__tests__/chatAuth.test.ts src/components/__tests__/ChatArea.auth.test.tsx src/stores/__tests__/chatAuthState.test.ts",
     "test:watch-alert-user-auth": "vitest run src/features/watchAlerts/__tests__ src/api/__tests__/watchAlertsAuth.test.ts src/components/__tests__/WatchButton.auth.test.tsx src/components/__tests__/NotificationBell.auth.test.tsx src/pages/__tests__/WatchlistPage.auth.test.tsx src/pages/__tests__/AlertsPage.auth.test.tsx",
     "preview": "vite preview"

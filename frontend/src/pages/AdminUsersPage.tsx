@@ -343,7 +343,7 @@ export function AdminUsersPage() {
   }
 
   return (
-    <div style={{ display: 'grid', gap: '16px' }}>
+    <div data-testid="admin-users-page" style={{ display: 'grid', gap: '16px', minHeight: '100%' }}>
       <section
         style={{
           background: '#fff',
@@ -399,7 +399,10 @@ export function AdminUsersPage() {
             overflow: 'hidden',
           }}
         >
-          <div style={{ overflowX: 'auto' }}>
+          <div
+            data-testid="admin-users-table-scroll"
+            style={{ overflowX: 'auto', overflowY: 'visible' }}
+          >
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '1040px' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', textAlign: 'left' }}>
