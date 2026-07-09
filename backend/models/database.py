@@ -1208,9 +1208,13 @@ class UserFeedback(Base):
     """用户反馈记录（Learning Loop核心）"""
 
     __tablename__ = "user_feedbacks"
+    __table_args__ = (
+        Index("ix_user_feedbacks_user_id", "user_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(100), nullable=False, index=True)
+    user_id = Column(String(100), nullable=True)
     feedback_type = Column(String(50), nullable=False)
     content = Column(Text, nullable=True)
     related_entity = Column(String(255), nullable=True)
@@ -1580,6 +1584,24 @@ def _ensure_schema_compatibility():
                 conn.execute(text(f"ALTER TABLE api_configs ADD COLUMN updated_at TIMESTAMP DEFAULT {updated_at_default}"))
             if "api_key" in api_columns:
                 conn.execute(text("UPDATE api_configs SET api_key = NULL WHERE api_key IS NOT NULL"))
+
+        if "user_feedbacks" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "user_feedbacks",
+                [
+                    ("user_id", "VARCHAR(100) NULL"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "user_feedbacks",
+                [
+                    ("ix_user_feedbacks_user_id", ("user_id",)),
+                ],
+            )
 
         if "conversations" in table_names:
             _ensure_missing_columns(

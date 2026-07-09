@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from dependencies.auth import require_admin
+from models.auth import User
 from models.database import (
     FieldChangeHistory,
     FundingRound,
@@ -711,7 +713,11 @@ def get_tier1_gaps(field: str | None = None, limit: int = 100, db: Session = Dep
 
 
 @router.post("/manual-update")
-def manual_update_field(request: ManualUpdateRequest, db: Session = Depends(get_db)):
+def manual_update_field(
+    request: ManualUpdateRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """人工字段更新 API，支持手机/前端直接录入。"""
     org = db.query(OrganizationProfile).filter(OrganizationProfile.id == request.org_id).first()
     if not org:
@@ -797,7 +803,11 @@ def manual_update_field(request: ManualUpdateRequest, db: Session = Depends(get_
 
 
 @router.post("/inline-entry")
-def inline_entry(request: InlineEntryRequest, db: Session = Depends(get_db)):
+def inline_entry(
+    request: InlineEntryRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """Dashboard 内联补录 API，用于 Gap Workbench 直接补字段。"""
     org = db.query(OrganizationProfile).filter(OrganizationProfile.id == request.org_id).first()
     if not org:
@@ -833,7 +843,11 @@ def inline_entry(request: InlineEntryRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/inline-entry/bulk")
-def bulk_inline_entry(request: BulkInlineEntryRequest, db: Session = Depends(get_db)):
+def bulk_inline_entry(
+    request: BulkInlineEntryRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """Dashboard 批量补录 API，支持一次粘贴多条 `机构名|值`。"""
     results = []
     success_count = 0
@@ -1066,7 +1080,11 @@ def get_people_candidates(
 
 
 @router.post("/people-candidates/review")
-def review_candidate(request: ApproveCandidateRequest, db: Session = Depends(get_db)):
+def review_candidate(
+    request: ApproveCandidateRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """人工审核 People 候选。"""
     candidate = db.query(LeaderCandidate).filter(LeaderCandidate.id == request.candidate_id).first()
     if not candidate:
@@ -1149,7 +1167,11 @@ def review_candidate(request: ApproveCandidateRequest, db: Session = Depends(get
 
 
 @router.post("/quick-people-entry")
-def quick_people_entry(request: QuickPeopleEntry, db: Session = Depends(get_db)):
+def quick_people_entry(
+    request: QuickPeopleEntry,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
     """快速手动录入 People 信息，支持模糊匹配机构名。"""
     search_term = (request.org_name or "").strip()
     if not search_term:

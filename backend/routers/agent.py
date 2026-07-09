@@ -6,17 +6,18 @@ import os
 import sys
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from dependencies.auth import require_admin
 from agent.memory import Memory
 from models.database import get_db
 
 
-router = APIRouter(prefix="/api/agent", tags=["agent"])
+router = APIRouter(prefix="/api/agent", tags=["agent"], dependencies=[Depends(require_admin)])
 
 
 class AgentTriggerResponse(BaseModel):

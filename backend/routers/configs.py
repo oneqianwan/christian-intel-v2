@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from dependencies.auth import require_super_admin
+from models.auth import User
 from models.database import ApiConfig, get_db
 
 
@@ -8,7 +10,10 @@ router = APIRouter()
 
 
 @router.get("/configs/keys")
-def list_api_keys(db: Session = Depends(get_db)):
+def list_api_keys(
+    _: User = Depends(require_super_admin),
+    db: Session = Depends(get_db),
+):
     rows = db.query(ApiConfig).order_by(ApiConfig.api_name.asc()).all()
     return [
         {

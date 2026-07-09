@@ -3,19 +3,37 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from dependencies.auth import get_current_user_if_auth_enabled
+from models.auth import User
 from models.database import Bookmark, IntelligenceItem, get_db
 
 router = APIRouter()
 
 
+def _resolve_bookmark_user_id(current_user: User | None) -> str:
+    if current_user is None:
+        return "default"
+    return str(current_user.id)
+
+
 @router.post("/bookmarks")
-def create_bookmark(item_id: str, note: str = "", db: Session = Depends(get_db)):
+def create_bookmark(
+    item_id: str,
+    note: str = "",
+    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    db: Session = Depends(get_db),
+):
     """收藏情报条目。"""
+    bookmark_user_id = _resolve_bookmark_user_id(current_user)
     item = db.query(IntelligenceItem).filter(IntelligenceItem.id == item_id).first()
     if not item:
         return {"status": "not_found", "message": "intelligence item not found"}
 
-    existing = db.query(Bookmark).filter(Bookmark.intelligence_item_id == item_id, Bookmark.user_id == "default").first()
+    existing = (
+        db.query(Bookmark)
+        .filter(Bookmark.intelligence_item_id == item_id, Bookmark.user_id == bookmark_user_id)
+        .first()
+    )
     if existing:
         existing.note = note
         db.commit()
@@ -23,6 +41,7 @@ def create_bookmark(item_id: str, note: str = "", db: Session = Depends(get_db))
 
     bookmark = Bookmark(
         id=str(uuid.uuid4()),
+        user_id=bookmark_user_id,
         intelligence_item_id=item_id,
         note=note,
     )
@@ -32,9 +51,18 @@ def create_bookmark(item_id: str, note: str = "", db: Session = Depends(get_db))
 
 
 @router.get("/bookmarks")
-def list_bookmarks(db: Session = Depends(get_db)):
+def list_bookmarks(
+    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    db: Session = Depends(get_db),
+):
     """列出收藏的情报。"""
-    bookmarks = db.query(Bookmark).order_by(Bookmark.created_at.desc()).all()
+    bookmark_user_id = _resolve_bookmark_user_id(current_user)
+    bookmarks = (
+        db.query(Bookmark)
+        .filter(Bookmark.user_id == bookmark_user_id)
+        .order_by(Bookmark.created_at.desc())
+        .all()
+    )
     result = []
     for b in bookmarks:
         item = db.query(IntelligenceItem).filter(IntelligenceItem.id == b.intelligence_item_id).first()
@@ -52,8 +80,13 @@ def list_bookmarks(db: Session = Depends(get_db)):
 
 
 @router.delete("/bookmarks/{bookmark_id}")
-def delete_bookmark(bookmark_id: str, db: Session = Depends(get_db)):
+def delete_bookmark(
+    bookmark_id: str,
+    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    db: Session = Depends(get_db),
+):
     """取消收藏。"""
-    deleted = db.query(Bookmark).filter(Bookmark.id == bookmark_id).delete()
+    bookmark_user_id = _resolve_bookmark_user_id(current_user)
+    deleted = db.query(Bookmark).filter(Bookmark.id == bookmark_id, Bookmark.user_id == bookmark_user_id).delete()
     db.commit()
     return {"status": "deleted" if deleted else "not_found"}

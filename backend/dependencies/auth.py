@@ -167,6 +167,15 @@ def require_authenticated_user_no_touch(user: User = Depends(get_current_user_no
     return user
 
 
+def get_current_user_if_auth_enabled(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> User | None:
+    if not bool(config.settings.AUTH_V1_ENABLED):
+        return None
+    return resolve_user_for_request(request=request, db=db, touch_last_seen=True)
+
+
 def require_role(*allowed_roles: str) -> Callable[[User], User]:
     normalized_allowed_roles = _normalize_allowed_roles(*allowed_roles)
 

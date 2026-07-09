@@ -6,6 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from dependencies.auth import get_current_user_if_auth_enabled, require_admin
+from models.auth import User
 from models.database import UserFeedback, get_db
 
 router = APIRouter()
@@ -22,11 +24,14 @@ class FeedbackIn(BaseModel):
 def submit_feedback(
     feedback: FeedbackIn,
     db: Session = Depends(get_db),
-    session_id: str = Header(default="session-1", alias="x-session-id"),
+    x_session_id: str | None = Header(default=None, alias="x-session-id"),
+    current_user: User | None = Depends(get_current_user_if_auth_enabled),
 ):
     """提交用户反馈"""
+    session_id = f"user:{current_user.id}" if current_user is not None else (x_session_id or "session-1")
     record = UserFeedback(
-        session_id=session_id or "session-1",
+        session_id=session_id,
+        user_id=str(current_user.id) if current_user is not None else None,
         feedback_type=feedback.feedback_type,
         content=feedback.content or "",
         related_entity=feedback.related_entity,
@@ -42,6 +47,7 @@ def submit_feedback(
 
 @router.get("/feedback/stats")
 def get_feedback_stats(
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """获取反馈统计（用于Learning Loop分析）"""
