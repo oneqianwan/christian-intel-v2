@@ -1242,6 +1242,178 @@ class Brain:
             f"composite_score={score_payload.get('composite_score', 'N/A')}"
         )
 
+    def _is_score_lookup_parsed_result(self, parsed_result: Optional[dict]) -> bool:
+        if not isinstance(parsed_result, dict):
+            return False
+        intent = str(parsed_result.get("intent") or "").strip()
+        response_contract = str(parsed_result.get("response_contract") or "").strip()
+        return intent == "organization_score_lookup" or response_contract == "score_lookup"
+
+    def _normalize_requested_scores(self, parsed_result: Optional[dict]) -> list[str]:
+        if not isinstance(parsed_result, dict):
+            return ["people_score", "digital_score", "intel_score"]
+        requested = parsed_result.get("requested_scores")
+        if not isinstance(requested, list):
+            requested = []
+        canonical = ["people_score", "digital_score", "intel_score", "composite_score"]
+        normalized = [item for item in canonical if item in requested]
+        return normalized or ["people_score", "digital_score", "intel_score"]
+
+    def _find_organization_for_score_lookup(self, organization_name: str):
+        from models.database import OrganizationProfile, get_db
+        from sqlalchemy import case, desc, func, or_
+
+        normalized_name = (organization_name or "").strip()
+        if not normalized_name:
+            return None
+
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            query = (
+                db.query(OrganizationProfile)
+                .filter(
+                    or_(
+                        OrganizationProfile.name.ilike(f"%{normalized_name}%"),
+                        OrganizationProfile.name_local.ilike(f"%{normalized_name}%"),
+                        OrganizationProfile.official_name.ilike(f"%{normalized_name}%"),
+                        OrganizationProfile.short_name.ilike(f"%{normalized_name}%"),
+                        OrganizationProfile.english_name.ilike(f"%{normalized_name}%"),
+                    )
+                )
+                .order_by(
+                    case(
+                        (func.lower(OrganizationProfile.name) == normalized_name.lower(), 0),
+                        (func.lower(OrganizationProfile.name_local) == normalized_name.lower(), 0),
+                        (func.lower(OrganizationProfile.official_name) == normalized_name.lower(), 0),
+                        (func.lower(OrganizationProfile.short_name) == normalized_name.lower(), 0),
+                        (func.lower(OrganizationProfile.english_name) == normalized_name.lower(), 0),
+                        else_=1,
+                    ),
+                    case((OrganizationProfile.source_name == "manual_seed", 0), else_=1),
+                    func.length(OrganizationProfile.name).asc(),
+                    desc(OrganizationProfile.updated_at),
+                )
+            )
+            org = query.first()
+            if org is not None:
+                db.expunge(org)
+            return org
+        finally:
+            db_gen.close()
+
+    def _format_score_lookup_answer(
+        self,
+        *,
+        organization_name: str,
+        score_payload: dict,
+        requested_scores: list[str],
+        lang: str,
+    ) -> str:
+        label_map = {
+            "people_score": "People Score",
+            "digital_score": "Digital Score",
+            "intel_score": "Intel Score",
+            "composite_score": "Composite Score",
+        }
+        lines = [
+            f"{organization_name} 的数据库评分如下：" if lang == "zh" else f"{organization_name} database scores:",
+            "",
+        ]
+        for field_name in requested_scores:
+            value = score_payload.get(field_name)
+            if value is None:
+                continue
+            lines.append(f"{label_map[field_name]}: {value}")
+        lines.extend(
+            [
+                "",
+                "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                "llm_used=false",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _format_score_lookup_not_found(self, *, organization_name: str, lang: str) -> str:
+        if lang == "zh":
+            return (
+                f'未在当前数据库中找到 "{organization_name}" 的评分数据。\n'
+                "因此我不能给出 people_score / digital_score / intel_score。\n"
+                "可创建情报采集任务补充数据。\n"
+                "llm_used=false"
+            )
+        return (
+            f'No score data for "{organization_name}" was found in the current database.\n'
+            "Therefore I cannot provide people_score / digital_score / intel_score.\n"
+            "A collection mission can be created to gather more data.\n"
+            "llm_used=false"
+        )
+
+    def _resolve_score_lookup_if_applicable(
+        self,
+        *,
+        user_message: str,
+        conversation_id: str,
+    ) -> Optional[dict]:
+        if not re.search(r"score|scores|评分|分数|得分", user_message or "", re.IGNORECASE):
+            return None
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            parsed_result = parser.parse(user_message, conversation_id=conversation_id)
+        finally:
+            if parser:
+                parser.close()
+
+        if not self._is_score_lookup_parsed_result(parsed_result):
+            return None
+
+        organization_name = str((parsed_result or {}).get("organization_name") or "").strip()
+        if not organization_name:
+            return None
+
+        requested_scores = self._normalize_requested_scores(parsed_result)
+        lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+        org = self._find_organization_for_score_lookup(organization_name)
+        if org is None:
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_score_lookup_not_found(organization_name=organization_name, lang=lang),
+                "evidence": [],
+                "organization_name": organization_name,
+                "data_source": "database",
+                "llm_used": False,
+            }
+
+        score_payload = self._extract_score_payload(org=org)
+        available_fields = [field for field in requested_scores if score_payload.get(field) is not None]
+        if not available_fields:
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_score_lookup_not_found(organization_name=getattr(org, "name", organization_name), lang=lang),
+                "evidence": [self._evidence_from_organization_profile(org, evidence_type="organization_score_lookup")],
+                "organization_name": getattr(org, "name", organization_name),
+                "data_source": "database",
+                "llm_used": False,
+            }
+
+        return {
+            "parsed_result": parsed_result,
+            "answer": self._format_score_lookup_answer(
+                organization_name=getattr(org, "name", organization_name),
+                score_payload=score_payload,
+                requested_scores=available_fields,
+                lang=lang,
+            ),
+            "evidence": [self._evidence_from_organization_profile(org, evidence_type="organization_score_lookup")],
+            "organization_name": getattr(org, "name", organization_name),
+            "data_source": "database",
+            "llm_used": False,
+        }
+
     def _normalize_evidence_item(self, item: Any) -> dict:
         if not isinstance(item, dict):
             return {}
@@ -3491,6 +3663,17 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            score_lookup_result = self._resolve_score_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+            )
+            if score_lookup_result is not None:
+                result = {
+                    "answer": self._clean_output(score_lookup_result.get("answer") or ""),
+                    "evidence": self._merge_evidence(score_lookup_result.get("evidence") or []),
+                }
+                span.set_output_obj(result)
+                return result
             pipeline_enabled = feature_flag_enabled("PIPELINE_ORCHESTRATOR_ENABLED")
             if self._should_prefer_pipeline_for_insight_render() and pipeline_enabled:
                 pipeline_service = self._get_pipeline_service(conversation_id=conversation_id)
@@ -3924,6 +4107,35 @@ class Brain:
                     Reason="product_intent_direct_answer",
                     conversation_id=conversation_id,
                     parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            score_lookup_result = self._resolve_score_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+            )
+            if score_lookup_result is not None:
+                direct_answer = True
+                parser_result = score_lookup_result.get("parsed_result")
+                response_text = str(score_lookup_result.get("answer") or "")
+                evidence = score_lookup_result.get("evidence") or []
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(evidence),
+                    "direct_answer": True,
+                    "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                }
+                span.set_output_obj({"done": True, "score_lookup": True, "organization_name": score_lookup_result.get("organization_name")})
+                _brain_stream_trace(
+                    "RETURN_ID=SCORE_LOOKUP",
+                    Reason="score_lookup_db_return",
+                    conversation_id=conversation_id,
+                    parser_result=parser_result,
+                    parser_result_response=response_text,
                     parser_result_direct_answer=True,
                     parser_result_data_found=True,
                 )
