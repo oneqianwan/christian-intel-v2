@@ -17,6 +17,9 @@ _CONVERSATION_LANG_PREF: dict[str, str] = {}
 
 class QueryParser:
     GREETING_TOKENS = ["你好", "hi", "hello", "早上好", "下午好", "晚上好"]
+    SCORE_INTENT_NAME = "organization_score_lookup"
+    SCORE_RESPONSE_CONTRACT = "score_lookup"
+    SCORE_ALL_FIELDS = ["people_score", "digital_score", "intel_score"]
 
     """规则解析器：匹配常见查询模式，直接返回数据库结果"""
 
@@ -216,6 +219,96 @@ class QueryParser:
 
     def _is_score_query(self, msg: str) -> bool:
         return any(re.search(kw, msg, re.IGNORECASE) for kw in self.SCORE_KEYWORDS)
+
+    def _extract_requested_scores(self, msg: str) -> List[str]:
+        raw = str(msg or "")
+        requested: list[str] = []
+
+        score_patterns = [
+            ("people_score", [r"\bpeople\s+score(?:s)?\b", r"人员评分", r"people/digital/intel\s+score"]),
+            ("digital_score", [r"\bdigital\s+score(?:s)?\b", r"数字评分", r"people/digital/intel\s+score"]),
+            ("intel_score", [r"\bintel\s+score(?:s)?\b", r"情报评分", r"people/digital/intel\s+score"]),
+            ("composite_score", [r"\bcomposite\s+score(?:s)?\b", r"\boverall\s+score(?:s)?\b", r"综合评分"]),
+        ]
+
+        for field_name, patterns in score_patterns:
+            if any(re.search(pattern, raw, re.IGNORECASE) for pattern in patterns):
+                requested.append(field_name)
+
+        if requested:
+            canonical_order = ["people_score", "digital_score", "intel_score", "composite_score"]
+            return [field for field in canonical_order if field in requested]
+
+        if re.search(r"三项评分|all\s+scores|show\s+me.+scores|give\s+me.+scores", raw, re.IGNORECASE):
+            return list(self.SCORE_ALL_FIELDS)
+
+        return list(self.SCORE_ALL_FIELDS)
+
+    def _clean_score_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+
+        clean = clean.strip(" \t\r\n?？!！,，.。:：;；\"'`/()[]{}")
+        clean = re.sub(
+            r"^(?:what\s+is\s+the\s+score\s+of|what\s+is\s+the|what\s+is|show\s+me|give\s+me|tell\s+me|query|查询一下|查询|查一下|查|给我|请给我|请查询|告诉我|请告诉我)(?:\s+|[:：])+",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"^(?:of|for)\s+", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"(?:的)?(?:people|digital|intel|composite|overall)\s+score(?:s)?$", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(
+            r"(?:的)?(?:people\s*/\s*digital\s*/\s*intel\s+score(?:s)?|people\s*,\s*digital\s+and\s+intel\s+score(?:s)?|people,\s*digital\s+and\s+intel\s+score(?:s)?|三项评分|评分是多少|评分多少|评分|分数|得分|score(?:s)?)$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"(?:是多少|多少|是什么|为多少)$", "", clean, flags=re.IGNORECASE)
+        clean = clean.strip()
+        clean = re.sub(r"(?:的)?(?:people|digital|intel|composite|overall)\s+score(?:s)?\s*$", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"(?:的)?(?:score(?:s)?|评分|分数|得分)\s*$", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"\s+", " ", clean).strip(" \t\r\n?？!！,，.。:：;；\"'`/()[]{}")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _extract_score_org_name(self, msg: str) -> Optional[str]:
+        raw = (msg or "").strip()
+        patterns = [
+            r"(?:people|digital|intel|composite|overall)?\s*score(?:s)?\s+of\s+(.+?)(?:\?|？|$)",
+            r"(?:show\s+me|give\s+me|tell\s+me|查询一下|查询|查一下|查|给我|请给我|请查询|告诉我|请告诉我)\s+(.+?)(?:\?|？|$)",
+            r"(.+?)(?:的)?(?:people\s*/\s*digital\s*/\s*intel\s+score(?:s)?|people\s*,\s*digital\s+and\s+intel\s+score(?:s)?|三项评分|people\s+score(?:s)?|digital\s+score(?:s)?|intel\s+score(?:s)?|composite\s+score(?:s)?|overall\s+score(?:s)?|评分是多少|评分多少|评分|分数|得分|score(?:s)?)(?:\?|？|$)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_score_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+
+        return self._clean_score_org_candidate(raw)
+
+    def _build_score_lookup_intent(self, msg: str) -> Optional[Dict]:
+        if not self._is_score_query(msg):
+            return None
+
+        organization_name = self._extract_score_org_name(msg)
+        if not organization_name:
+            return None
+
+        requested_scores = self._extract_requested_scores(msg)
+        return {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": self.SCORE_INTENT_NAME,
+            "organization_name": organization_name,
+            "requested_scores": requested_scores,
+            "response_contract": self.SCORE_RESPONSE_CONTRACT,
+            "requires_database_lookup": True,
+        }
 
     def _is_compare_query(self, msg: str) -> bool:
         return any(re.search(kw, msg, re.IGNORECASE) for kw in self.COMPARE_KEYWORDS)
@@ -780,71 +873,8 @@ class QueryParser:
         )
 
     def _handle_score_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
-        org_name = self._extract_org_name(msg)
-        if not org_name:
-            return None
-
-        orgs = self._find_organization(org_name)
-        if not orgs:
-            if self._get_lang_pref(conversation_id) == "zh":
-                return {
-                    "data_found": True,
-                    "response": f'数据库中未找到 "{org_name}" 的相关机构。',
-                    "answer": f'数据库中未找到 "{org_name}" 的相关机构。',
-                    "evidence": [],
-                    "direct_answer": True,
-                }
-            return {
-                "data_found": True,
-                "response": f'数据库中未找到 "{org_name}" 的相关机构。',
-                "answer": f'数据库中未找到 "{org_name}" 的相关机构。',
-                "evidence": [],
-                "direct_answer": True,
-            }
-
-        if len(orgs) > 1 and len(org_name) < 10:
-            candidates = "\n".join(
-                [
-                    f"- {o.name} ({o.country})" + (f" [{o.official_website}]" if o.official_website else "")
-                    for o in orgs[:5]
-                ]
-            )
-            if self._get_lang_pref(conversation_id) == "zh":
-                return {
-                    "data_found": True,
-                    "response": f'找到多个匹配 "{org_name}" 的机构，请明确：\n{candidates}',
-                    "answer": f'找到多个匹配 "{org_name}" 的机构，请明确：\n{candidates}',
-                    "evidence": [],
-                    "direct_answer": True,
-                }
-            return {
-                "data_found": True,
-                "response": f'找到多个匹配 "{org_name}" 的机构，请明确：\n{candidates}',
-                "answer": f'找到多个匹配 "{org_name}" 的机构，请明确：\n{candidates}',
-                "evidence": [],
-                "direct_answer": True,
-            }
-
-        org = orgs[0]
-        composite = (org.people_score or 0) + (org.digital_score or 0) + (org.intel_score or 0)
-        if getattr(self, "_lang", "en") == "zh":
-            response = (
-                f"**{org.name}** ({org.country or 'N/A'})\n"
-                f"- 人员评分: {org.people_score or 0} ({org.people_score_grade or 'F'})\n"
-                f"- 数字评分: {org.digital_score or 0} ({org.digital_score_grade or 'F'})\n"
-                f"- 情报评分: {org.intel_score or 0} ({org.intel_score_grade or 'F'})\n"
-                f"- **综合评分: {composite}**\n"
-            )
-        else:
-            response = (
-                f"**{org.name}** ({org.country or 'N/A'})\n"
-                f"- People Score: {org.people_score or 0} ({org.people_score_grade or 'F'})\n"
-                f"- Digital Score: {org.digital_score or 0} ({org.digital_score_grade or 'F'})\n"
-                f"- Intel Score: {org.intel_score or 0} ({org.intel_score_grade or 'F'})\n"
-                f"- **Composite: {composite}**\n"
-            )
-        evidence = [self._evidence_from_org(org, evidence_type="organization_score")]
-        return {"data_found": True, "response": response, "answer": response, "evidence": evidence, "direct_answer": True}
+        _ = conversation_id
+        return self._build_score_lookup_intent(msg)
 
     def _handle_compare_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         """处理对比查询"""
