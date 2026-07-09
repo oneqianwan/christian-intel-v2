@@ -1338,14 +1338,16 @@ class Brain:
         if lang == "zh":
             return (
                 f'未在当前数据库中找到 "{organization_name}" 的评分数据。\n'
+                "status=not_found\n"
                 "因此我不能给出 people_score / digital_score / intel_score。\n"
-                "可创建情报采集任务补充数据。\n"
+                "数据来源：本地 intelligence database。\n"
                 "llm_used=false"
             )
         return (
-            f'No score data for "{organization_name}" was found in the current database.\n'
-            "Therefore I cannot provide people_score / digital_score / intel_score.\n"
-            "A collection mission can be created to gather more data.\n"
+            f'No score data was found for "{organization_name}" in the local intelligence database.\n'
+            "status=not_found\n"
+            "I cannot provide people_score, digital_score, or intel_score for this organization.\n"
+            "Data source: local intelligence database.\n"
             "llm_used=false"
         )
 
