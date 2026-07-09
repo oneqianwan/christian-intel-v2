@@ -6,7 +6,7 @@
 - Scope=`Frontend admin route + AdminGuard wiring + AdminLayout + UsersPage only`
 - BackendChanged=`NO`
 - ManualBrowserUAT=`LIMITED`
-- AdminUsersScrollManualRetest=`PENDING`
+- AdminUsersScrollManualRetest=`SKIPPED_BY_USER`
 
 ## Files Changed
 - `frontend/package.json`
@@ -57,6 +57,8 @@
 ## Scroll Fix Follow-Up
 - Real browser UAT found that Admin Users page could load data but could not scroll vertically when the user list exceeded viewport height
 - User confirmed that after shrinking browser zoom they could see 4 accounts, so backend loading was normal and the defect was strictly a frontend scrolling issue
+- Code fix shipped and committed:
+  - `efa4b26 fix: allow admin users page scrolling`
 - Root cause:
   - Global `html, body, #root` are configured with `overflow: hidden`
   - `AdminLayout` originally rendered a natural-height page but did not provide its own `overflowY: auto` scroll container
@@ -66,10 +68,10 @@
   - Main content resets `minHeight: 0` and enables `overflowY: auto`
   - Admin page root stretches within that scroll container instead of relying on body scroll
   - Table wrapper preserves horizontal scrolling on smaller screens without blocking page-level vertical access
-- Manual follow-up still required:
-  - Admin Users 页面不缩放也可以纵向滚动
-  - 4 个账号都能看到
-  - role/status/revoke sessions 可以继续测试
+- Manual follow-up:
+  - User explicitly chose to skip the scroll manual retest
+  - This item must not be recorded as PASS
+  - AdminUsersScrollManualRetest=`SKIPPED_BY_USER`
 
 ## Role Matrix
 
@@ -147,10 +149,8 @@
 - Real browser UAT issue recorded:
   - Admin Users 页面无法纵向滚动
   - 用户缩小浏览器比例后确认 4 个账号都能加载出来
-- AdminUsersScrollManualRetest=`PENDING`
+- AdminUsersScrollManualRetest=`SKIPPED_BY_USER`
 - Recommended manual checks:
-  - Admin Users 页面在默认缩放下可以纵向滚动
-  - 4 个账号都能完整看到
   - role/status/revoke sessions 操作可以继续测试
   - super_admin login -> Admin entry visible
   - admin login -> Admin entry visible but role update hidden
