@@ -55,6 +55,20 @@ def _parse_mission_payload(query: str) -> dict[str, Any]:
         return {}
 
 
+def _serialize_mission_payload(payload: dict[str, Any]) -> str:
+    return MISSION_PAYLOAD_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
+def _store_mission_payload(mission: Mission, payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    current_query = str(getattr(mission, "query", "") or "")
+    if not current_query.startswith(MISSION_PAYLOAD_PREFIX):
+        return False
+    setattr(mission, "query", _serialize_mission_payload(payload))
+    return True
+
+
 def _load_mission_by_id(session: Session, mission_id: str) -> Optional[Mission]:
     return session.query(Mission).filter(Mission.id == mission_id).first()
 
@@ -164,6 +178,20 @@ def dispatch_collection_mission(
                 session.commit()
 
             normalized_status = "completed" if target_mission.status in {"done", "completed"} else "failed"
+            collection_result_payload = {
+                "sources_checked": list(adapter_result.get("sources_checked") or collection_targets),
+                "raw_items_count": int(adapter_result.get("raw_items_count") or 0),
+                "collection_summary": str(
+                    adapter_result.get("collection_summary")
+                    or f"Collection dispatch {normalized_status}"
+                ),
+            }
+            raw_items = adapter_result.get("raw_items")
+            if isinstance(raw_items, list):
+                collection_result_payload["raw_items"] = raw_items
+            if _store_mission_payload(target_mission, {**payload, "collection_result": collection_result_payload}):
+                target_mission.updated_at = datetime.utcnow()
+                session.commit()
             return {
                 "mission_id": target_mission.id,
                 "organization_name": organization_name,
