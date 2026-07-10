@@ -128,3 +128,80 @@ class ScoreDraftApprovalResponse(BaseModel):
     writeback_reason: Optional[str] = None
     data_source: Optional[str] = None
     reason: Optional[ScoreDraftApprovalFailureReason] = None
+
+
+class GraphWarning(BaseModel):
+    code: str
+    message: str
+    edge_id: Optional[str] = None
+    org_id: Optional[str] = None
+    organization_name: Optional[str] = None
+
+
+class GraphCenterNode(BaseModel):
+    id: str
+    graph_id: str
+    type: str
+    name: str
+    region: Optional[str] = None
+    denomination: Optional[str] = None
+    people_score: Optional[int] = None
+    digital_score: Optional[int] = None
+    intel_score: Optional[int] = None
+
+
+class GraphNode(BaseModel):
+    id: str
+    entity_id: str
+    type: str
+    label: str
+    name: str
+    region: Optional[str] = None
+    denomination: Optional[str] = None
+    people_score: Optional[int] = None
+    digital_score: Optional[int] = None
+    intel_score: Optional[int] = None
+    confidence: float = 0.0
+    source_count: int = 0
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    relation_type: str
+    direction: str
+    strength: Optional[float] = None
+    confidence: float = 0.0
+    is_verified: bool = False
+    evidence_url: Optional[str] = None
+    evidence_source: Optional[str] = None
+    evidence_date: Optional[str] = None
+    reason: str
+    missing_evidence: bool = False
+
+
+class GraphSummary(BaseModel):
+    node_count: int
+    edge_count: int
+    verified_edge_count: int
+    unverified_edge_count: int
+    missing_evidence_count: int
+
+
+class OrganizationGraphPayload(BaseModel):
+    center: Optional[GraphCenterNode] = None
+    nodes: List[GraphNode]
+    edges: List[GraphEdge]
+    summary: GraphSummary
+    warnings: List[GraphWarning]
+    found: bool = True
+    depth: int = 1
+    limit: int = 50
+    include_unverified: bool = False
+
+
+class OrganizationRelationsResponse(BaseModel):
+    total: int
+    relations: List[Dict[str, Any]]
+    graph: OrganizationGraphPayload

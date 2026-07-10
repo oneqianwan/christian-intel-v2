@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
+from models.schemas import OrganizationRelationsResponse
 from models.database import IntelligenceItem, OrganizationProfile, get_db
-from services.relation_mapper import RelationMapper
+from services.relation_mapper import RelationMapper, build_organization_graph
 
 router = APIRouter(prefix="/api/dashboard/org", tags=["org-detail"])
 
@@ -81,14 +82,26 @@ def get_org_detail(org_id: str, db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{org_id}/relations")
-def get_org_relations(org_id: str, db: Session = Depends(get_db)):
+@router.get("/{org_id}/relations", response_model=OrganizationRelationsResponse)
+def get_org_relations(org_id: str, include_unverified: bool = False, limit: int = 50, db: Session = Depends(get_db)):
     """机构关系网络：投资、合作、关联（含映射）。"""
+    org = db.query(OrganizationProfile).filter(OrganizationProfile.id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
     mapper = RelationMapper(db)
     relations = mapper.get_relations_for_org(org_id)
+    graph = build_organization_graph(
+        db=db,
+        org_id=org_id,
+        depth=1,
+        limit=limit,
+        include_unverified=include_unverified,
+    )
     return {
         "total": len(relations),
         "relations": relations,
+        "graph": graph,
     }
 
 
