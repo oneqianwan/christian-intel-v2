@@ -8,22 +8,36 @@ from dependencies.auth import (
     require_admin,
     require_super_admin,
 )
-from models.auth import AuthSession, User
-from models.database import get_db
+from models.auth import User
+from models.database import Mission, get_db
 from models.schemas import (
     AdminUserListResponse,
     AdminUserResponse,
     AdminUserRoleUpdateRequest,
     AdminUserSessionRevokeResponse,
     AdminUserStatusUpdateRequest,
+    ScoreDraftApprovalRequest,
+    ScoreDraftApprovalResponse,
 )
 from schemas.watch_alert import ApiErrorResponse
 from services.auth_service import revoke_all_user_sessions
+from services import score_draft_service
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 USER_STATUS_VALUES: tuple[str, ...] = ("active", "disabled", "pending")
+APPROVAL_REJECTION_REASONS: frozenset[str] = frozenset(
+    {
+        "not_approved",
+        "mission_not_completed",
+        "missing_evidence",
+        "existing_score_preserved",
+        "organization_not_found",
+        "invalid_score_range",
+        "score_draft_rebuild_failed",
+    }
+)
 
 
 def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
@@ -40,6 +54,27 @@ def _normalize_status_value(value: str | None) -> str | None:
     if normalized not in USER_STATUS_VALUES:
         return None
     return normalized
+
+
+def _get_mission_or_none(db: Session, *, mission_id: str) -> Mission | None:
+    return db.query(Mission).filter(Mission.id == str(mission_id)).first()
+
+
+def _normalize_score_draft_approval_reason(reason: str | None) -> str:
+    normalized = str(reason or "").strip()
+    if normalized in APPROVAL_REJECTION_REASONS:
+        return normalized
+    if normalized in {"ambiguous_organization", "organization_not_found"}:
+        return "organization_not_found"
+    return "score_draft_rebuild_failed"
+
+
+def _score_draft_approval_failure(reason: str) -> ScoreDraftApprovalResponse:
+    return ScoreDraftApprovalResponse(
+        success=False,
+        writeback=False,
+        reason=_normalize_score_draft_approval_reason(reason),
+    )
 
 
 def _serialize_user(user: User) -> AdminUserResponse:
@@ -252,3 +287,54 @@ def revoke_user_sessions(
     revoked_count = revoke_all_user_sessions(db, user_id=user.id)
     db.commit()
     return AdminUserSessionRevokeResponse(success=True, revoked_count=int(revoked_count))
+
+
+@router.post("/score-drafts/{mission_id}/approve", response_model=ScoreDraftApprovalResponse)
+def approve_score_draft(
+    mission_id: str,
+    payload: ScoreDraftApprovalRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    del current_user
+
+    if not payload.approved:
+        return _score_draft_approval_failure("not_approved")
+
+    mission = _get_mission_or_none(db, mission_id=mission_id)
+    if mission is None:
+        return _score_draft_approval_failure("score_draft_rebuild_failed")
+
+    mission_status = str(getattr(mission, "status", "") or "").strip().lower()
+    if mission_status not in {"done", "completed"}:
+        return _score_draft_approval_failure("mission_not_completed")
+
+    rebuilt_draft = score_draft_service.create_score_draft_from_collection_result(
+        mission=mission,
+        db=db,
+    )
+    if not bool(rebuilt_draft.get("score_draft")):
+        return _score_draft_approval_failure(str(rebuilt_draft.get("reason") or "score_draft_rebuild_failed"))
+
+    result = score_draft_service.writeback_score_draft(
+        mission=mission,
+        score_draft=rebuilt_draft,
+        approved=True,
+        overwrite=bool(payload.overwrite),
+        writeback_reason=payload.writeback_reason,
+        writeback_source="admin_score_draft_approval_api",
+        db=db,
+    )
+    if not bool(result.get("writeback")):
+        return _score_draft_approval_failure(str(result.get("reason") or "score_draft_rebuild_failed"))
+
+    return ScoreDraftApprovalResponse(
+        success=True,
+        writeback=True,
+        mission_id=str(result.get("mission_id") or mission_id),
+        organization_name=str(result.get("organization_name") or ""),
+        scores_written=result.get("scores_written") if isinstance(result.get("scores_written"), dict) else {},
+        writeback_source=str(result.get("writeback_source") or "admin_score_draft_approval_api"),
+        writeback_reason=str(result.get("writeback_reason") or payload.writeback_reason),
+        data_source=str(result.get("data_source") or "collection_result"),
+    )

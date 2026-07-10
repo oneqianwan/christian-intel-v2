@@ -99,3 +99,32 @@ class AdminUserStatusUpdateRequest(BaseModel):
 class AdminUserSessionRevokeResponse(BaseModel):
     success: bool = True
     revoked_count: int
+
+
+ScoreDraftApprovalFailureReason = Literal[
+    "not_approved",
+    "mission_not_completed",
+    "missing_evidence",
+    "existing_score_preserved",
+    "organization_not_found",
+    "invalid_score_range",
+    "score_draft_rebuild_failed",
+]
+
+
+class ScoreDraftApprovalRequest(BaseModel):
+    approved: bool = False
+    writeback_reason: str = Field(min_length=1, max_length=255)
+    overwrite: bool = False
+
+
+class ScoreDraftApprovalResponse(BaseModel):
+    success: bool
+    writeback: bool
+    mission_id: Optional[str] = None
+    organization_name: Optional[str] = None
+    scores_written: Optional[Dict[str, int]] = None
+    writeback_source: Optional[str] = None
+    writeback_reason: Optional[str] = None
+    data_source: Optional[str] = None
+    reason: Optional[ScoreDraftApprovalFailureReason] = None
