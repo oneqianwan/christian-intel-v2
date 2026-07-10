@@ -1352,6 +1352,102 @@ class Brain:
             "llm_used=false"
         )
 
+    def _build_score_lookup_collection_targets(self) -> list[str]:
+        return ["website", "rss", "youtube", "telegram", "web_search"]
+
+    def _build_score_lookup_mission_draft(
+        self,
+        *,
+        organization_name: str,
+        requested_scores: list[str],
+        request_id: str,
+    ) -> dict:
+        return {
+            "mission_type": "organization_score_data_collection",
+            "organization_name": organization_name,
+            "reason": "score_lookup_db_miss",
+            "requested_scores": list(requested_scores or []),
+            "status": "draft",
+            "collection_required": True,
+            "collection_targets": self._build_score_lookup_collection_targets(),
+            "created_by": "brain_score_lookup",
+            "request_id": request_id,
+        }
+
+    def _create_score_lookup_collection_mission(
+        self,
+        *,
+        organization_name: str,
+        requested_scores: list[str],
+        request_id: str,
+    ) -> dict:
+        mission_draft = self._build_score_lookup_mission_draft(
+            organization_name=organization_name,
+            requested_scores=requested_scores,
+            request_id=request_id,
+        )
+        try:
+            from services.mission_service import create_collection_mission
+
+            mission = create_collection_mission(
+                query=organization_name,
+                country="全球",
+                target_entity=organization_name,
+                metadata={
+                    "mission_type": mission_draft["mission_type"],
+                    "reason": mission_draft["reason"],
+                    "requested_scores": mission_draft["requested_scores"],
+                    "collection_targets": mission_draft["collection_targets"],
+                    "created_by": mission_draft["created_by"],
+                    "request_id": request_id,
+                },
+            )
+            mission_id = getattr(mission, "id", None) if mission is not None else None
+            return {
+                "collection_required": True,
+                "mission_created": bool(mission_id),
+                "mission_id": mission_id,
+                "mission_mode": "created_persistent_mission" if mission_id else "mission_draft_only",
+                "mission_draft": None if mission_id else mission_draft,
+                "collection_targets": mission_draft["collection_targets"],
+            }
+        except Exception as exc:
+            logger.info(
+                "event=brain.score_lookup.mission_fallback organization_name=%s reason=%s",
+                organization_name,
+                str(exc)[:200],
+            )
+            return {
+                "collection_required": True,
+                "mission_created": False,
+                "mission_id": None,
+                "mission_mode": "mission_draft_only",
+                "mission_draft": mission_draft,
+                "collection_targets": mission_draft["collection_targets"],
+            }
+
+    def _append_collection_followup_to_not_found_answer(
+        self,
+        *,
+        base_answer: str,
+        mission_info: dict,
+        lang: str,
+    ) -> str:
+        mission_id = mission_info.get("mission_id")
+        if mission_info.get("mission_created") and mission_id:
+            followup = (
+                f"\n已创建补采 Mission：{mission_id}\ncollection_required=true"
+                if lang == "zh"
+                else f"\nCollection mission created: {mission_id}\ncollection_required=true"
+            )
+        else:
+            followup = (
+                "\n已准备补采任务草案，等待后续采集执行。\ncollection_required=true"
+                if lang == "zh"
+                else "\nA collection mission draft has been prepared for follow-up gathering.\ncollection_required=true"
+            )
+        return f"{base_answer}\n{followup}".strip()
+
     def _store_score_lookup_trace(self, trace_payload: dict) -> dict:
         safe_trace = {
             "request_id": str(trace_payload.get("request_id") or ""),
@@ -1367,11 +1463,18 @@ class Brain:
             "fallback_used": bool(trace_payload.get("fallback_used")),
             "organization_name": str(trace_payload.get("organization_name") or ""),
             "answer_contract": str(trace_payload.get("answer_contract") or ""),
+            "collection_required": bool(trace_payload.get("collection_required")),
+            "mission_created": bool(trace_payload.get("mission_created")),
+            "mission_id": trace_payload.get("mission_id"),
+            "mission_mode": str(trace_payload.get("mission_mode") or ""),
+            "collection_targets": list(trace_payload.get("collection_targets") or []),
+            "requested_scores": list(trace_payload.get("requested_scores") or []),
         }
         self.last_score_lookup_trace = safe_trace
         logger.info(
             "event=brain.score_lookup request_id=%s route=%s organization_name=%s "
             "answer_contract=%s db_hit=%s llm_called=%s fallback_used=%s "
+            "collection_required=%s mission_created=%s mission_id=%s collection_targets=%s "
             "intent_detection_ms=%.3f db_lookup_ms=%.3f scorer_lookup_ms=%.3f planner_ms=%.3f llm_ms=%.3f total_ms=%.3f",
             safe_trace["request_id"],
             safe_trace["route"],
@@ -1380,6 +1483,10 @@ class Brain:
             safe_trace["db_hit"],
             safe_trace["llm_called"],
             safe_trace["fallback_used"],
+            safe_trace["collection_required"],
+            safe_trace["mission_created"],
+            safe_trace["mission_id"],
+            safe_trace["collection_targets"],
             safe_trace["intent_detection_ms"],
             safe_trace["db_lookup_ms"],
             safe_trace["scorer_lookup_ms"],
@@ -1427,6 +1534,12 @@ class Brain:
         org = self._find_organization_for_score_lookup(organization_name)
         db_lookup_ms = round((time.perf_counter() - db_started_at) * 1000.0, 3)
         if org is None:
+            mission_info = self._create_score_lookup_collection_mission(
+                organization_name=organization_name,
+                requested_scores=requested_scores,
+                request_id=trace_request_id,
+            )
+            answer_contract = "not_found"
             trace_payload = self._store_score_lookup_trace(
                 {
                     "request_id": trace_request_id,
@@ -1441,23 +1554,42 @@ class Brain:
                     "llm_called": False,
                     "fallback_used": False,
                     "organization_name": organization_name,
-                    "answer_contract": "not_found",
+                    "answer_contract": answer_contract,
+                    "collection_required": mission_info.get("collection_required"),
+                    "mission_created": mission_info.get("mission_created"),
+                    "mission_id": mission_info.get("mission_id"),
+                    "mission_mode": mission_info.get("mission_mode"),
+                    "collection_targets": mission_info.get("collection_targets"),
+                    "requested_scores": requested_scores,
                 }
             )
             return {
                 "parsed_result": parsed_result,
-                "answer": self._format_score_lookup_not_found(organization_name=organization_name, lang=lang),
+                "answer": self._append_collection_followup_to_not_found_answer(
+                    base_answer=self._format_score_lookup_not_found(organization_name=organization_name, lang=lang),
+                    mission_info=mission_info,
+                    lang=lang,
+                ),
                 "evidence": [],
                 "organization_name": organization_name,
                 "data_source": "database",
                 "llm_used": False,
                 "trace": trace_payload,
+                "mission_id": mission_info.get("mission_id"),
+                "mission_created": mission_info.get("mission_created"),
+                "mission_draft": mission_info.get("mission_draft"),
             }
 
         score_payload = self._extract_score_payload(org=org)
         available_fields = [field for field in requested_scores if score_payload.get(field) is not None]
         if not available_fields:
             resolved_organization_name = getattr(org, "name", organization_name)
+            mission_info = self._create_score_lookup_collection_mission(
+                organization_name=resolved_organization_name,
+                requested_scores=requested_scores,
+                request_id=trace_request_id,
+            )
+            answer_contract = "not_found"
             trace_payload = self._store_score_lookup_trace(
                 {
                     "request_id": trace_request_id,
@@ -1472,17 +1604,30 @@ class Brain:
                     "llm_called": False,
                     "fallback_used": False,
                     "organization_name": resolved_organization_name,
-                    "answer_contract": "not_found",
+                    "answer_contract": answer_contract,
+                    "collection_required": mission_info.get("collection_required"),
+                    "mission_created": mission_info.get("mission_created"),
+                    "mission_id": mission_info.get("mission_id"),
+                    "mission_mode": mission_info.get("mission_mode"),
+                    "collection_targets": mission_info.get("collection_targets"),
+                    "requested_scores": requested_scores,
                 }
             )
             return {
                 "parsed_result": parsed_result,
-                "answer": self._format_score_lookup_not_found(organization_name=resolved_organization_name, lang=lang),
+                "answer": self._append_collection_followup_to_not_found_answer(
+                    base_answer=self._format_score_lookup_not_found(organization_name=resolved_organization_name, lang=lang),
+                    mission_info=mission_info,
+                    lang=lang,
+                ),
                 "evidence": [self._evidence_from_organization_profile(org, evidence_type="organization_score_lookup")],
                 "organization_name": resolved_organization_name,
                 "data_source": "database",
                 "llm_used": False,
                 "trace": trace_payload,
+                "mission_id": mission_info.get("mission_id"),
+                "mission_created": mission_info.get("mission_created"),
+                "mission_draft": mission_info.get("mission_draft"),
             }
 
         resolved_organization_name = getattr(org, "name", organization_name)
@@ -1501,6 +1646,12 @@ class Brain:
                 "fallback_used": False,
                 "organization_name": resolved_organization_name,
                 "answer_contract": "score_lookup",
+                "collection_required": False,
+                "mission_created": False,
+                "mission_id": None,
+                "mission_mode": "none",
+                "collection_targets": [],
+                "requested_scores": available_fields,
             }
         )
         return {
@@ -1516,6 +1667,9 @@ class Brain:
             "data_source": "database",
             "llm_used": False,
             "trace": trace_payload,
+            "mission_id": None,
+            "mission_created": False,
+            "mission_draft": None,
         }
 
     def _normalize_evidence_item(self, item: Any) -> dict:
