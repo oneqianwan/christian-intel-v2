@@ -20,6 +20,8 @@ class QueryParser:
     SCORE_INTENT_NAME = "organization_score_lookup"
     SCORE_RESPONSE_CONTRACT = "score_lookup"
     SCORE_ALL_FIELDS = ["people_score", "digital_score", "intel_score"]
+    RELATIONSHIP_GRAPH_INTENT_NAME = "organization_relationship_graph_lookup"
+    RELATIONSHIP_GRAPH_RESPONSE_CONTRACT = "relationship_graph"
 
     """规则解析器：匹配常见查询模式，直接返回数据库结果"""
 
@@ -78,6 +80,22 @@ class QueryParser:
         r"电话",
         r"负责人",
         r"对接",
+    ]
+
+    RELATIONSHIP_GRAPH_KEYWORDS = [
+        r"relationship\s+graph",
+        r"relationship\s+network",
+        r"\bnetwork\b",
+        r"\bconnected\s+to\b",
+        r"\bpartners?\b",
+        r"\brelated\s+organizations?\b",
+        r"关系图谱",
+        r"关系网络",
+        r"合作网络",
+        r"关系边",
+        r"关联机构",
+        r"合作方",
+        r"有关联",
     ]
 
     PROFILE_KEYWORDS = [
@@ -187,6 +205,9 @@ class QueryParser:
 
         if self._is_existence_query(msg):
             return self._handle_existence_query(msg, conversation_id=conversation_id)
+
+        if self._is_relationship_graph_query(msg):
+            return self._handle_relationship_graph_query(msg, conversation_id=conversation_id)
 
         if self._is_contact_query(msg):
             return self._handle_contact_query(msg, conversation_id=conversation_id)
@@ -359,6 +380,14 @@ class QueryParser:
 
     def _is_contact_query(self, msg: str) -> bool:
         return any(re.search(kw, msg, re.IGNORECASE) for kw in self.CONTACT_KEYWORDS)
+
+    def _is_relationship_graph_query(self, msg: str) -> bool:
+        raw = str(msg or "").strip()
+        if not raw:
+            return False
+        if self._is_score_query(raw) or self._is_contact_query(raw):
+            return False
+        return any(re.search(kw, raw, re.IGNORECASE) for kw in self.RELATIONSHIP_GRAPH_KEYWORDS)
 
     def _is_capabilities_query(self, msg: str) -> bool:
         return any(re.search(kw, msg, re.IGNORECASE) for kw in self.CAPABILITIES_KEYWORDS)
@@ -875,6 +904,77 @@ class QueryParser:
     def _handle_score_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         _ = conversation_id
         return self._build_score_lookup_intent(msg)
+
+    def _clean_relationship_graph_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:show\s+me|show|what\s+organizations\s+is|what\s+are|who\s+are|explain|tell\s+me|give\s+me|说明|给我|查一下|查查|帮我|请|请给我)\s+",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(
+            r"(?:的)?(?:relationship\s+graph|relationship\s+network|network|partners?|related\s+organizations?|graph|关系图谱|关系网络|合作网络|合作方|关联机构|关系边|有哪些合作方|和哪些机构有关联|有哪些关联机构|是什么)$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"(?:\?|？|。|！|!)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _extract_relationship_graph_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        patterns = [
+            r"show\s+me\s+the\s+relationship\s+graph\s+of\s+(.+?)(?:\?|？|$)",
+            r"explain\s+the\s+relationship\s+network\s+of\s+(.+?)(?:\?|？|$)",
+            r"what\s+organizations\s+is\s+(.+?)\s+connected\s+to(?:\?|？|$)",
+            r"who\s+are\s+(.+?)\s+partners(?:\?|？|$)",
+            r"what\s+are\s+the\s+related\s+organizations\s+of\s+(.+?)(?:\?|？|$)",
+            r"show\s+(.+?)\s+network(?:\?|？|$)",
+            r"(.+?)\s+的关系图谱是什么(?:\?|？|$)",
+            r"说明\s+(.+?)\s+的关系图谱(?:\?|？|$)",
+            r"说明\s+(.+?)\s+的关系网络(?:\?|？|$)",
+            r"(.+?)\s+和哪些机构有关联(?:\?|？|$)",
+            r"(.+?)\s+有哪些合作方(?:\?|？|$)",
+            r"(.+?)\s+的关联机构有哪些(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的关系图谱(?:\?|？|$)",
+            r"查一下\s+(.+?)\s+的合作网络(?:\?|？|$)",
+            r"(.+?)\s+的关系边有哪些(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_relationship_graph_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+        return None
+
+    def _build_relationship_graph_intent(self, msg: str) -> Optional[Dict]:
+        if not self._is_relationship_graph_query(msg):
+            return None
+        organization_name = self._extract_relationship_graph_org_name(msg)
+        if not organization_name:
+            return None
+        return {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": self.RELATIONSHIP_GRAPH_INTENT_NAME,
+            "organization_name": organization_name,
+            "response_contract": self.RELATIONSHIP_GRAPH_RESPONSE_CONTRACT,
+            "depth": 1,
+            "include_unverified": False,
+            "requires_database_lookup": True,
+        }
+
+    def _handle_relationship_graph_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
+        _ = conversation_id
+        return self._build_relationship_graph_intent(msg)
 
     def _handle_compare_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         """处理对比查询"""

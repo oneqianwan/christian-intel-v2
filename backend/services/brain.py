@@ -1250,6 +1250,13 @@ class Brain:
         response_contract = str(parsed_result.get("response_contract") or "").strip()
         return intent == "organization_score_lookup" or response_contract == "score_lookup"
 
+    def _is_relationship_graph_parsed_result(self, parsed_result: Optional[dict]) -> bool:
+        if not isinstance(parsed_result, dict):
+            return False
+        intent = str(parsed_result.get("intent") or "").strip()
+        response_contract = str(parsed_result.get("response_contract") or "").strip()
+        return intent == "organization_relationship_graph_lookup" or response_contract == "relationship_graph"
+
     def _normalize_requested_scores(self, parsed_result: Optional[dict]) -> list[str]:
         if not isinstance(parsed_result, dict):
             return ["people_score", "digital_score", "intel_score"]
@@ -1259,6 +1266,168 @@ class Brain:
         canonical = ["people_score", "digital_score", "intel_score", "composite_score"]
         normalized = [item for item in canonical if item in requested]
         return normalized or ["people_score", "digital_score", "intel_score"]
+
+    def _normalize_graph_options(self, parsed_result: Optional[dict]) -> tuple[int, bool]:
+        if not isinstance(parsed_result, dict):
+            return 1, False
+        try:
+            depth = int(parsed_result.get("depth") or 1)
+        except Exception:
+            depth = 1
+        include_unverified = bool(parsed_result.get("include_unverified"))
+        return depth or 1, include_unverified
+
+    def _graph_node_label_map(self, graph_payload: dict) -> dict[str, str]:
+        labels: dict[str, str] = {}
+        center = graph_payload.get("center") or {}
+        center_graph_id = str(center.get("graph_id") or "")
+        center_name = str(center.get("name") or "")
+        if center_graph_id and center_name:
+            labels[center_graph_id] = center_name
+        for node in graph_payload.get("nodes") or []:
+            graph_id = str(node.get("id") or "")
+            label = str(node.get("name") or node.get("label") or "")
+            if graph_id and label:
+                labels[graph_id] = label
+        return labels
+
+    def _graph_evidence_from_payload(self, graph_payload: dict) -> list[dict]:
+        evidence: list[dict] = []
+        center = graph_payload.get("center") or {}
+        center_name = str(center.get("name") or "").strip()
+        for edge in graph_payload.get("edges") or []:
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f'{center_name} {edge.get("relation_type") or "relationship"}',
+                        "source_name": str(edge.get("evidence_source") or "relation_graph"),
+                        "url": str(edge.get("evidence_url") or ""),
+                        "confidence": float(edge.get("confidence") or 0.0),
+                        "published_at": str(edge.get("evidence_date") or ""),
+                        "updated_at": str(edge.get("evidence_date") or ""),
+                        "type": "relationship_graph",
+                        "snippet": str(edge.get("reason") or ""),
+                    }
+                )
+            )
+        return evidence
+
+    def _format_relationship_graph_answer(self, *, graph_payload: dict, lang: str) -> str:
+        center = graph_payload.get("center") or {}
+        center_name = str(center.get("name") or "Unknown Organization")
+        edges = list(graph_payload.get("edges") or [])
+        warnings = list(graph_payload.get("warnings") or [])
+        label_map = self._graph_node_label_map(graph_payload)
+
+        if not bool(graph_payload.get("found")) or not center:
+            if lang == "zh":
+                return (
+                    f'未在当前数据库中找到 "{center_name}" 的关系图谱中心机构。\n'
+                    "status=not_found\n"
+                    "response_contract=relationship_graph\n"
+                    "我不会编造关系。后续可以创建补充采集任务来查找公开合作方、联盟、媒体和事工关系。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                f'No relationship-graph center organization was found for "{center_name}".\n'
+                "status=not_found\n"
+                "response_contract=relationship_graph\n"
+                "I will not fabricate relationships. A follow-up collection mission can be created later to gather public partner, alliance, media, and ministry links.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if not edges:
+            if lang == "zh":
+                lines = [
+                    f"当前数据库还没有发现 {center_name} 的有证据关系图谱。",
+                    "status=no_relations",
+                    "response_contract=relationship_graph",
+                    "我不会编造关系。可以在后续阶段创建补充采集任务来查找公开合作方、联盟、媒体和事工关系。",
+                    "warnings:",
+                ]
+            else:
+                lines = [
+                    f"The current database has not found any evidence-backed relationship graph for {center_name}.",
+                    "status=no_relations",
+                    "response_contract=relationship_graph",
+                    "I will not fabricate relationships. A follow-up collection mission can be created later to gather public partner, alliance, media, and ministry links.",
+                    "warnings:",
+                ]
+            for warning in warnings or [{"code": "no_relations", "message": "No graph relations found for this organization"}]:
+                lines.append(f"- {warning.get('code')}: {warning.get('message')}")
+            lines.extend(
+                [
+                    "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                    "llm_used=false",
+                ]
+            )
+            return "\n".join(lines)
+
+        if lang == "zh":
+            lines = [
+                f"{center_name} 的关系图谱目前有 {len(edges)} 条有证据关系：",
+                "以下关系来自数据库证据，不是推测。",
+                "response_contract=relationship_graph",
+                f"中心机构：{center_name}",
+                f"关系数量：{len(edges)}",
+                "相关机构列表："
+                + ("、".join(sorted({label_map.get(edge.get('target')) or label_map.get(edge.get('source')) or '' for edge in edges if (label_map.get(edge.get('target')) or label_map.get(edge.get('source')))})) or "无"),
+                "",
+            ]
+        else:
+            lines = [
+                f"{center_name} currently has {len(edges)} evidence-backed relationships in the database:",
+                "The following relationships come from database evidence and are not guesses.",
+                "response_contract=relationship_graph",
+                f"Center organization: {center_name}",
+                f"Relationship count: {len(edges)}",
+                "Related organizations: "
+                + (", ".join(sorted({label_map.get(edge.get('target')) or label_map.get(edge.get('source')) or '' for edge in edges if (label_map.get(edge.get('target')) or label_map.get(edge.get('source')))})) or "none"),
+                "",
+            ]
+
+        center_graph_id = str(center.get("graph_id") or "")
+        for idx, edge in enumerate(edges, start=1):
+            source_label = label_map.get(str(edge.get("source") or ""), str(edge.get("source") or "unknown"))
+            target_label = label_map.get(str(edge.get("target") or ""), str(edge.get("target") or "unknown"))
+            evidence_ref = edge.get("evidence_url") or edge.get("evidence_source") or "证据链接缺失 / missing_evidence"
+            if str(edge.get("source") or "") == center_graph_id:
+                counterpart = target_label
+            elif str(edge.get("target") or "") == center_graph_id:
+                counterpart = source_label
+            else:
+                counterpart = target_label
+            lines.extend(
+                [
+                    f"{idx}. {center_name} -> {counterpart}",
+                    f"   - relation_type: {edge.get('relation_type') or 'unknown'}",
+                    f"   - evidence: {evidence_ref}",
+                    f"   - confidence: {edge.get('confidence')}",
+                    f"   - is_verified: {str(bool(edge.get('is_verified'))).lower()}",
+                ]
+            )
+            if edge.get("missing_evidence"):
+                lines.append("   - warning: missing_evidence")
+            reason = str(edge.get("reason") or "").strip()
+            if reason:
+                lines.append(f"   - reason: {reason}")
+            lines.append("")
+
+        lines.append("warnings:")
+        if warnings:
+            for warning in warnings:
+                lines.append(f"- {warning.get('code')}: {warning.get('message')}")
+        else:
+            lines.append("- none")
+        lines.extend(
+            [
+                "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                "llm_used=false",
+            ]
+        )
+        return "\n".join(lines).strip()
 
     def _find_organization_for_score_lookup(self, organization_name: str):
         from models.database import OrganizationProfile, get_db
@@ -1670,6 +1839,72 @@ class Brain:
             "mission_id": None,
             "mission_created": False,
             "mission_draft": None,
+        }
+
+    def _resolve_relationship_graph_if_applicable(
+        self,
+        *,
+        user_message: str,
+        conversation_id: str,
+        route: str = "simple",
+    ) -> Optional[dict]:
+        if not re.search(
+            r"graph|network|partner|connected|relation|relationship|图谱|关系|合作网络|关联机构|合作方|有关联|有关系",
+            user_message or "",
+            re.IGNORECASE,
+        ):
+            return None
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            parsed_result = parser.parse(user_message, conversation_id=conversation_id)
+        finally:
+            if parser:
+                parser.close()
+
+        if not self._is_relationship_graph_parsed_result(parsed_result):
+            return None
+
+        organization_name = str((parsed_result or {}).get("organization_name") or "").strip()
+        if not organization_name:
+            return None
+
+        depth, include_unverified = self._normalize_graph_options(parsed_result)
+        lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+
+        db_gen = None
+        db = None
+        try:
+            from models.database import get_db
+            from services.relation_mapper import build_organization_graph
+
+            db_gen = get_db()
+            db = next(db_gen)
+            graph_payload = build_organization_graph(
+                db=db,
+                organization_name=organization_name,
+                depth=depth,
+                limit=50,
+                include_unverified=include_unverified,
+            )
+        finally:
+            if db_gen is not None:
+                db_gen.close()
+
+        center_name = str(((graph_payload or {}).get("center") or {}).get("name") or organization_name)
+        answer = self._format_relationship_graph_answer(graph_payload=graph_payload, lang=lang)
+        return {
+            "parsed_result": parsed_result,
+            "answer": answer,
+            "evidence": self._graph_evidence_from_payload(graph_payload),
+            "organization_name": center_name,
+            "relationship_graph": graph_payload,
+            "data_source": "database",
+            "llm_used": False,
+            "route": route,
         }
 
     def _normalize_evidence_item(self, item: Any) -> dict:
@@ -3921,6 +4156,19 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            relationship_graph_result = self._resolve_relationship_graph_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="simple",
+            )
+            if relationship_graph_result is not None:
+                result = {
+                    "answer": self._clean_output(relationship_graph_result.get("answer") or ""),
+                    "evidence": self._merge_evidence(relationship_graph_result.get("evidence") or []),
+                    "relationship_graph": relationship_graph_result.get("relationship_graph") or {},
+                }
+                span.set_output_obj(result)
+                return result
             score_lookup_result = self._resolve_score_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
@@ -4366,6 +4614,37 @@ class Brain:
                     Reason="product_intent_direct_answer",
                     conversation_id=conversation_id,
                     parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            relationship_graph_result = self._resolve_relationship_graph_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="stream",
+            )
+            if relationship_graph_result is not None:
+                direct_answer = True
+                parser_result = relationship_graph_result.get("parsed_result")
+                response_text = str(relationship_graph_result.get("answer") or "")
+                evidence = relationship_graph_result.get("evidence") or []
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(evidence),
+                    "relationship_graph": relationship_graph_result.get("relationship_graph") or {},
+                    "direct_answer": True,
+                    "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                }
+                span.set_output_obj({"done": True, "relationship_graph": True, "organization_name": relationship_graph_result.get("organization_name")})
+                _brain_stream_trace(
+                    "RETURN_ID=RELATIONSHIP_GRAPH",
+                    Reason="relationship_graph_db_return",
+                    conversation_id=conversation_id,
+                    parser_result=parser_result,
+                    parser_result_response=response_text,
                     parser_result_direct_answer=True,
                     parser_result_data_found=True,
                 )
