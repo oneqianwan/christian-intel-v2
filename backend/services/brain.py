@@ -591,6 +591,7 @@ class Brain:
         self.model = DEEPSEEK_MODEL
         self.conversation_history: List[dict] = []
         self.current_entities: List[dict] = []
+        self.last_score_lookup_trace: Optional[dict] = None
         self.container = self._create_service_container()
         self.available_functions = {
             "query_database": self._query_database,
@@ -1351,16 +1352,57 @@ class Brain:
             "llm_used=false"
         )
 
+    def _store_score_lookup_trace(self, trace_payload: dict) -> dict:
+        safe_trace = {
+            "request_id": str(trace_payload.get("request_id") or ""),
+            "route": str(trace_payload.get("route") or ""),
+            "intent_detection_ms": float(trace_payload.get("intent_detection_ms") or 0.0),
+            "db_lookup_ms": float(trace_payload.get("db_lookup_ms") or 0.0),
+            "scorer_lookup_ms": float(trace_payload.get("scorer_lookup_ms") or 0.0),
+            "planner_ms": float(trace_payload.get("planner_ms") or 0.0),
+            "llm_ms": float(trace_payload.get("llm_ms") or 0.0),
+            "total_ms": float(trace_payload.get("total_ms") or 0.0),
+            "db_hit": bool(trace_payload.get("db_hit")),
+            "llm_called": bool(trace_payload.get("llm_called")),
+            "fallback_used": bool(trace_payload.get("fallback_used")),
+            "organization_name": str(trace_payload.get("organization_name") or ""),
+            "answer_contract": str(trace_payload.get("answer_contract") or ""),
+        }
+        self.last_score_lookup_trace = safe_trace
+        logger.info(
+            "event=brain.score_lookup request_id=%s route=%s organization_name=%s "
+            "answer_contract=%s db_hit=%s llm_called=%s fallback_used=%s "
+            "intent_detection_ms=%.3f db_lookup_ms=%.3f scorer_lookup_ms=%.3f planner_ms=%.3f llm_ms=%.3f total_ms=%.3f",
+            safe_trace["request_id"],
+            safe_trace["route"],
+            safe_trace["organization_name"],
+            safe_trace["answer_contract"],
+            safe_trace["db_hit"],
+            safe_trace["llm_called"],
+            safe_trace["fallback_used"],
+            safe_trace["intent_detection_ms"],
+            safe_trace["db_lookup_ms"],
+            safe_trace["scorer_lookup_ms"],
+            safe_trace["planner_ms"],
+            safe_trace["llm_ms"],
+            safe_trace["total_ms"],
+        )
+        return safe_trace
+
     def _resolve_score_lookup_if_applicable(
         self,
         *,
         user_message: str,
         conversation_id: str,
+        route: str = "simple",
+        request_id: Optional[str] = None,
     ) -> Optional[dict]:
+        started_at = time.perf_counter()
         if not re.search(r"score|scores|评分|分数|得分", user_message or "", re.IGNORECASE):
             return None
 
         parser = None
+        parser_started_at = time.perf_counter()
         try:
             from .query_parser import QueryParser
 
@@ -1369,6 +1411,7 @@ class Brain:
         finally:
             if parser:
                 parser.close()
+        intent_detection_ms = round((time.perf_counter() - parser_started_at) * 1000.0, 3)
 
         if not self._is_score_lookup_parsed_result(parsed_result):
             return None
@@ -1379,8 +1422,28 @@ class Brain:
 
         requested_scores = self._normalize_requested_scores(parsed_result)
         lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+        trace_request_id = str(request_id or f"{route}-{uuid.uuid4().hex[:12]}")
+        db_started_at = time.perf_counter()
         org = self._find_organization_for_score_lookup(organization_name)
+        db_lookup_ms = round((time.perf_counter() - db_started_at) * 1000.0, 3)
         if org is None:
+            trace_payload = self._store_score_lookup_trace(
+                {
+                    "request_id": trace_request_id,
+                    "route": route,
+                    "intent_detection_ms": intent_detection_ms,
+                    "db_lookup_ms": db_lookup_ms,
+                    "scorer_lookup_ms": 0.0,
+                    "planner_ms": 0.0,
+                    "llm_ms": 0.0,
+                    "total_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
+                    "db_hit": False,
+                    "llm_called": False,
+                    "fallback_used": False,
+                    "organization_name": organization_name,
+                    "answer_contract": "not_found",
+                }
+            )
             return {
                 "parsed_result": parsed_result,
                 "answer": self._format_score_lookup_not_found(organization_name=organization_name, lang=lang),
@@ -1388,32 +1451,71 @@ class Brain:
                 "organization_name": organization_name,
                 "data_source": "database",
                 "llm_used": False,
+                "trace": trace_payload,
             }
 
         score_payload = self._extract_score_payload(org=org)
         available_fields = [field for field in requested_scores if score_payload.get(field) is not None]
         if not available_fields:
+            resolved_organization_name = getattr(org, "name", organization_name)
+            trace_payload = self._store_score_lookup_trace(
+                {
+                    "request_id": trace_request_id,
+                    "route": route,
+                    "intent_detection_ms": intent_detection_ms,
+                    "db_lookup_ms": db_lookup_ms,
+                    "scorer_lookup_ms": 0.0,
+                    "planner_ms": 0.0,
+                    "llm_ms": 0.0,
+                    "total_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
+                    "db_hit": False,
+                    "llm_called": False,
+                    "fallback_used": False,
+                    "organization_name": resolved_organization_name,
+                    "answer_contract": "not_found",
+                }
+            )
             return {
                 "parsed_result": parsed_result,
-                "answer": self._format_score_lookup_not_found(organization_name=getattr(org, "name", organization_name), lang=lang),
+                "answer": self._format_score_lookup_not_found(organization_name=resolved_organization_name, lang=lang),
                 "evidence": [self._evidence_from_organization_profile(org, evidence_type="organization_score_lookup")],
-                "organization_name": getattr(org, "name", organization_name),
+                "organization_name": resolved_organization_name,
                 "data_source": "database",
                 "llm_used": False,
+                "trace": trace_payload,
             }
 
+        resolved_organization_name = getattr(org, "name", organization_name)
+        trace_payload = self._store_score_lookup_trace(
+            {
+                "request_id": trace_request_id,
+                "route": route,
+                "intent_detection_ms": intent_detection_ms,
+                "db_lookup_ms": db_lookup_ms,
+                "scorer_lookup_ms": 0.0,
+                "planner_ms": 0.0,
+                "llm_ms": 0.0,
+                "total_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
+                "db_hit": True,
+                "llm_called": False,
+                "fallback_used": False,
+                "organization_name": resolved_organization_name,
+                "answer_contract": "score_lookup",
+            }
+        )
         return {
             "parsed_result": parsed_result,
             "answer": self._format_score_lookup_answer(
-                organization_name=getattr(org, "name", organization_name),
+                organization_name=resolved_organization_name,
                 score_payload=score_payload,
                 requested_scores=available_fields,
                 lang=lang,
             ),
             "evidence": [self._evidence_from_organization_profile(org, evidence_type="organization_score_lookup")],
-            "organization_name": getattr(org, "name", organization_name),
+            "organization_name": resolved_organization_name,
             "data_source": "database",
             "llm_used": False,
+            "trace": trace_payload,
         }
 
     def _normalize_evidence_item(self, item: Any) -> dict:
@@ -3668,6 +3770,7 @@ class Brain:
             score_lookup_result = self._resolve_score_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
+                route="simple",
             )
             if score_lookup_result is not None:
                 result = {
@@ -4116,6 +4219,7 @@ class Brain:
             score_lookup_result = self._resolve_score_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
+                route="stream",
             )
             if score_lookup_result is not None:
                 direct_answer = True
