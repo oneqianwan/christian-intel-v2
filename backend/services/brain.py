@@ -1264,6 +1264,13 @@ class Brain:
         response_contract = str(parsed_result.get("response_contract") or "").strip()
         return intent == "organization_contact_lookup" or response_contract == "contact_lookup"
 
+    def _is_recommendation_lookup_parsed_result(self, parsed_result: Optional[dict]) -> bool:
+        if not isinstance(parsed_result, dict):
+            return False
+        intent = str(parsed_result.get("intent") or "").strip()
+        response_contract = str(parsed_result.get("response_contract") or "").strip()
+        return intent == "organization_partnership_recommendation_lookup" or response_contract == "partnership_recommendations"
+
     def _normalize_requested_scores(self, parsed_result: Optional[dict]) -> list[str]:
         if not isinstance(parsed_result, dict):
             return ["people_score", "digital_score", "intel_score"]
@@ -1349,6 +1356,44 @@ class Brain:
                 )
             )
         return evidence
+
+    def _recommendation_evidence_from_payload(self, recommendation_payload: dict) -> list[dict]:
+        evidence: list[dict] = []
+        organization = recommendation_payload.get("organization") or {}
+        organization_name = str(organization.get("name") or "").strip()
+        for item in recommendation_payload.get("recommendations") or []:
+            target_org = item.get("target_org") or {}
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f"{organization_name} -> {target_org.get('name') or 'recommendation'}",
+                        "source_name": str(target_org.get("source_name") or organization.get("source_name") or "partnership_recommender"),
+                        "url": str(target_org.get("source_url") or ""),
+                        "confidence": float(item.get("confidence") or 0.0),
+                        "published_at": "",
+                        "updated_at": str(organization.get("updated_at") or ""),
+                        "type": "partnership_recommendation",
+                        "snippet": str(item.get("explanation") or ""),
+                    }
+                )
+            )
+        return evidence
+
+    def _empty_recommendation_payload(self, *, warning: str) -> dict:
+        return {
+            "organization": None,
+            "summary": {
+                "candidate_count": 0,
+                "recommended_count": 0,
+                "high_priority_count": 0,
+                "with_contact_count": 0,
+                "with_relationship_path_count": 0,
+                "warning_count": 1,
+            },
+            "recommendations": [],
+            "warnings": [warning],
+            "found": True,
+        }
 
     def _filter_contact_payload(self, contact_payload: dict, requested_contacts: list[str]) -> dict:
         canonical = requested_contacts or ["website", "email", "phone", "social"]
@@ -1609,6 +1654,126 @@ class Brain:
             if contact_warnings:
                 lines.append(f"  - warnings: {', '.join(contact_warnings)}")
             lines.append("")
+
+        lines.append("warnings:")
+        if warnings:
+            for warning in warnings:
+                lines.append(f"- {warning}")
+        else:
+            lines.append("- none")
+        lines.extend(
+            [
+                "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                "llm_used=false",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _format_recommendation_lookup_answer(self, *, recommendation_payload: dict, lang: str) -> str:
+        organization = recommendation_payload.get("organization") or {}
+        organization_name = str(organization.get("name") or "Unknown Organization")
+        recommendations = list(recommendation_payload.get("recommendations") or [])
+        warnings = list(recommendation_payload.get("warnings") or [])
+
+        if "organization_name_missing" in warnings:
+            if lang == "zh":
+                return (
+                    "当前推荐查询缺少明确机构名称。\n"
+                    "status=organization_name_missing\n"
+                    "response_contract=partnership_recommendations\n"
+                    "请明确说明要为哪个机构推荐合作对象，例如：给我 Victory Philippines 的推荐合作对象。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The recommendation query does not include a clear organization name.\n"
+                "status=organization_name_missing\n"
+                "response_contract=partnership_recommendations\n"
+                "Please specify which organization needs partnership recommendations, for example: Recommend partner organizations for Victory Philippines.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if not bool(recommendation_payload.get("found")) or not organization:
+            if lang == "zh":
+                return (
+                    "数据库中没有找到该机构。\n"
+                    "status=not_found\n"
+                    "response_contract=partnership_recommendations\n"
+                    "我不会编造推荐对象、联系方式或关系路径。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The organization was not found in the database.\n"
+                "status=not_found\n"
+                "response_contract=partnership_recommendations\n"
+                "I will not fabricate recommendation targets, contacts, or relationship paths.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if not recommendations:
+            if lang == "zh":
+                lines = [
+                    f"当前数据库没有足够候选为 {organization_name} 生成推荐。",
+                    "status=no_candidates",
+                    "response_contract=partnership_recommendations",
+                    "我不会编造推荐机构。请先补充评分、关系图谱或联系方式数据。",
+                    "warnings:",
+                ]
+            else:
+                lines = [
+                    f"The current database does not have enough candidates to generate recommendations for {organization_name}.",
+                    "status=no_candidates",
+                    "response_contract=partnership_recommendations",
+                    "I will not fabricate recommendation targets. Please enrich score, relationship, or contact data first.",
+                    "warnings:",
+                ]
+            for warning in warnings or ["no_recommendation_candidates_found"]:
+                lines.append(f"- {warning}")
+            lines.extend(
+                [
+                    "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                    "llm_used=false",
+                ]
+            )
+            return "\n".join(lines)
+
+        if lang == "zh":
+            lines = [
+                f"{organization_name} 的推荐合作对象如下（来自数据库规则计算，不是推测）：",
+                "response_contract=partnership_recommendations",
+                f"机构名称：{organization_name}",
+                f"候选数量：{recommendation_payload.get('summary', {}).get('candidate_count', 0)}",
+                f"推荐数量：{recommendation_payload.get('summary', {}).get('recommended_count', 0)}",
+                "",
+            ]
+        else:
+            lines = [
+                f"Partnership recommendations for {organization_name} are listed below (from database rules, not guesses):",
+                "response_contract=partnership_recommendations",
+                f"Organization: {organization_name}",
+                f"Candidate count: {recommendation_payload.get('summary', {}).get('candidate_count', 0)}",
+                f"Recommended count: {recommendation_payload.get('summary', {}).get('recommended_count', 0)}",
+                "",
+            ]
+
+        for index, item in enumerate(recommendations[:3], start=1):
+            target_org = item.get("target_org") or {}
+            reason_codes = list(item.get("reason_codes") or [])
+            lines.extend(
+                [
+                    f"{index}. {target_org.get('name') or 'Unknown Target'}",
+                    f"   - priority: {item.get('priority')}",
+                    f"   - recommendation_score: {item.get('recommendation_score')}",
+                    f"   - confidence: {item.get('confidence')}",
+                    f"   - reason_codes: {', '.join(reason_codes) if reason_codes else 'none'}",
+                    f"   - recommended_next_action: {item.get('recommended_next_action')}",
+                    f"   - explanation: {item.get('explanation') or ''}",
+                    "",
+                ]
+            )
 
         lines.append("warnings:")
         if warnings:
@@ -2165,6 +2330,77 @@ class Brain:
             "evidence": self._contact_evidence_from_payload(filtered_payload),
             "organization_name": organization_name_from_payload,
             "contact_lookup": filtered_payload,
+            "data_source": "database",
+            "llm_used": False,
+            "route": route,
+        }
+
+    def _resolve_recommendation_lookup_if_applicable(
+        self,
+        *,
+        user_message: str,
+        conversation_id: str,
+        route: str = "simple",
+    ) -> Optional[dict]:
+        if not re.search(
+            r"recommend|recommended\s+organizations?|partner(?:ship)?|best\s+organizations?\s+to\s+contact|outreach\s+targets?|contact\s+first|推荐合作对象|推荐合作机构|推荐几个合作对象|优先联系谁|优先联系哪些机构|应该联系谁|谁最值得联系|最值得先联系|适合合作的机构|适合合作|下一步联系哪些机构|可以跟谁合作",
+            user_message or "",
+            re.IGNORECASE,
+        ):
+            return None
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            parsed_result = parser.parse(user_message, conversation_id=conversation_id)
+        finally:
+            if parser:
+                parser.close()
+
+        if not self._is_recommendation_lookup_parsed_result(parsed_result):
+            return None
+
+        organization_name = str((parsed_result or {}).get("organization_name") or "").strip()
+        lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+
+        if not organization_name:
+            recommendation_payload = self._empty_recommendation_payload(warning="organization_name_missing")
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_recommendation_lookup_answer(recommendation_payload=recommendation_payload, lang=lang),
+                "evidence": [],
+                "organization_name": "",
+                "partnership_recommendations": recommendation_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        db_gen = None
+        try:
+            from models.database import get_db
+            from services.partnership_recommender import build_partnership_recommendations
+
+            db_gen = get_db()
+            db = next(db_gen)
+            recommendation_payload = build_partnership_recommendations(
+                db=db,
+                organization_name=organization_name,
+                limit=10,
+            )
+        finally:
+            if db_gen is not None:
+                db_gen.close()
+
+        organization_name_from_payload = str(((recommendation_payload.get("organization") or {}).get("name")) or organization_name)
+        return {
+            "parsed_result": parsed_result,
+            "answer": self._format_recommendation_lookup_answer(recommendation_payload=recommendation_payload, lang=lang),
+            "evidence": self._recommendation_evidence_from_payload(recommendation_payload),
+            "organization_name": organization_name_from_payload,
+            "partnership_recommendations": recommendation_payload,
             "data_source": "database",
             "llm_used": False,
             "route": route,
@@ -4419,6 +4655,19 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            recommendation_lookup_result = self._resolve_recommendation_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="simple",
+            )
+            if recommendation_lookup_result is not None:
+                result = {
+                    "answer": self._clean_output(recommendation_lookup_result.get("answer") or ""),
+                    "evidence": self._merge_evidence(recommendation_lookup_result.get("evidence") or []),
+                    "partnership_recommendations": recommendation_lookup_result.get("partnership_recommendations") or {},
+                }
+                span.set_output_obj(result)
+                return result
             contact_lookup_result = self._resolve_contact_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
@@ -4890,6 +5139,43 @@ class Brain:
                     Reason="product_intent_direct_answer",
                     conversation_id=conversation_id,
                     parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            recommendation_lookup_result = self._resolve_recommendation_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="stream",
+            )
+            if recommendation_lookup_result is not None:
+                direct_answer = True
+                parser_result = recommendation_lookup_result.get("parsed_result")
+                response_text = str(recommendation_lookup_result.get("answer") or "")
+                evidence = recommendation_lookup_result.get("evidence") or []
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(evidence),
+                    "partnership_recommendations": recommendation_lookup_result.get("partnership_recommendations") or {},
+                    "direct_answer": True,
+                    "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                }
+                span.set_output_obj(
+                    {
+                        "done": True,
+                        "partnership_recommendations": True,
+                        "organization_name": recommendation_lookup_result.get("organization_name"),
+                    }
+                )
+                _brain_stream_trace(
+                    "RETURN_ID=RECOMMENDATION_LOOKUP",
+                    Reason="recommendation_lookup_db_return",
+                    conversation_id=conversation_id,
+                    parser_result=parser_result,
+                    parser_result_response=response_text,
                     parser_result_direct_answer=True,
                     parser_result_data_found=True,
                 )

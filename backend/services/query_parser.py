@@ -24,6 +24,8 @@ class QueryParser:
     CONTACT_RESPONSE_CONTRACT = "contact_lookup"
     RELATIONSHIP_GRAPH_INTENT_NAME = "organization_relationship_graph_lookup"
     RELATIONSHIP_GRAPH_RESPONSE_CONTRACT = "relationship_graph"
+    RECOMMENDATION_INTENT_NAME = "organization_partnership_recommendation_lookup"
+    RECOMMENDATION_RESPONSE_CONTRACT = "partnership_recommendations"
 
     """规则解析器：匹配常见查询模式，直接返回数据库结果"""
 
@@ -121,6 +123,31 @@ class QueryParser:
         r"关联机构",
         r"合作方",
         r"有关联",
+    ]
+
+    RECOMMENDATION_KEYWORDS = [
+        r"recommend\s+partners?",
+        r"partner\s+recommendations?",
+        r"who\s+should\s+i\s+contact",
+        r"who\s+should\s+we\s+contact\s+first",
+        r"who\s+should\s+.+?\s+contact\s+first",
+        r"who\s+should\s+they\s+partner\s+with",
+        r"who\s+should\s+.+?\s+partner\s+with",
+        r"recommended\s+organizations?",
+        r"best\s+organizations?\s+to\s+contact",
+        r"partnership\s+opportunit(?:y|ies)",
+        r"outreach\s+targets?",
+        r"推荐合作对象",
+        r"推荐合作机构",
+        r"推荐几个合作对象",
+        r"优先联系谁",
+        r"应该联系谁",
+        r"谁最值得联系",
+        r"可以跟谁合作",
+        r"适合合作的机构",
+        r"下一步联系哪些机构",
+        r"最值得先联系",
+        r"优先联系哪些机构",
     ]
 
     PROFILE_KEYWORDS = [
@@ -230,6 +257,9 @@ class QueryParser:
 
         if self._is_existence_query(msg):
             return self._handle_existence_query(msg, conversation_id=conversation_id)
+
+        if self._is_recommendation_query(msg):
+            return self._handle_recommendation_query(msg, conversation_id=conversation_id)
 
         if self._is_relationship_graph_query(msg):
             return self._handle_relationship_graph_query(msg, conversation_id=conversation_id)
@@ -407,9 +437,17 @@ class QueryParser:
         raw = str(msg or "").strip()
         if not raw:
             return False
-        if self._is_score_query(raw):
+        if self._is_score_query(raw) or self._is_recommendation_query(raw):
             return False
         return any(re.search(kw, raw, re.IGNORECASE) for kw in self.CONTACT_KEYWORDS)
+
+    def _is_recommendation_query(self, msg: str) -> bool:
+        raw = str(msg or "").strip()
+        if not raw:
+            return False
+        if self._is_score_query(raw):
+            return False
+        return any(re.search(kw, raw, re.IGNORECASE) for kw in self.RECOMMENDATION_KEYWORDS)
 
     def _extract_requested_contacts(self, msg: str) -> List[str]:
         raw = str(msg or "")
@@ -455,8 +493,9 @@ class QueryParser:
             clean,
             flags=re.IGNORECASE,
         )
-        clean = re.sub(r"(?:\?|？|。|！|!)+$", "", clean).strip()
+        clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
         clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
         if len(clean) <= 1:
             return None
         return clean
@@ -517,9 +556,67 @@ class QueryParser:
         raw = str(msg or "").strip()
         if not raw:
             return False
-        if self._is_score_query(raw) or self._is_contact_query(raw):
+        if self._is_score_query(raw) or self._is_contact_query(raw) or self._is_recommendation_query(raw):
             return False
         return any(re.search(kw, raw, re.IGNORECASE) for kw in self.RELATIONSHIP_GRAPH_KEYWORDS)
+
+    def _clean_recommendation_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:recommend(?:\s+partner(?:s)?)?|recommend(?:ed)?\s+organizations?|who\s+should|help\s+me\s+recommend|帮我推荐|给我|请给我|请推荐|推荐|帮我|下一步|优先|应该|谁最值得|可以|适合)\s+",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(
+            r"(?:的)?(?:推荐合作对象有哪些|推荐合作对象|推荐合作机构|可以合作的机构|适合合作的机构|可以跟谁合作|应该联系谁|优先联系谁|谁最值得联系|下一步联系哪些机构|recommend(?:ed)?\s+partners?|partner(?:ship)?\s+recommendations?|organizations?\s+to\s+contact|outreach\s+targets?|partnership\s+opportunit(?:y|ies)|partner\s+with)$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _extract_recommendation_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        patterns = [
+            r"who\s+should\s+(.+?)\s+partner\s+with(?:\?|？|$)",
+            r"recommend(?:\s+partner(?:s)?)?\s+(?:organizations?\s+for\s+)?(.+?)(?:\?|？|$)",
+            r"recommend\s+partner\s+organizations?\s+for\s+(.+?)(?:\?|？|$)",
+            r"who\s+should\s+(.+?)\s+contact\s+first(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的推荐合作对象(?:有哪些)?(?:\?|？|$)",
+            r"帮我推荐\s+(.+?)\s+可以合作的机构(?:\?|？|$)",
+            r"(.+?)\s+推荐合作对象有哪些(?:\?|？|$)",
+            r"(.+?)\s+可以跟谁合作(?:\?|？|$)",
+            r"推荐\s+(.+?)\s+适合合作的机构(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_recommendation_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+        return None
+
+    def _build_recommendation_lookup_intent(self, msg: str) -> Optional[Dict]:
+        if not self._is_recommendation_query(msg):
+            return None
+        organization_name = self._extract_recommendation_org_name(msg)
+        return {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": self.RECOMMENDATION_INTENT_NAME,
+            "organization_name": organization_name or "",
+            "response_contract": self.RECOMMENDATION_RESPONSE_CONTRACT,
+            "requires_database_lookup": True,
+        }
 
     def _is_capabilities_query(self, msg: str) -> bool:
         return any(re.search(kw, msg, re.IGNORECASE) for kw in self.CAPABILITIES_KEYWORDS)
@@ -901,6 +998,8 @@ class QueryParser:
             return False
         if any(re.search(kw, msg, re.IGNORECASE) for kw in self.CONTACT_KEYWORDS):
             return False
+        if any(re.search(kw, msg, re.IGNORECASE) for kw in self.RECOMMENDATION_KEYWORDS):
+            return False
         return any(re.search(kw, msg, re.IGNORECASE) for kw in self.PROFILE_KEYWORDS) and len(lowered) >= 4
 
     def _coerce_datetime_str(self, value) -> str:
@@ -1107,6 +1206,10 @@ class QueryParser:
     def _handle_relationship_graph_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         _ = conversation_id
         return self._build_relationship_graph_intent(msg)
+
+    def _handle_recommendation_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
+        _ = conversation_id
+        return self._build_recommendation_lookup_intent(msg)
 
     def _handle_compare_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         """处理对比查询"""
