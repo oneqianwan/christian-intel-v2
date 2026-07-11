@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
-from models.schemas import OrganizationRelationsResponse
+from models.schemas import OrganizationContactPayload, OrganizationRelationsResponse
 from models.database import IntelligenceItem, OrganizationProfile, get_db
+from services.contact_intelligence import build_organization_contact_payload
 from services.relation_mapper import RelationMapper, build_organization_graph
 
 router = APIRouter(prefix="/api/dashboard/org", tags=["org-detail"])
@@ -103,6 +104,15 @@ def get_org_relations(org_id: str, include_unverified: bool = False, limit: int 
         "relations": relations,
         "graph": graph,
     }
+
+
+@router.get("/{org_id}/contacts", response_model=OrganizationContactPayload)
+def get_org_contacts(org_id: str, db: Session = Depends(get_db)):
+    """机构可信联系方式合同。"""
+    payload = build_organization_contact_payload(db=db, org_id=org_id, include_unverified=True)
+    if payload.get("found") is False:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return payload
 
 
 @router.get("/{org_id}/timeline")

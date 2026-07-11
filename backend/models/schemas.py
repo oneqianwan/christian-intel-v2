@@ -205,3 +205,51 @@ class OrganizationRelationsResponse(BaseModel):
     total: int
     relations: List[Dict[str, Any]]
     graph: OrganizationGraphPayload
+
+
+ContactVerificationStatus = Literal["unverified", "verified", "likely"]
+ContactUsage = Literal["research", "outreach_candidate"]
+
+
+class OrganizationContactOrganization(BaseModel):
+    id: str
+    name: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    organization_confidence: Optional[float] = None
+    updated_at: Optional[datetime] = None
+
+
+class OrganizationContactItem(BaseModel):
+    id: str
+    type: str
+    label: str
+    value: str
+    normalized_value: str
+    platform: Optional[str] = None
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    confidence: Optional[float] = None
+    verification_status: ContactVerificationStatus = "unverified"
+    is_verified: bool = False
+    usage: ContactUsage
+    warnings: List[str]
+
+
+class OrganizationContactSummary(BaseModel):
+    contact_count: int
+    email_count: int
+    phone_count: int
+    social_count: int
+    website_count: int
+    verified_count: int
+    missing_source_count: int
+    outreach_candidate_count: int
+
+
+class OrganizationContactPayload(BaseModel):
+    organization: Optional[OrganizationContactOrganization] = None
+    contacts: List[OrganizationContactItem]
+    summary: OrganizationContactSummary
+    warnings: List[str]
+    found: bool = True
