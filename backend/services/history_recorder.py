@@ -14,12 +14,35 @@ TRACKED_FIELDS = [
     "mission_statement",
     "contact_email",
     "phone_public",
+    "facebook_url",
+    "youtube_url",
+    "twitter_url",
+    "telegram_username",
+    "social_accounts_json",
+    "social_accounts",
     "ai_maturity_score",
     "digital_score",
     "has_programs",
     "has_leadership_page",
     "has_annual_report",
 ]
+
+
+def build_change_source_tag(
+    source: str = "unknown",
+    *,
+    source_url: str | None = None,
+    extraction_method: str | None = None,
+    source_context: str | None = None,
+) -> str:
+    parts = [str(source or "unknown").strip() or "unknown"]
+    if extraction_method:
+        parts.append(f"method={str(extraction_method).strip()}")
+    if source_context:
+        parts.append(f"context={str(source_context).strip()}")
+    if source_url:
+        parts.append(f"url={str(source_url).strip()[:180]}")
+    return "|".join(parts)[:255]
 
 
 def record_change(

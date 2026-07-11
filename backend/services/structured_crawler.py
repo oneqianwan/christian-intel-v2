@@ -9,6 +9,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from crawlers.website_deep_crawler import assess_ai_maturity_v2, assess_digital_score_v2
+from services.contact_intelligence import build_contact_candidates_from_crawl_result, extract_contact_candidates_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -226,9 +227,39 @@ class DeepCrawlReport:
 
         contact_page = self._find_page("contact")
         if contact_page:
-            email = self._extract_email(contact_page.html or contact_page.text_content)
-            if email:
-                updates["contact_email"] = email
+            contact_candidates = build_contact_candidates_from_crawl_result(
+                {
+                    "emails": re.findall(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", contact_page.html or contact_page.text_content or ""),
+                    "phones": re.findall(r"(\+?\d[\d\s\-\(\)]{7,}\d)", contact_page.html or contact_page.text_content or ""),
+                    "source_url": contact_page.url,
+                    "source_name": "structured_crawler",
+                    "source_context": "contact_page",
+                },
+                organization_url=self.base_url,
+                extraction_method="regex",
+            )
+            contact_candidates.extend(
+                extract_contact_candidates_from_text(
+                    contact_page.html or contact_page.text_content or "",
+                    source_url=contact_page.url,
+                    source_name="structured_crawler",
+                    organization_url=self.base_url,
+                    source_context="contact_page",
+                )
+            )
+            for candidate in contact_candidates:
+                candidate_type = candidate.get("type")
+                platform = candidate.get("platform")
+                if candidate_type == "email" and "contact_email" not in updates:
+                    updates["contact_email"] = candidate["normalized_value"]
+                elif candidate_type == "phone" and "phone_public" not in updates:
+                    updates["phone_public"] = candidate["normalized_value"]
+                elif candidate_type == "social_profile" and platform == "facebook" and "facebook_url" not in updates:
+                    updates["facebook_url"] = candidate["normalized_value"]
+                elif candidate_type == "social_profile" and platform == "youtube" and "youtube_url" not in updates:
+                    updates["youtube_url"] = candidate["normalized_value"]
+                elif candidate_type == "social_profile" and platform == "telegram" and "telegram_username" not in updates:
+                    updates["telegram_username"] = candidate["value"]
             updates["has_contact"] = True
 
         all_text = "\n\n".join(page.text_content for page in self.pages_crawled if page.text_content)

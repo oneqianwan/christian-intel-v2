@@ -20,7 +20,7 @@ os.chdir(backend_dir)
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
-from models.database import SessionLocal, init_db
+from models.database import OrganizationProfile, SessionLocal, init_db
 
 try:
     from backend.services.llm_client import call_llm
@@ -31,6 +31,11 @@ try:
     from backend.crawlers.dynamic_crawler import DynamicCrawler
 except ImportError:
     from crawlers.dynamic_crawler import DynamicCrawler
+
+try:
+    from backend.services.contact_intelligence import apply_validated_contact_candidates_to_org, build_contact_candidates_from_crawl_result
+except ImportError:
+    from services.contact_intelligence import apply_validated_contact_candidates_to_org, build_contact_candidates_from_crawl_result
 
 
 def is_valid_website_url(url: str) -> bool:
@@ -328,19 +333,31 @@ def save_deep_data(org_id: str, org_name: str, website_url: str, extracted: Dict
             leader_title = first_leader.get("title")
 
         social_accounts = extracted.get("social_accounts") or {}
+        rule_based_fallback = _heuristic_extract(about_text, website_url)
+        contact_candidates = build_contact_candidates_from_crawl_result(
+            {
+                "official_website": website_url,
+                "contact_email": rule_based_fallback.get("contact_email"),
+                "contact_phone": rule_based_fallback.get("contact_phone"),
+                "social_accounts": rule_based_fallback.get("social_accounts") or {},
+                "source_url": website_url,
+                "source_name": "website_deep_crawler",
+            },
+            organization_url=website_url,
+            extraction_method="regex",
+            source_context=None,
+        )
+
         updates = {
             "description": extracted.get("description"),
             "founded_year": extracted.get("founded_year"),
             "denomination": extracted.get("denomination"),
-            "contact_email": extracted.get("contact_email"),
-            "phone_public": extracted.get("contact_phone"),
             "address": extracted.get("address"),
             "city": extracted.get("city"),
             "mission_statement": extracted.get("mission_statement"),
             "has_ai_initiative": bool(extracted.get("has_ai_content")),
             "has_online_giving": bool(extracted.get("has_online_giving")),
             "has_mobile_app": bool(extracted.get("has_mobile_app")),
-            "social_accounts": json.dumps(social_accounts, ensure_ascii=False) if social_accounts else None,
             "key_activities": json.dumps(extracted.get("key_activities") or [], ensure_ascii=False),
             "ai_maturity_score": ai_maturity,
             "digital_score": digital_score,
@@ -349,26 +366,34 @@ def save_deep_data(org_id: str, org_name: str, website_url: str, extracted: Dict
             "official_website": website_url,
             "leader_name": leader_name,
             "leader_title": leader_title,
-            "facebook_url": social_accounts.get("facebook"),
-            "youtube_url": social_accounts.get("youtube"),
-            "telegram_username": social_accounts.get("telegram"),
         }
 
-        set_clauses = []
-        params: Dict[str, Any] = {"org_id": org_id}
+        org = db_session.query(OrganizationProfile).filter(OrganizationProfile.id == org_id).first()
+        if not org:
+            print(f"  [Save] 机构不存在: {org_name}")
+            return
+
+        updated_any = False
         for field, value in updates.items():
             if value is not None:
-                set_clauses.append(f"{field} = :{field}")
-                params[field] = value
+                setattr(org, field, value)
+                updated_any = True
 
-        if not set_clauses:
+        contact_update_result = apply_validated_contact_candidates_to_org(
+            org,
+            contact_candidates,
+            change_source="website_deep_crawler",
+            changed_by="system",
+            db=db_session,
+        )
+        if contact_update_result.get("updated_fields"):
+            updated_any = True
+
+        if not updated_any:
             print(f"  [Save] 无数据可更新: {org_name}")
             return
 
-        db_session.execute(
-            text(f"UPDATE organization_profiles SET {', '.join(set_clauses)}, updated_at = :updated_at WHERE id = :org_id"),
-            {**params, "updated_at": datetime.utcnow()},
-        )
+        org.updated_at = datetime.utcnow()
         db_session.commit()
 
         print(f"  [Save] [OK] {org_name}")

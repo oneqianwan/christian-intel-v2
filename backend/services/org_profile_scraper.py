@@ -9,6 +9,10 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from models.database import OrganizationProfile
+from services.contact_intelligence import (
+    apply_validated_contact_candidates_to_org,
+    build_contact_candidates_from_crawl_result,
+)
 
 
 PH_ORGANIZATION_SEEDS = [
@@ -429,6 +433,7 @@ def scrape_org_website(org_seed: Dict[str, Any], db: Session) -> Dict[str, Any]:
             "youtube_url": None,
             "telegram_username": None,
             "member_estimate": None,
+            "contact_candidates": [],
         }
 
         emails = _extract_emails(resp.text)
@@ -445,6 +450,23 @@ def scrape_org_website(org_seed: Dict[str, Any], db: Session) -> Dict[str, Any]:
 
         socials = _extract_social_links(soup)
         result.update(socials)
+        result["contact_candidates"].extend(
+            build_contact_candidates_from_crawl_result(
+                {
+                    "official_website": effective_base,
+                    "emails": emails,
+                    "phones": phones,
+                    "facebook_url": socials.get("facebook_url"),
+                    "youtube_url": socials.get("youtube_url"),
+                    "telegram_username": socials.get("telegram_username"),
+                    "source_url": effective_base,
+                    "source_name": "org_profile_scraper",
+                    "source_context": "official_website",
+                },
+                organization_url=effective_base,
+                extraction_method="regex",
+            )
+        )
 
         contact_candidates = _find_candidate_links(
             soup,
@@ -493,6 +515,22 @@ def scrape_org_website(org_seed: Dict[str, Any], db: Session) -> Dict[str, Any]:
                     result["address"] = addr
                 if not result.get("facebook_url") or not result.get("youtube_url") or not result.get("telegram_username"):
                     result.update({k: v for k, v in _extract_social_links(s).items() if v and not result.get(k)})
+                result["contact_candidates"].extend(
+                    build_contact_candidates_from_crawl_result(
+                        {
+                            "emails": emails2,
+                            "phones": phones2,
+                            "facebook_url": result.get("facebook_url"),
+                            "youtube_url": result.get("youtube_url"),
+                            "telegram_username": result.get("telegram_username"),
+                            "source_url": str(r.url),
+                            "source_name": "org_profile_scraper",
+                            "source_context": "contact_page",
+                        },
+                        organization_url=effective_base,
+                        extraction_method="regex",
+                    )
+                )
             except Exception:
                 pass
 
@@ -537,15 +575,15 @@ def store_organization_profile(db: Session, org_seed: Dict[str, Any], scraped_da
         "country": country,
         "denomination": org_seed.get("denomination", "") or None,
         "official_website": data.get("official_website"),
-        "contact_email": data.get("contact_email"),
-        "phone_public": data.get("phone_public"),
+        "contact_email": None,
+        "phone_public": None,
         "address": data.get("address"),
         "leader_name": data.get("leader_name"),
         "leader_title": data.get("leader_title"),
         "leader_bio_url": data.get("leader_bio_url"),
-        "facebook_url": data.get("facebook_url"),
-        "youtube_url": data.get("youtube_url"),
-        "telegram_username": data.get("telegram_username"),
+        "facebook_url": None,
+        "youtube_url": None,
+        "telegram_username": None,
         "source_url": org_seed.get("website"),
         "source_name": "机构官网抓取",
         "confidence": 0.85,
@@ -566,10 +604,24 @@ def store_organization_profile(db: Session, org_seed: Dict[str, Any], scraped_da
                 continue
             if hasattr(existing, key):
                 setattr(existing, key, value)
+        apply_validated_contact_candidates_to_org(
+            existing,
+            data.get("contact_candidates") or [],
+            change_source="org_profile_scraper",
+            changed_by="system",
+            db=db,
+        )
         db.commit()
         return {"status": "updated", "id": existing.id}
 
     profile = OrganizationProfile(id=str(uuid.uuid4()), **profile_data)
+    apply_validated_contact_candidates_to_org(
+        profile,
+        data.get("contact_candidates") or [],
+        change_source="org_profile_scraper",
+        changed_by="system",
+        db=db,
+    )
     db.add(profile)
     db.commit()
     return {"status": "created", "id": profile.id}
