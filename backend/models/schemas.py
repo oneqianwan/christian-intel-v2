@@ -330,3 +330,86 @@ class PartnershipRecommendationPayload(BaseModel):
     recommendations: List[PartnershipRecommendationItem]
     warnings: List[str]
     found: bool = True
+
+
+ActionPlanRecommendedChannel = Literal["email", "website", "phone", "social", "research_first", "manual_review"]
+ActionPlanRiskLevel = Literal["low", "medium", "high"]
+ActionPlanStepType = Literal["research", "verify_contact", "review_relationship", "prepare_outreach", "contact", "monitor", "skip"]
+ActionPlanStepChannel = Literal["email", "website", "phone", "social", "internal_review", "none"]
+ActionPlanContactType = Literal["email", "phone", "website", "social_profile", "none"]
+ActionPlanStepPriority = Literal["high", "medium", "low"]
+
+
+class PartnershipActionPlanOrganization(BaseModel):
+    id: str
+    name: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+
+class PartnershipActionPlanTargetOrg(BaseModel):
+    id: str
+    name: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+
+
+class PartnershipActionPlanSummary(BaseModel):
+    plan_available: bool
+    step_count: int
+    blocked: bool
+    block_reasons: List[str]
+    recommended_channel: ActionPlanRecommendedChannel
+    risk_level: ActionPlanRiskLevel
+    confidence: float
+
+
+class PartnershipActionPlanUsesContact(BaseModel):
+    type: ActionPlanContactType = "none"
+    value: Optional[str] = None
+    source_url: Optional[str] = None
+    is_verified: bool = False
+
+
+class PartnershipActionPlanStep(BaseModel):
+    step_number: int
+    action_type: ActionPlanStepType
+    title: str
+    description: str
+    channel: ActionPlanStepChannel
+    depends_on: List[int]
+    required_evidence: List[str]
+    uses_contact: PartnershipActionPlanUsesContact
+    risk_flags: List[str]
+    success_criteria: List[str]
+    do_not_proceed_if: List[str]
+    priority: ActionPlanStepPriority
+
+
+class PartnershipActionRecommendationSnapshot(BaseModel):
+    target_org_id: Optional[str] = None
+    target_org_name: Optional[str] = None
+    recommendation_score: int = 0
+    priority: RecommendationPriority = "low"
+    confidence: float = 0.0
+    reason_codes: List[str]
+    risks: List[str]
+    warnings: List[str]
+    recommended_next_action: RecommendationNextAction = "research_more"
+
+
+class PartnershipActionPlanEvidence(BaseModel):
+    score_snapshot: RecommendationScoreSnapshot
+    relationship_snapshot: RecommendationRelationshipSnapshot
+    contact_snapshot: RecommendationContactSnapshot
+    recommendation_snapshot: PartnershipActionRecommendationSnapshot
+
+
+class PartnershipActionPlanPayload(BaseModel):
+    organization: PartnershipActionPlanOrganization
+    target_org: Optional[PartnershipActionPlanTargetOrg] = None
+    summary: PartnershipActionPlanSummary
+    action_plan: List[PartnershipActionPlanStep]
+    evidence: PartnershipActionPlanEvidence
+    warnings: List[str]

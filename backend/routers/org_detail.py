@@ -3,13 +3,16 @@
 提供完整的机构画像：评分、关系网络、情报时间线。
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
-from models.schemas import OrganizationContactPayload, OrganizationRelationsResponse, PartnershipRecommendationPayload
+from models.schemas import OrganizationContactPayload, OrganizationRelationsResponse, PartnershipActionPlanPayload, PartnershipRecommendationPayload
 from models.database import IntelligenceItem, OrganizationProfile, get_db
 from services.contact_intelligence import build_organization_contact_payload
+from services.partnership_action_planner import build_partnership_action_plan
 from services.partnership_recommender import build_partnership_recommendations
 from services.relation_mapper import RelationMapper, build_organization_graph
 
@@ -123,6 +126,24 @@ def get_org_recommendations(org_id: str, limit: int = 10, db: Session = Depends(
     if payload.get("found") is False:
         raise HTTPException(status_code=404, detail="Organization not found")
     return payload
+
+
+@router.get("/{org_id}/action-plan", response_model=PartnershipActionPlanPayload)
+def get_org_action_plan(org_id: str, target_org_id: Optional[str] = None, db: Session = Depends(get_db)):
+    """机构合作行动计划合同。"""
+    try:
+        return build_partnership_action_plan(
+            db=db,
+            org_id=org_id,
+            target_org_id=target_org_id,
+        )
+    except LookupError as exc:
+        message = str(exc)
+        if message == "organization_not_found":
+            raise HTTPException(status_code=404, detail="Organization not found") from exc
+        if message == "target_org_not_found":
+            raise HTTPException(status_code=404, detail="Target organization not found") from exc
+        raise
 
 
 @router.get("/{org_id}/timeline")
