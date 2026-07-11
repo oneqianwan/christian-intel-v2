@@ -9,8 +9,10 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
+import { IntelGraph } from '../components/IntelGraph'
 import { WatchButton } from '../components/WatchButton'
 import { buildApiUrl } from '../services/api'
+import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 
 interface OrgDetail {
   id: string
@@ -82,8 +84,11 @@ export function OrgDetailPage() {
   const showWatchUi = isWatchAlertUiEnabled()
   const [org, setOrg] = useState<OrgDetail | null>(null)
   const [relations, setRelations] = useState<Relation[]>([])
+  const [relationshipGraph, setRelationshipGraph] = useState<RelationshipGraphPayload | null>(null)
   const [timeline, setTimeline] = useState<IntelItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [relationsLoading, setRelationsLoading] = useState(false)
+  const [relationsError, setRelationsError] = useState<string | null>(null)
   const relationTypeMap: Record<string, string> = {
     invested_in: '投资',
     co_invested: '共同投资',
@@ -116,14 +121,21 @@ export function OrgDetailPage() {
   }
 
   const fetchRelations = async () => {
+    setRelationsLoading(true)
+    setRelationsError(null)
     try {
       const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}/relations`))
       if (!res.ok) throw new Error('fetch relations failed')
       const data = await res.json()
       setRelations(Array.isArray(data.relations) ? data.relations : [])
+      setRelationshipGraph(data.graph || null)
     } catch (e) {
       console.error('Failed to fetch relations:', e)
       setRelations([])
+      setRelationshipGraph(null)
+      setRelationsError('关系图谱加载失败，当前不显示任何假关系。')
+    } finally {
+      setRelationsLoading(false)
     }
   }
 
@@ -394,7 +406,31 @@ export function OrgDetailPage() {
 
         <div>
           <div style={{ ...cardStyle, marginBottom: 24 }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Relations · {relations.length}</h3>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Relations Graph</h3>
+            {relationsLoading ? (
+              <div style={{ color: '#64748b', fontSize: 13 }}>Loading relationship graph...</div>
+            ) : relationsError ? (
+              <div
+                style={{
+                  color: '#b91c1c',
+                  fontSize: 13,
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                }}
+              >
+                {relationsError}
+              </div>
+            ) : relationshipGraph ? (
+              <IntelGraph graph={relationshipGraph} />
+            ) : (
+              <div style={{ color: '#999', fontSize: 13 }}>No relationship graph payload available</div>
+            )}
+          </div>
+
+          <div style={{ ...cardStyle, marginBottom: 24 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Relations List · {relations.length}</h3>
             {relations.length === 0 ? (
               <div style={{ color: '#999', fontSize: 13 }}>No relations recorded yet</div>
             ) : (
@@ -415,7 +451,7 @@ export function OrgDetailPage() {
                           marginRight: 8,
                         }}
                       >
-                        {relation.direction === 'outgoing' ? '→' : '←'} {relationTypeMap[relation.relation_type] || relation.relation_type}
+                        {relation.direction === 'outgoing' ? '->' : '<-'} {relationTypeMap[relation.relation_type] || relation.relation_type}
                       </span>
                       <a
                         href={`/dashboard/org/${relation.other_org.id}`}
@@ -448,7 +484,7 @@ export function OrgDetailPage() {
                           <span style={{ color: '#888', marginLeft: 8 }}>· {relation.investment.round}</span>
                         ) : null}
                         {relation.evidence && relation.evidence.verified ? (
-                          <span style={{ color: '#4caf50', marginLeft: 8 }}>✓ Verified</span>
+                          <span style={{ color: '#4caf50', marginLeft: 8 }}>Verified</span>
                         ) : null}
                         {relation.evidence && relation.evidence.url ? (
                           <a
@@ -457,7 +493,7 @@ export function OrgDetailPage() {
                             rel="noopener noreferrer"
                             style={{ color: '#1976d2', marginLeft: 8, fontSize: 11 }}
                           >
-                            Source →
+                            Source
                           </a>
                         ) : null}
                       </div>

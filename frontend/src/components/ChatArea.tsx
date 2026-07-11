@@ -7,6 +7,7 @@ import { registerChatAbortHandler } from '../features/chat/cleanup'
 import { useConversationStore } from '../stores/conversationStore'
 import { useMessageStore } from '../stores/messageStore'
 import { ChatApiError, buildApiUrl, sendChatStream, fetchMessages, createConversation } from '../services/api'
+import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 import GlobalIntelCard from './GlobalIntelCard'
 import AgentAlerts from './AgentAlerts'
 import { CollectionPanel } from './CollectionPanel'
@@ -51,18 +52,7 @@ type MatchPayload = {
   matches: InvestorMatch[]
 }
 
-type GraphPayload = {
-  center_entity: string
-  relations: Array<{
-    entity: { name: string; type?: string }
-    type: string
-    direction?: string
-    amount?: number
-    description?: string
-  }>
-}
-
-type _KeepFrontendAnswerAuditTypes = MatchPayload | GraphPayload
+type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload
 
 const md5 = (input: string): string => {
   const text = unescape(encodeURIComponent(String(input || '')))
@@ -189,6 +179,16 @@ const extractMetaPayload = <T,>(content: string, tagName: string): T | null => {
 
 void (0 as unknown as _KeepFrontendAnswerAuditTypes | null)
 void extractMetaPayload
+
+const hasRelationshipGraphPayload = (value: unknown): value is RelationshipGraphPayload => {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return Array.isArray(candidate.nodes) &&
+    Array.isArray(candidate.edges) &&
+    Array.isArray(candidate.warnings) &&
+    typeof candidate.summary === 'object' &&
+    candidate.summary !== null
+}
 
 const stripMetaBlocks = (content: string): string =>
   content
@@ -840,7 +840,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
         }
         list.forEach((m) => useMessageStore.getState().addMessage(currentId, {
           id: m.id, role: m.role, content: m.content || '',
-          sources: m.sources || [], delivery_type: m.delivery_type, status: m.status, scope: m.scope,
+          sources: m.sources || [],
+          delivery_type: m.delivery_type,
+          status: m.status,
+          scope: m.scope,
+          relationship_graph: hasRelationshipGraphPayload(m.relationship_graph) ? m.relationship_graph : undefined,
         }))
       }).catch(async (error) => {
         if (error instanceof ChatApiError && error.status === 401) {
@@ -876,6 +880,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
             delivery_type: m.delivery_type,
             status: m.status,
             scope: m.scope,
+            relationship_graph: hasRelationshipGraphPayload(m.relationship_graph) ? m.relationship_graph : undefined,
           })
         )
       } catch (e) {
@@ -1244,6 +1249,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
               status: 'completed',
               scope: delivery.scope || delivery.execution_summary?.scope,
               welcome_reply_uuid: welcomeReplyUuid || undefined,
+              relationship_graph: hasRelationshipGraphPayload(data.relationship_graph)
+                ? data.relationship_graph
+                : hasRelationshipGraphPayload(delivery.relationship_graph)
+                  ? delivery.relationship_graph
+                  : undefined,
             })
             streamContentRef.current = ''
             setStreamingContent('')
@@ -1620,6 +1630,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
             ) : (
             (() => {
               const visibleContent = msg.content
+              const relationshipGraph = hasRelationshipGraphPayload(msg.relationship_graph) ? msg.relationship_graph : null
               return (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '86%' }}>
               {msg.role === 'assistant' && renderAssistantAvatar(60, 56, '#eef4ff')}
@@ -1639,6 +1650,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                       <div className="streaming-body">{msg.content}</div>
                     )
                   : getDisplayContent(msg.content)}
+                {msg.role === 'assistant' && relationshipGraph && (
+                  <div style={{ marginTop: '12px' }}>
+                    <IntelGraph graph={relationshipGraph} />
+                  </div>
+                )}
                 {msg.role === 'assistant' && ['intelligence_brief', 'analysis_brief', 'contact_full'].includes(msg.delivery_type || '') && parseBriefItems(visibleContent).length > 0 && (
                   <div style={{ marginTop: '12px', display: 'grid', gap: '10px' }}>
                     {parseBriefItems(visibleContent).map((item) => {

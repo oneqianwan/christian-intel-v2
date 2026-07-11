@@ -1,6 +1,7 @@
 import { create } from 'zustand'
+import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 
-interface Message {
+export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
@@ -10,6 +11,7 @@ interface Message {
   scope?: string
   localOnly?: boolean
   welcome_reply_uuid?: string
+  relationship_graph?: RelationshipGraphPayload
 }
 
 interface MessageStore {
@@ -36,7 +38,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         existing.scope === msg.scope &&
         existing.localOnly === msg.localOnly &&
         existing.welcome_reply_uuid === msg.welcome_reply_uuid &&
-        JSON.stringify(existing.sources) === JSON.stringify(msg.sources)
+        JSON.stringify(existing.sources) === JSON.stringify(msg.sources) &&
+        JSON.stringify(existing.relationship_graph) === JSON.stringify(msg.relationship_graph)
 
       if (unchanged) {
         return s
