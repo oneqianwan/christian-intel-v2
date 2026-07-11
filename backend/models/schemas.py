@@ -253,3 +253,80 @@ class OrganizationContactPayload(BaseModel):
     summary: OrganizationContactSummary
     warnings: List[str]
     found: bool = True
+
+
+RecommendationPriority = Literal["high", "medium", "low"]
+RecommendationNextAction = Literal["research_more", "contact", "review_manually", "skip"]
+
+
+class PartnershipRecommendationOrganization(BaseModel):
+    id: str
+    name: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+
+class PartnershipRecommendationTargetOrg(BaseModel):
+    id: str
+    name: str
+    country: Optional[str] = None
+    city: Optional[str] = None
+    denomination: Optional[str] = None
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+
+
+class RecommendationScoreSnapshot(BaseModel):
+    people_score: Optional[int] = None
+    digital_score: Optional[int] = None
+    intel_score: Optional[int] = None
+
+
+class RecommendationRelationshipSnapshot(BaseModel):
+    has_relationship_path: bool = False
+    relationship_count: int = 0
+    strongest_relationship_type: Optional[str] = None
+    relationship_path_summary: List[str]
+
+
+class RecommendationContactSnapshot(BaseModel):
+    has_website: bool = False
+    has_email: bool = False
+    has_phone: bool = False
+    has_social: bool = False
+    contact_count: int = 0
+    verified_contact_count: int = 0
+    missing_source_count: int = 0
+
+
+class PartnershipRecommendationItem(BaseModel):
+    target_org: PartnershipRecommendationTargetOrg
+    recommendation_score: int
+    priority: RecommendationPriority
+    confidence: float
+    reason_codes: List[str]
+    explanation: str
+    score_snapshot: RecommendationScoreSnapshot
+    relationship_snapshot: RecommendationRelationshipSnapshot
+    contact_snapshot: RecommendationContactSnapshot
+    risks: List[str]
+    warnings: List[str]
+    recommended_next_action: RecommendationNextAction
+
+
+class PartnershipRecommendationSummary(BaseModel):
+    candidate_count: int
+    recommended_count: int
+    high_priority_count: int
+    with_contact_count: int
+    with_relationship_path_count: int
+    warning_count: int
+
+
+class PartnershipRecommendationPayload(BaseModel):
+    organization: Optional[PartnershipRecommendationOrganization] = None
+    summary: PartnershipRecommendationSummary
+    recommendations: List[PartnershipRecommendationItem]
+    warnings: List[str]
+    found: bool = True
