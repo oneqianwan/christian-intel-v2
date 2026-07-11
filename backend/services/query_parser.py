@@ -20,6 +20,8 @@ class QueryParser:
     SCORE_INTENT_NAME = "organization_score_lookup"
     SCORE_RESPONSE_CONTRACT = "score_lookup"
     SCORE_ALL_FIELDS = ["people_score", "digital_score", "intel_score"]
+    CONTACT_INTENT_NAME = "organization_contact_lookup"
+    CONTACT_RESPONSE_CONTRACT = "contact_lookup"
     RELATIONSHIP_GRAPH_INTENT_NAME = "organization_relationship_graph_lookup"
     RELATIONSHIP_GRAPH_RESPONSE_CONTRACT = "relationship_graph"
 
@@ -74,12 +76,35 @@ class QueryParser:
     CONTACT_KEYWORDS = [
         r"contact",
         r"contacts",
+        r"contact\s+information",
+        r"contact\s+channels?",
+        r"how\s+can\s+i\s+contact",
+        r"how\s+do\s+i\s+reach",
+        r"reach\s+this\s+organization",
+        r"public\s+contact",
+        r"public\s+contact\s+channels?",
         r"联系方式",
         r"联系信息",
+        r"怎么联系",
+        r"如何联系",
+        r"联系这个机构",
+        r"联系这个教会",
         r"邮箱",
+        r"公开邮箱",
         r"电话",
-        r"负责人",
-        r"对接",
+        r"官网",
+        r"网站",
+        r"website",
+        r"email",
+        r"phone",
+        r"facebook",
+        r"youtube",
+        r"telegram",
+        r"social",
+        r"social\s+links",
+        r"社媒",
+        r"社交媒体",
+        r"公开联系方式",
     ]
 
     RELATIONSHIP_GRAPH_KEYWORDS = [
@@ -379,7 +404,114 @@ class QueryParser:
         return any(re.search(p, msg, re.IGNORECASE) for p in patterns)
 
     def _is_contact_query(self, msg: str) -> bool:
-        return any(re.search(kw, msg, re.IGNORECASE) for kw in self.CONTACT_KEYWORDS)
+        raw = str(msg or "").strip()
+        if not raw:
+            return False
+        if self._is_score_query(raw):
+            return False
+        return any(re.search(kw, raw, re.IGNORECASE) for kw in self.CONTACT_KEYWORDS)
+
+    def _extract_requested_contacts(self, msg: str) -> List[str]:
+        raw = str(msg or "")
+        requested: list[str] = []
+        contact_patterns = [
+            ("website", [r"\bwebsite\b", r"官网", r"网站"]),
+            ("email", [r"\bemail\b", r"邮箱", r"公开邮箱"]),
+            ("phone", [r"\bphone\b", r"电话", r"电话号码"]),
+            (
+                "social",
+                [
+                    r"\bsocial\b",
+                    r"social\s+links",
+                    r"facebook",
+                    r"youtube",
+                    r"telegram",
+                    r"社媒",
+                    r"社交媒体",
+                    r"账号",
+                ],
+            ),
+        ]
+        for field_name, patterns in contact_patterns:
+            if any(re.search(pattern, raw, re.IGNORECASE) for pattern in patterns):
+                requested.append(field_name)
+        canonical_order = ["website", "email", "phone", "social"]
+        normalized = [field for field in canonical_order if field in requested]
+        return normalized or canonical_order
+
+    def _clean_contact_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:how\s+can\s+i\s+contact|what\s+is\s+the\s+contact\s+information\s+for|show\s+me|give\s+me|what\s+is|does|how\s+do\s+i\s+reach|what\s+are\s+the\s+public\s+contact\s+channels\s+for|给我|请给我|告诉我|我怎么联系|怎么联系|说明|查一下|这个机构的|这个教会的)\s+",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(
+            r"(?:的)?(?:联系方式是什么|联系方式|官网是什么|官网|网站是什么|网站|邮箱|公开邮箱|电话是多少|电话|facebook|youtube|telegram|社媒账号有哪些|社媒|社交媒体|social\s+links|contact\s+information|contact\s+channels?|email|website|phone\s+number|phone|public\s+contact\s+channels?)$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"(?:\?|？|。|！|!)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _extract_contact_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        patterns = [
+            r"how\s+can\s+i\s+contact\s+(.+?)(?:\?|？|$)",
+            r"what\s+is\s+the\s+contact\s+information\s+for\s+(.+?)(?:\?|？|$)",
+            r"show\s+me\s+(.+?)\s+email(?:\?|？|$)",
+            r"give\s+me\s+(.+?)\s+email(?:\?|？|$)",
+            r"show\s+me\s+(.+?)\s+website(?:\?|？|$)",
+            r"show\s+me\s+(.+?)\s+phone(?:\?|？|$)",
+            r"what\s+is\s+(.+?)\s+website(?:\?|？|$)",
+            r"does\s+(.+?)\s+have\s+a\s+phone\s+number(?:\?|？|$)",
+            r"show\s+me\s+(.+?)\s+social\s+links(?:\?|？|$)",
+            r"what\s+are\s+the\s+public\s+contact\s+channels\s+for\s+(.+?)(?:\?|？|$)",
+            r"(.+?)\s+怎么联系(?:\?|？|$)",
+            r"(.+?)\s+的联系方式是什么(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的邮箱(?:\?|？|$)",
+            r"(.+?)\s+的官网是什么(?:\?|？|$)",
+            r"(.+?)\s+的电话是多少(?:\?|？|$)",
+            r"(.+?)\s+的\s+Facebook\s*/\s*YouTube\s*/\s*Telegram\s+是什么(?:\?|？|$)",
+            r"(.+?)\s+的社媒账号有哪些(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的公开联系方式(?:\?|？|$)",
+            r"这个机构有没有\s+(.+?)\s*(?:公开邮箱|邮箱|电话|官网)(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_contact_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+
+        candidate = self._clean_contact_org_candidate(raw)
+        if candidate and not any(re.search(kw, candidate, re.IGNORECASE) for kw in self.CONTACT_KEYWORDS):
+            return candidate
+        return self._extract_org_name(raw)
+
+    def _build_contact_lookup_intent(self, msg: str) -> Optional[Dict]:
+        if not self._is_contact_query(msg):
+            return None
+        organization_name = self._extract_contact_org_name(msg)
+        if not organization_name:
+            return None
+        return {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": self.CONTACT_INTENT_NAME,
+            "organization_name": organization_name,
+            "requested_contacts": self._extract_requested_contacts(msg),
+            "response_contract": self.CONTACT_RESPONSE_CONTRACT,
+            "requires_database_lookup": True,
+        }
 
     def _is_relationship_graph_query(self, msg: str) -> bool:
         raw = str(msg or "").strip()
@@ -1338,32 +1470,8 @@ class QueryParser:
         return {"data_found": True, "response": response, "answer": response, "evidence": evidence, "direct_answer": True}
 
     def _handle_contact_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
-        org_name = self._extract_org_name(msg)
-        if not org_name:
-            return None
-        orgs = self._find_organization(org_name)
-        if not orgs:
-            response = f'数据库中未找到 "{org_name}" 的相关机构。'
-            return {"data_found": True, "response": response, "answer": response, "evidence": [], "direct_answer": True}
-        org = orgs[0]
-        if self._get_lang_pref(conversation_id) == "zh":
-            response = (
-                f"**{org.name}** ({org.country or 'N/A'})\n"
-                f"- 官网: {org.official_website or '未知'}\n"
-                f"- 邮箱: {org.contact_email or '未知'}\n"
-                f"- 电话: {org.phone_public or '未知'}\n"
-                f"- 负责人: {org.leader_name or '未知'} ({org.leader_title or '未知'})\n"
-            )
-        else:
-            response = (
-                f"**{org.name}** ({org.country or 'N/A'})\n"
-                f"- Website: {org.official_website or 'Unknown'}\n"
-                f"- Email: {org.contact_email or 'Unknown'}\n"
-                f"- Phone: {org.phone_public or 'Unknown'}\n"
-                f"- Leader: {org.leader_name or 'Unknown'} ({org.leader_title or 'Unknown'})\n"
-            )
-        evidence = [self._evidence_from_org(org, evidence_type="organization_contacts")]
-        return {"data_found": True, "response": response, "answer": response, "evidence": evidence, "direct_answer": True}
+        _ = conversation_id
+        return self._build_contact_lookup_intent(msg)
 
     def _handle_org_profile_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         org_name = self._extract_org_name(msg)

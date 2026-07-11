@@ -1257,6 +1257,13 @@ class Brain:
         response_contract = str(parsed_result.get("response_contract") or "").strip()
         return intent == "organization_relationship_graph_lookup" or response_contract == "relationship_graph"
 
+    def _is_contact_lookup_parsed_result(self, parsed_result: Optional[dict]) -> bool:
+        if not isinstance(parsed_result, dict):
+            return False
+        intent = str(parsed_result.get("intent") or "").strip()
+        response_contract = str(parsed_result.get("response_contract") or "").strip()
+        return intent == "organization_contact_lookup" or response_contract == "contact_lookup"
+
     def _normalize_requested_scores(self, parsed_result: Optional[dict]) -> list[str]:
         if not isinstance(parsed_result, dict):
             return ["people_score", "digital_score", "intel_score"]
@@ -1276,6 +1283,16 @@ class Brain:
             depth = 1
         include_unverified = bool(parsed_result.get("include_unverified"))
         return depth or 1, include_unverified
+
+    def _normalize_requested_contacts(self, parsed_result: Optional[dict]) -> list[str]:
+        if not isinstance(parsed_result, dict):
+            return ["website", "email", "phone", "social"]
+        requested = parsed_result.get("requested_contacts")
+        if not isinstance(requested, list):
+            requested = []
+        canonical = ["website", "email", "phone", "social"]
+        normalized = [item for item in canonical if item in requested]
+        return normalized or canonical
 
     def _graph_node_label_map(self, graph_payload: dict) -> dict[str, str]:
         labels: dict[str, str] = {}
@@ -1311,6 +1328,65 @@ class Brain:
                 )
             )
         return evidence
+
+    def _contact_evidence_from_payload(self, contact_payload: dict) -> list[dict]:
+        evidence: list[dict] = []
+        organization = contact_payload.get("organization") or {}
+        organization_name = str(organization.get("name") or "").strip()
+        for contact in contact_payload.get("contacts") or []:
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f"{organization_name} {contact.get('label') or contact.get('type') or 'contact'}",
+                        "source_name": str(contact.get("source_name") or organization.get("source_name") or "contact_payload"),
+                        "url": str(contact.get("source_url") or ""),
+                        "confidence": float(organization.get("organization_confidence") or 0.0),
+                        "published_at": "",
+                        "updated_at": str(organization.get("updated_at") or ""),
+                        "type": "contact_lookup",
+                        "snippet": str(contact.get("normalized_value") or contact.get("value") or ""),
+                    }
+                )
+            )
+        return evidence
+
+    def _filter_contact_payload(self, contact_payload: dict, requested_contacts: list[str]) -> dict:
+        canonical = requested_contacts or ["website", "email", "phone", "social"]
+        allowed_types = set()
+        if "website" in canonical:
+            allowed_types.add("website")
+        if "email" in canonical:
+            allowed_types.add("email")
+        if "phone" in canonical:
+            allowed_types.add("phone")
+        if "social" in canonical:
+            allowed_types.add("social_profile")
+
+        contacts = [
+            contact
+            for contact in (contact_payload.get("contacts") or [])
+            if str(contact.get("type") or "") in allowed_types
+        ]
+        summary = {
+            "contact_count": len(contacts),
+            "email_count": sum(1 for contact in contacts if contact.get("type") == "email"),
+            "phone_count": sum(1 for contact in contacts if contact.get("type") == "phone"),
+            "social_count": sum(1 for contact in contacts if contact.get("type") == "social_profile"),
+            "website_count": sum(1 for contact in contacts if contact.get("type") == "website"),
+            "verified_count": sum(1 for contact in contacts if contact.get("is_verified") is True),
+            "missing_source_count": sum(1 for contact in contacts if "field_level_source_missing" in (contact.get("warnings") or [])),
+            "outreach_candidate_count": sum(1 for contact in contacts if contact.get("usage") == "outreach_candidate"),
+        }
+        warnings = list(contact_payload.get("warnings") or [])
+        if not contacts and "contact_missing" not in warnings:
+            warnings.append("contact_missing")
+        return {
+            "organization": contact_payload.get("organization"),
+            "contacts": contacts,
+            "summary": summary,
+            "warnings": list(dict.fromkeys(warnings)),
+            "found": bool(contact_payload.get("found", True)),
+        }
 
     def _format_relationship_graph_answer(self, *, graph_payload: dict, lang: str) -> str:
         center = graph_payload.get("center") or {}
@@ -1419,6 +1495,125 @@ class Brain:
         if warnings:
             for warning in warnings:
                 lines.append(f"- {warning.get('code')}: {warning.get('message')}")
+        else:
+            lines.append("- none")
+        lines.extend(
+            [
+                "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                "llm_used=false",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _format_contact_lookup_answer(self, *, contact_payload: dict, requested_contacts: list[str], lang: str) -> str:
+        organization = contact_payload.get("organization") or {}
+        organization_name = str(organization.get("name") or "Unknown Organization")
+        contacts = list(contact_payload.get("contacts") or [])
+        warnings = list(contact_payload.get("warnings") or [])
+
+        if not bool(contact_payload.get("found")) or not organization:
+            if lang == "zh":
+                return (
+                    f'未在当前数据库中找到 "{organization_name}" 的机构联系方式记录。\n'
+                    "status=not_found\n"
+                    "response_contract=contact_lookup\n"
+                    "我不会编造联系方式。后续可以先做补充采集，再查询官网 contact page、公开邮箱和社媒主页。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                f'No contact record was found for "{organization_name}" in the current database.\n'
+                "status=not_found\n"
+                "response_contract=contact_lookup\n"
+                "I will not fabricate contact channels. A follow-up collection step can gather the official website, public email, and social profiles first.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        requested_label_map = {
+            "website": "官网/website" if lang == "zh" else "website",
+            "email": "邮箱/email" if lang == "zh" else "email",
+            "phone": "电话/phone" if lang == "zh" else "phone",
+            "social": "社媒/social" if lang == "zh" else "social",
+        }
+        requested_text = "、".join(requested_label_map[item] for item in requested_contacts) if lang == "zh" else ", ".join(
+            requested_label_map[item] for item in requested_contacts
+        )
+
+        if not contacts:
+            if lang == "zh":
+                lines = [
+                    f"当前数据库没有已记录的公开联系方式：{organization_name}",
+                    "status=no_contacts",
+                    "response_contract=contact_lookup",
+                    f"请求范围：{requested_text or 'all'}",
+                    "我不会编造联系方式。可以在后续阶段创建补充采集任务去查找官网 contact page、公开邮箱和社媒主页。",
+                    "warnings:",
+                ]
+            else:
+                lines = [
+                    f"The current database does not contain recorded public contact channels for {organization_name}.",
+                    "status=no_contacts",
+                    "response_contract=contact_lookup",
+                    f"Requested channels: {requested_text or 'all'}",
+                    "I will not fabricate contact details. A follow-up collection step can gather the official contact page, public email, and social profiles later.",
+                    "warnings:",
+                ]
+            for warning in warnings or ["contact_missing"]:
+                lines.append(f"- {warning}")
+            lines.extend(
+                [
+                    "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                    "llm_used=false",
+                ]
+            )
+            return "\n".join(lines)
+
+        if lang == "zh":
+            lines = [
+                f"{organization_name} 的公开联系方式如下（来自数据库记录，不是推测）：",
+                "response_contract=contact_lookup",
+                f"机构名称：{organization_name}",
+                f"请求范围：{requested_text or '全部'}",
+                "",
+            ]
+        else:
+            lines = [
+                f"{organization_name} public contact channels are listed below (from database records, not guesses):",
+                "response_contract=contact_lookup",
+                f"Organization: {organization_name}",
+                f"Requested channels: {requested_text or 'all'}",
+                "",
+            ]
+
+        platform_label_map = {
+            "facebook": "Facebook",
+            "youtube": "YouTube",
+            "twitter": "Twitter",
+            "telegram": "Telegram",
+            "linkedin": "LinkedIn",
+            "whatsapp": "WhatsApp",
+            "instagram": "Instagram",
+            "tiktok": "TikTok",
+        }
+        for contact in contacts:
+            label = str(contact.get("label") or contact.get("type") or "Contact")
+            if contact.get("type") == "social_profile":
+                label = platform_label_map.get(str(contact.get("platform") or "").lower(), label)
+            lines.append(f"- {label}: {contact.get('normalized_value') or contact.get('value')}")
+            lines.append(f"  - source_url: {contact.get('source_url') or 'N/A'}")
+            lines.append(f"  - source_name: {contact.get('source_name') or 'N/A'}")
+            lines.append(f"  - verification_status: {contact.get('verification_status') or 'unverified'}")
+            lines.append(f"  - is_verified: {str(bool(contact.get('is_verified'))).lower()}")
+            contact_warnings = list(contact.get("warnings") or [])
+            if contact_warnings:
+                lines.append(f"  - warnings: {', '.join(contact_warnings)}")
+            lines.append("")
+
+        lines.append("warnings:")
+        if warnings:
+            for warning in warnings:
+                lines.append(f"- {warning}")
         else:
             lines.append("- none")
         lines.extend(
@@ -1902,6 +2097,74 @@ class Brain:
             "evidence": self._graph_evidence_from_payload(graph_payload),
             "organization_name": center_name,
             "relationship_graph": graph_payload,
+            "data_source": "database",
+            "llm_used": False,
+            "route": route,
+        }
+
+    def _resolve_contact_lookup_if_applicable(
+        self,
+        *,
+        user_message: str,
+        conversation_id: str,
+        route: str = "simple",
+    ) -> Optional[dict]:
+        if not re.search(
+            r"contact|contacts|email|phone|website|social|facebook|youtube|telegram|how\s+do\s+i\s+reach|reach\s+this\s+organization|联系方式|联系信息|怎么联系|如何联系|联系这个机构|联系这个教会|邮箱|公开邮箱|电话|官网|网站|社媒|公开联系方式",
+            user_message or "",
+            re.IGNORECASE,
+        ):
+            return None
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            parsed_result = parser.parse(user_message, conversation_id=conversation_id)
+        finally:
+            if parser:
+                parser.close()
+
+        if not self._is_contact_lookup_parsed_result(parsed_result):
+            return None
+
+        organization_name = str((parsed_result or {}).get("organization_name") or "").strip()
+        if not organization_name:
+            return None
+
+        requested_contacts = self._normalize_requested_contacts(parsed_result)
+        lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+
+        db_gen = None
+        try:
+            from models.database import get_db
+            from services.contact_intelligence import build_organization_contact_payload
+
+            db_gen = get_db()
+            db = next(db_gen)
+            contact_payload = build_organization_contact_payload(
+                db=db,
+                organization_name=organization_name,
+                include_unverified=True,
+            )
+        finally:
+            if db_gen is not None:
+                db_gen.close()
+
+        filtered_payload = self._filter_contact_payload(contact_payload, requested_contacts)
+        answer = self._format_contact_lookup_answer(
+            contact_payload=filtered_payload,
+            requested_contacts=requested_contacts,
+            lang=lang,
+        )
+        organization_name_from_payload = str(((filtered_payload.get("organization") or {}).get("name")) or organization_name)
+        return {
+            "parsed_result": parsed_result,
+            "answer": answer,
+            "evidence": self._contact_evidence_from_payload(filtered_payload),
+            "organization_name": organization_name_from_payload,
+            "contact_lookup": filtered_payload,
             "data_source": "database",
             "llm_used": False,
             "route": route,
@@ -4156,6 +4419,19 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            contact_lookup_result = self._resolve_contact_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="simple",
+            )
+            if contact_lookup_result is not None:
+                result = {
+                    "answer": self._clean_output(contact_lookup_result.get("answer") or ""),
+                    "evidence": self._merge_evidence(contact_lookup_result.get("evidence") or []),
+                    "contact_lookup": contact_lookup_result.get("contact_lookup") or {},
+                }
+                span.set_output_obj(result)
+                return result
             relationship_graph_result = self._resolve_relationship_graph_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
@@ -4614,6 +4890,37 @@ class Brain:
                     Reason="product_intent_direct_answer",
                     conversation_id=conversation_id,
                     parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            contact_lookup_result = self._resolve_contact_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="stream",
+            )
+            if contact_lookup_result is not None:
+                direct_answer = True
+                parser_result = contact_lookup_result.get("parsed_result")
+                response_text = str(contact_lookup_result.get("answer") or "")
+                evidence = contact_lookup_result.get("evidence") or []
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(evidence),
+                    "contact_lookup": contact_lookup_result.get("contact_lookup") or {},
+                    "direct_answer": True,
+                    "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                }
+                span.set_output_obj({"done": True, "contact_lookup": True, "organization_name": contact_lookup_result.get("organization_name")})
+                _brain_stream_trace(
+                    "RETURN_ID=CONTACT_LOOKUP",
+                    Reason="contact_lookup_db_return",
+                    conversation_id=conversation_id,
+                    parser_result=parser_result,
+                    parser_result_response=response_text,
                     parser_result_direct_answer=True,
                     parser_result_data_found=True,
                 )
