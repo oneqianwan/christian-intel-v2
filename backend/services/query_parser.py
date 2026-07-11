@@ -24,6 +24,8 @@ class QueryParser:
     CONTACT_RESPONSE_CONTRACT = "contact_lookup"
     RELATIONSHIP_GRAPH_INTENT_NAME = "organization_relationship_graph_lookup"
     RELATIONSHIP_GRAPH_RESPONSE_CONTRACT = "relationship_graph"
+    ACTION_PLAN_INTENT_NAME = "organization_partnership_action_plan_lookup"
+    ACTION_PLAN_RESPONSE_CONTRACT = "partnership_action_plan"
     RECOMMENDATION_INTENT_NAME = "organization_partnership_recommendation_lookup"
     RECOMMENDATION_RESPONSE_CONTRACT = "partnership_recommendations"
 
@@ -150,6 +152,33 @@ class QueryParser:
         r"优先联系哪些机构",
     ]
 
+    ACTION_PLAN_KEYWORDS = [
+        r"action\s+plan",
+        r"next\s+steps",
+        r"outreach\s+plan",
+        r"partnership\s+action\s+plan",
+        r"how\s+should\s+we\s+proceed",
+        r"how\s+should\s+they\s+approach",
+        r"what\s+should\s+we\s+do\s+next",
+        r"create\s+(?:an?\s+)?plan",
+        r"execution\s+plan",
+        r"follow[\-\s]?up\s+plan",
+        r"合作行动计划",
+        r"行动计划",
+        r"推进合作",
+        r"怎么推进合作",
+        r"怎么联系下一步",
+        r"先做什么",
+        r"下一步怎么做",
+        r"下一步应该怎么做",
+        r"下一步联系谁",
+        r"外联计划",
+        r"outreach\s*计划",
+        r"合作执行步骤",
+        r"行动方案",
+        r"如何推进合作",
+    ]
+
     PROFILE_KEYWORDS = [
         r"profile",
         r"介绍",
@@ -257,6 +286,9 @@ class QueryParser:
 
         if self._is_existence_query(msg):
             return self._handle_existence_query(msg, conversation_id=conversation_id)
+
+        if self._is_action_plan_query(msg):
+            return self._handle_action_plan_query(msg, conversation_id=conversation_id)
 
         if self._is_recommendation_query(msg):
             return self._handle_recommendation_query(msg, conversation_id=conversation_id)
@@ -449,6 +481,24 @@ class QueryParser:
             return False
         return any(re.search(kw, raw, re.IGNORECASE) for kw in self.RECOMMENDATION_KEYWORDS)
 
+    def _is_action_plan_query(self, msg: str) -> bool:
+        raw = str(msg or "").strip()
+        if not raw:
+            return False
+        if self._is_score_query(raw):
+            return False
+        graph_only_keywords = [
+            r"relationship\s+graph",
+            r"relationship\s+network",
+            r"关系图谱",
+            r"关系网络",
+            r"合作网络",
+            r"关系边",
+        ]
+        if any(re.search(kw, raw, re.IGNORECASE) for kw in graph_only_keywords):
+            return False
+        return any(re.search(kw, raw, re.IGNORECASE) for kw in self.ACTION_PLAN_KEYWORDS)
+
     def _extract_requested_contacts(self, msg: str) -> List[str]:
         raw = str(msg or "")
         requested: list[str] = []
@@ -615,6 +665,123 @@ class QueryParser:
             "intent": self.RECOMMENDATION_INTENT_NAME,
             "organization_name": organization_name or "",
             "response_contract": self.RECOMMENDATION_RESPONSE_CONTRACT,
+            "requires_database_lookup": True,
+        }
+
+    def _clean_action_plan_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:give\s+me|show\s+me|create|build|draft|what\s+are|what's|how\s+should|帮我|给我|请给我|请生成|生成|做一个|制定|做个|说明)\s+",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(
+            r"(?:的)?(?:合作行动计划|行动计划|合作执行步骤|行动方案|下一步怎么做|下一步应该怎么做|下一步|外联计划|outreach\s+plan|action\s+plan|partnership\s+action\s+plan|next\s+steps|execution\s+plan|follow[\-\s]?up\s+plan)$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"\s+target[_\-\s]?org[_\-\s]?id\s*[:=]\s*[A-Za-z0-9._\-]+$", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _clean_action_plan_target_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:the\s+recommended\s+partner|recommended\s+partner|目标机构|推荐机构|合作对象)\s*",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _extract_action_plan_target_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        patterns = [
+            r"给我\s+(.+?)\s+联系\s+(.+?)\s+的(?:合作)?行动计划(?:\?|？|$)",
+            r"(.+?)\s+联系\s+(.+?)\s+的(?:合作)?行动计划(?:\?|？|$)",
+            r"create\s+(?:an?\s+)?(?:outreach\s+|partnership\s+)?action\s+plan\s+for\s+(.+?)\s+(?:to\s+approach|to\s+contact|approach)\s+(.+?)(?:\?|？|$)",
+            r"how\s+should\s+(.+?)\s+approach\s+(.+?)(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            target_candidate = self._clean_action_plan_target_candidate(match.group(2) or "")
+            if target_candidate:
+                return target_candidate
+        return None
+
+    def _extract_action_plan_target_org_id(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        match = re.search(r"target[_\-\s]?org[_\-\s]?id\s*[:=]\s*([A-Za-z0-9._\-]+)", raw, re.IGNORECASE)
+        if not match:
+            return None
+        candidate = str(match.group(1) or "").strip()
+        return candidate or None
+
+    def _extract_action_plan_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        targeted_patterns = [
+            r"给我\s+(.+?)\s+联系\s+(.+?)\s+的(?:合作)?行动计划(?:\?|？|$)",
+            r"(.+?)\s+联系\s+(.+?)\s+的(?:合作)?行动计划(?:\?|？|$)",
+            r"create\s+(?:an?\s+)?(?:outreach\s+|partnership\s+)?action\s+plan\s+for\s+(.+?)\s+(?:to\s+approach|to\s+contact|approach)\s+(.+?)(?:\?|？|$)",
+            r"how\s+should\s+(.+?)\s+approach\s+(.+?)(?:\?|？|$)",
+        ]
+        for pattern in targeted_patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_action_plan_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+
+        patterns = [
+            r"what\s+are\s+the\s+next\s+steps\s+for\s+(.+?)(?:\?|？|$)",
+            r"create\s+(?:an?\s+)?(?:outreach\s+|partnership\s+)?action\s+plan\s+for\s+(.+?)(?:\?|？|$)",
+            r"give\s+me\s+(?:an?\s+)?(?:outreach\s+|partnership\s+)?action\s+plan\s+for\s+(.+?)(?:\?|？|$)",
+            r"(.+?)\s+next\s+steps(?:\?|？|$)",
+            r"(.+?)\s+下一步应该怎么做(?:\?|？|$)",
+            r"(.+?)\s+下一步怎么做(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的(?:合作)?行动计划(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的外联计划(?:\?|？|$)",
+            r"(.+?)\s+的合作行动计划(?:\?|？|$)",
+            r"(.+?)\s+应该先联系谁，?下一步怎么做(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_action_plan_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+        return None
+
+    def _build_action_plan_lookup_intent(self, msg: str) -> Optional[Dict]:
+        if not self._is_action_plan_query(msg):
+            return None
+        return {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": self.ACTION_PLAN_INTENT_NAME,
+            "organization_name": self._extract_action_plan_org_name(msg) or "",
+            "target_organization_name": self._extract_action_plan_target_org_name(msg) or "",
+            "target_org_id": self._extract_action_plan_target_org_id(msg) or "",
+            "response_contract": self.ACTION_PLAN_RESPONSE_CONTRACT,
             "requires_database_lookup": True,
         }
 
@@ -1210,6 +1377,10 @@ class QueryParser:
     def _handle_recommendation_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         _ = conversation_id
         return self._build_recommendation_lookup_intent(msg)
+
+    def _handle_action_plan_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
+        _ = conversation_id
+        return self._build_action_plan_lookup_intent(msg)
 
     def _handle_compare_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         """处理对比查询"""

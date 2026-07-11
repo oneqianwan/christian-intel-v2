@@ -1271,6 +1271,13 @@ class Brain:
         response_contract = str(parsed_result.get("response_contract") or "").strip()
         return intent == "organization_partnership_recommendation_lookup" or response_contract == "partnership_recommendations"
 
+    def _is_action_plan_lookup_parsed_result(self, parsed_result: Optional[dict]) -> bool:
+        if not isinstance(parsed_result, dict):
+            return False
+        intent = str(parsed_result.get("intent") or "").strip()
+        response_contract = str(parsed_result.get("response_contract") or "").strip()
+        return intent == "organization_partnership_action_plan_lookup" or response_contract == "partnership_action_plan"
+
     def _normalize_requested_scores(self, parsed_result: Optional[dict]) -> list[str]:
         if not isinstance(parsed_result, dict):
             return ["people_score", "digital_score", "intel_score"]
@@ -1379,6 +1386,49 @@ class Brain:
             )
         return evidence
 
+    def _action_plan_evidence_from_payload(self, action_plan_payload: dict) -> list[dict]:
+        evidence: list[dict] = []
+        organization = action_plan_payload.get("organization") or {}
+        target_org = action_plan_payload.get("target_org") or {}
+        recommendation_snapshot = (action_plan_payload.get("evidence") or {}).get("recommendation_snapshot") or {}
+        relationship_snapshot = (action_plan_payload.get("evidence") or {}).get("relationship_snapshot") or {}
+
+        if organization or target_org:
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f"{organization.get('name') or 'organization'} -> {target_org.get('name') or 'action_plan'}",
+                        "source_name": str(target_org.get("source_name") or organization.get("source_name") or "partnership_action_planner"),
+                        "url": str(target_org.get("source_url") or organization.get("source_url") or ""),
+                        "confidence": float((action_plan_payload.get("summary") or {}).get("confidence") or 0.0),
+                        "published_at": "",
+                        "updated_at": str(organization.get("updated_at") or ""),
+                        "type": "partnership_action_plan",
+                        "snippet": ", ".join(recommendation_snapshot.get("reason_codes") or []) or ", ".join(relationship_snapshot.get("relationship_path_summary") or []),
+                    }
+                )
+            )
+
+        for step in (action_plan_payload.get("action_plan") or [])[:2]:
+            uses_contact = step.get("uses_contact") or {}
+            if str(uses_contact.get("type") or "none") == "none":
+                continue
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f"{target_org.get('name') or 'target'} {step.get('action_type') or 'step'}",
+                        "source_name": "partnership_action_planner",
+                        "url": str(uses_contact.get("source_url") or ""),
+                        "confidence": float((action_plan_payload.get("summary") or {}).get("confidence") or 0.0),
+                        "published_at": "",
+                        "updated_at": str(organization.get("updated_at") or ""),
+                        "type": "action_plan_contact",
+                        "snippet": str(uses_contact.get("value") or ""),
+                    }
+                )
+            )
+        return evidence
+
     def _empty_recommendation_payload(self, *, warning: str) -> dict:
         return {
             "organization": None,
@@ -1393,6 +1443,64 @@ class Brain:
             "recommendations": [],
             "warnings": [warning],
             "found": True,
+        }
+
+    def _empty_action_plan_payload(
+        self,
+        *,
+        warning: str,
+        found: bool = True,
+        organization: Optional[dict] = None,
+        target_org: Optional[dict] = None,
+    ) -> dict:
+        return {
+            "organization": organization,
+            "target_org": target_org,
+            "summary": {
+                "plan_available": False,
+                "step_count": 0,
+                "blocked": True,
+                "block_reasons": [warning],
+                "recommended_channel": "research_first",
+                "risk_level": "high",
+                "confidence": 0.0,
+            },
+            "action_plan": [],
+            "evidence": {
+                "score_snapshot": {
+                    "people_score": None,
+                    "digital_score": None,
+                    "intel_score": None,
+                },
+                "relationship_snapshot": {
+                    "has_relationship_path": False,
+                    "relationship_count": 0,
+                    "strongest_relationship_type": None,
+                    "relationship_path_summary": [],
+                },
+                "contact_snapshot": {
+                    "has_website": False,
+                    "has_email": False,
+                    "has_phone": False,
+                    "has_social": False,
+                    "contact_count": 0,
+                    "verified_contact_count": 0,
+                    "missing_source_count": 0,
+                },
+                "recommendation_snapshot": {
+                    "target_org_id": target_org.get("id") if isinstance(target_org, dict) else None,
+                    "target_org_name": target_org.get("name") if isinstance(target_org, dict) else None,
+                    "recommendation_score": 0,
+                    "priority": "low",
+                    "confidence": 0.0,
+                    "reason_codes": [],
+                    "risks": [],
+                    "warnings": [warning],
+                    "recommended_next_action": "research_more",
+                },
+            },
+            "warnings": [warning],
+            "found": found,
         }
 
     def _filter_contact_payload(self, contact_payload: dict, requested_contacts: list[str]) -> dict:
@@ -1771,6 +1879,151 @@ class Brain:
                     f"   - reason_codes: {', '.join(reason_codes) if reason_codes else 'none'}",
                     f"   - recommended_next_action: {item.get('recommended_next_action')}",
                     f"   - explanation: {item.get('explanation') or ''}",
+                    "",
+                ]
+            )
+
+        lines.append("warnings:")
+        if warnings:
+            for warning in warnings:
+                lines.append(f"- {warning}")
+        else:
+            lines.append("- none")
+        lines.extend(
+            [
+                "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                "llm_used=false",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _format_action_plan_lookup_answer(self, *, action_plan_payload: dict, lang: str) -> str:
+        organization = action_plan_payload.get("organization") or {}
+        target_org = action_plan_payload.get("target_org") or {}
+        summary = action_plan_payload.get("summary") or {}
+        steps = list(action_plan_payload.get("action_plan") or [])
+        warnings = list(action_plan_payload.get("warnings") or [])
+        organization_name = str(organization.get("name") or "Unknown Organization")
+        target_name = str(target_org.get("name") or "Unknown Target")
+
+        if "organization_name_missing" in warnings:
+            if lang == "zh":
+                return (
+                    "当前行动计划查询缺少明确机构名称。\n"
+                    "status=organization_name_missing\n"
+                    "response_contract=partnership_action_plan\n"
+                    "请明确说明要为哪个机构生成合作行动计划，例如：给我 Harbor Church 的合作行动计划。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The action-plan query does not include a clear organization name.\n"
+                "status=organization_name_missing\n"
+                "response_contract=partnership_action_plan\n"
+                "Please specify which organization needs an action plan, for example: Create an action plan for Harbor Church.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if "target_organization_not_found" in warnings:
+            if lang == "zh":
+                return (
+                    "数据库中没有找到目标机构。\n"
+                    "status=target_not_found\n"
+                    "response_contract=partnership_action_plan\n"
+                    "我不会编造目标机构、联系方式或合作路径。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The target organization was not found in the database.\n"
+                "status=target_not_found\n"
+                "response_contract=partnership_action_plan\n"
+                "I will not fabricate a target organization, contacts, or relationship paths.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if not bool(action_plan_payload.get("found", True)) or not organization:
+            if lang == "zh":
+                return (
+                    "数据库中没有找到该机构。\n"
+                    "status=not_found\n"
+                    "response_contract=partnership_action_plan\n"
+                    "我不会编造机构、联系方式或行动步骤。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The organization was not found in the database.\n"
+                "status=not_found\n"
+                "response_contract=partnership_action_plan\n"
+                "I will not fabricate an organization, contacts, or action steps.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if bool(summary.get("blocked")) or not steps:
+            block_reasons = list(summary.get("block_reasons") or []) or warnings or ["insufficient_evidence"]
+            if lang == "zh":
+                lines = [
+                    "当前数据库没有足够数据生成可执行行动计划。",
+                    "status=blocked",
+                    "response_contract=partnership_action_plan",
+                    f"机构名称：{organization_name}",
+                    "我不会编造联系人、关系路径或外联步骤。",
+                    "block_reasons:",
+                ]
+            else:
+                lines = [
+                    "The current database does not have enough data to produce an executable action plan.",
+                    "status=blocked",
+                    "response_contract=partnership_action_plan",
+                    f"Organization: {organization_name}",
+                    "I will not fabricate contacts, relationship paths, or outreach steps.",
+                    "block_reasons:",
+                ]
+            for item in block_reasons:
+                lines.append(f"- {item}")
+            lines.extend(
+                [
+                    "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                    "llm_used=false",
+                ]
+            )
+            return "\n".join(lines)
+
+        if lang == "zh":
+            lines = [
+                f"{organization_name} 的合作行动计划如下（数据库规则生成，不调用 LLM）：",
+                "response_contract=partnership_action_plan",
+                f"机构名称：{organization_name}",
+                f"目标机构：{target_name}",
+                f"recommended_channel: {summary.get('recommended_channel')}",
+                f"risk_level: {summary.get('risk_level')}",
+                f"confidence: {summary.get('confidence')}",
+                "",
+            ]
+        else:
+            lines = [
+                f"Partnership action plan for {organization_name} (generated from database rules, without LLM):",
+                "response_contract=partnership_action_plan",
+                f"Organization: {organization_name}",
+                f"Target organization: {target_name}",
+                f"recommended_channel: {summary.get('recommended_channel')}",
+                f"risk_level: {summary.get('risk_level')}",
+                f"confidence: {summary.get('confidence')}",
+                "",
+            ]
+
+        for step in steps[:3]:
+            lines.extend(
+                [
+                    f"{step.get('step_number')}. {step.get('title') or step.get('action_type') or 'step'}",
+                    f"   - action_type: {step.get('action_type')}",
+                    f"   - channel: {step.get('channel')}",
+                    f"   - priority: {step.get('priority')}",
+                    f"   - risk_flags: {', '.join(step.get('risk_flags') or []) or 'none'}",
                     "",
                 ]
             )
@@ -2330,6 +2583,163 @@ class Brain:
             "evidence": self._contact_evidence_from_payload(filtered_payload),
             "organization_name": organization_name_from_payload,
             "contact_lookup": filtered_payload,
+            "data_source": "database",
+            "llm_used": False,
+            "route": route,
+        }
+
+    def _resolve_action_plan_lookup_if_applicable(
+        self,
+        *,
+        user_message: str,
+        conversation_id: str,
+        route: str = "simple",
+    ) -> Optional[dict]:
+        if not re.search(
+            r"action\s+plan|next\s+steps|outreach\s+plan|partnership\s+action\s+plan|how\s+should\s+we\s+proceed|how\s+should\s+they\s+approach|what\s+should\s+we\s+do\s+next|create\s+(?:an?\s+)?plan|execution\s+plan|follow[\-\s]?up\s+plan|合作行动计划|行动计划|推进合作|怎么推进合作|怎么联系下一步|先做什么|下一步怎么做|下一步应该怎么做|下一步联系谁|外联计划|outreach\s*计划|合作执行步骤|行动方案|如何推进合作",
+            user_message or "",
+            re.IGNORECASE,
+        ):
+            return None
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            parsed_result = parser.parse(user_message, conversation_id=conversation_id)
+        finally:
+            if parser:
+                parser.close()
+
+        if not self._is_action_plan_lookup_parsed_result(parsed_result):
+            return None
+
+        organization_name = str((parsed_result or {}).get("organization_name") or "").strip()
+        target_organization_name = str((parsed_result or {}).get("target_organization_name") or "").strip()
+        target_org_id = str((parsed_result or {}).get("target_org_id") or "").strip()
+        lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+
+        if not organization_name:
+            action_plan_payload = self._empty_action_plan_payload(warning="organization_name_missing")
+            action_plan_payload["intent"] = "organization_partnership_action_plan_lookup"
+            action_plan_payload["source"] = "database"
+            action_plan_payload["generated_by"] = "brain_action_plan_lookup"
+            action_plan_payload["no_llm"] = True
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_action_plan_lookup_answer(action_plan_payload=action_plan_payload, lang=lang),
+                "evidence": [],
+                "organization_name": "",
+                "partnership_action_plan": action_plan_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        source_org = self._find_organization_for_score_lookup(organization_name)
+        if source_org is None:
+            action_plan_payload = self._empty_action_plan_payload(warning="organization_not_found", found=False)
+            action_plan_payload["intent"] = "organization_partnership_action_plan_lookup"
+            action_plan_payload["source"] = "database"
+            action_plan_payload["generated_by"] = "brain_action_plan_lookup"
+            action_plan_payload["no_llm"] = True
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_action_plan_lookup_answer(action_plan_payload=action_plan_payload, lang=lang),
+                "evidence": [],
+                "organization_name": organization_name,
+                "partnership_action_plan": action_plan_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        resolved_target_org = None
+        if target_org_id:
+            db_gen = None
+            try:
+                from models.database import OrganizationProfile, get_db
+
+                db_gen = get_db()
+                db = next(db_gen)
+                resolved_target_org = db.query(OrganizationProfile).filter(OrganizationProfile.id == target_org_id).first()
+                if resolved_target_org is not None:
+                    db.expunge(resolved_target_org)
+            finally:
+                if db_gen is not None:
+                    db_gen.close()
+        elif target_organization_name:
+            resolved_target_org = self._find_organization_for_score_lookup(target_organization_name)
+
+        if (target_org_id or target_organization_name) and resolved_target_org is None:
+            action_plan_payload = self._empty_action_plan_payload(
+                warning="target_organization_not_found",
+                organization={
+                    "id": getattr(source_org, "id", None),
+                    "name": getattr(source_org, "name", organization_name),
+                    "source_url": getattr(source_org, "source_url", None),
+                    "source_name": getattr(source_org, "source_name", None),
+                    "updated_at": getattr(source_org, "updated_at", None),
+                },
+            )
+            action_plan_payload["intent"] = "organization_partnership_action_plan_lookup"
+            action_plan_payload["source"] = "database"
+            action_plan_payload["generated_by"] = "brain_action_plan_lookup"
+            action_plan_payload["no_llm"] = True
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_action_plan_lookup_answer(action_plan_payload=action_plan_payload, lang=lang),
+                "evidence": [],
+                "organization_name": getattr(source_org, "name", organization_name),
+                "partnership_action_plan": action_plan_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        db_gen = None
+        try:
+            from models.database import get_db
+            from services.partnership_action_planner import build_partnership_action_plan
+
+            db_gen = get_db()
+            db = next(db_gen)
+            action_plan_payload = build_partnership_action_plan(
+                db=db,
+                org_id=str(getattr(source_org, "id")),
+                target_org_id=str(getattr(resolved_target_org, "id")) if resolved_target_org is not None else None,
+            )
+        except LookupError as exc:
+            message = str(exc)
+            if message == "target_org_not_found":
+                action_plan_payload = self._empty_action_plan_payload(
+                    warning="target_organization_not_found",
+                    organization={
+                        "id": getattr(source_org, "id", None),
+                        "name": getattr(source_org, "name", organization_name),
+                        "source_url": getattr(source_org, "source_url", None),
+                        "source_name": getattr(source_org, "source_name", None),
+                        "updated_at": getattr(source_org, "updated_at", None),
+                    },
+                )
+            else:
+                action_plan_payload = self._empty_action_plan_payload(warning="organization_not_found", found=False)
+        finally:
+            if db_gen is not None:
+                db_gen.close()
+
+        action_plan_payload["intent"] = "organization_partnership_action_plan_lookup"
+        action_plan_payload["source"] = "database"
+        action_plan_payload["generated_by"] = "brain_action_plan_lookup"
+        action_plan_payload["no_llm"] = True
+        organization_name_from_payload = str(((action_plan_payload.get("organization") or {}).get("name")) or organization_name)
+        return {
+            "parsed_result": parsed_result,
+            "answer": self._format_action_plan_lookup_answer(action_plan_payload=action_plan_payload, lang=lang),
+            "evidence": self._action_plan_evidence_from_payload(action_plan_payload),
+            "organization_name": organization_name_from_payload,
+            "partnership_action_plan": action_plan_payload,
             "data_source": "database",
             "llm_used": False,
             "route": route,
@@ -4655,6 +5065,19 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            action_plan_lookup_result = self._resolve_action_plan_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="simple",
+            )
+            if action_plan_lookup_result is not None:
+                result = {
+                    "answer": self._clean_output(action_plan_lookup_result.get("answer") or ""),
+                    "evidence": self._merge_evidence(action_plan_lookup_result.get("evidence") or []),
+                    "partnership_action_plan": action_plan_lookup_result.get("partnership_action_plan") or {},
+                }
+                span.set_output_obj(result)
+                return result
             recommendation_lookup_result = self._resolve_recommendation_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
@@ -5139,6 +5562,43 @@ class Brain:
                     Reason="product_intent_direct_answer",
                     conversation_id=conversation_id,
                     parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            action_plan_lookup_result = self._resolve_action_plan_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="stream",
+            )
+            if action_plan_lookup_result is not None:
+                direct_answer = True
+                parser_result = action_plan_lookup_result.get("parsed_result")
+                response_text = str(action_plan_lookup_result.get("answer") or "")
+                evidence = action_plan_lookup_result.get("evidence") or []
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(evidence),
+                    "partnership_action_plan": action_plan_lookup_result.get("partnership_action_plan") or {},
+                    "direct_answer": True,
+                    "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                }
+                span.set_output_obj(
+                    {
+                        "done": True,
+                        "partnership_action_plan": True,
+                        "organization_name": action_plan_lookup_result.get("organization_name"),
+                    }
+                )
+                _brain_stream_trace(
+                    "RETURN_ID=ACTION_PLAN_LOOKUP",
+                    Reason="action_plan_lookup_db_return",
+                    conversation_id=conversation_id,
+                    parser_result=parser_result,
+                    parser_result_response=response_text,
                     parser_result_direct_answer=True,
                     parser_result_data_found=True,
                 )
