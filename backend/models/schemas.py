@@ -413,3 +413,124 @@ class PartnershipActionPlanPayload(BaseModel):
     action_plan: List[PartnershipActionPlanStep]
     evidence: PartnershipActionPlanEvidence
     warnings: List[str]
+
+
+EvidenceBriefDecision = Literal["proceed", "research_more", "manual_review", "do_not_contact"]
+EvidenceBriefPriority = Literal["high", "medium", "low"]
+EvidenceBriefRiskSeverity = Literal["low", "medium", "high"]
+
+
+class PartnershipEvidenceBriefOrganization(BaseModel):
+    id: str
+    name: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+
+class PartnershipEvidenceBriefTargetOrg(BaseModel):
+    id: str
+    name: str
+    source_url: Optional[str] = None
+    source_name: Optional[str] = None
+
+
+class PartnershipEvidenceBriefSummary(BaseModel):
+    brief_available: bool
+    decision: EvidenceBriefDecision
+    priority: EvidenceBriefPriority
+    confidence: float
+    risk_level: EvidenceBriefRiskSeverity
+    evidence_count: int
+    missing_evidence_count: int
+    recommended_channel: Optional[ActionPlanRecommendedChannel] = None
+
+
+class PartnershipEvidenceDecisionRationale(BaseModel):
+    headline: str
+    reason_codes: List[str]
+    supporting_points: List[str]
+    limiting_factors: List[str]
+
+
+class PartnershipEvidenceScoreSection(BaseModel):
+    people_score: Optional[int] = None
+    digital_score: Optional[int] = None
+    intel_score: Optional[int] = None
+    strengths: List[str]
+    weaknesses: List[str]
+    warnings: List[str]
+
+
+class PartnershipEvidenceRelationshipSection(BaseModel):
+    has_relationship_path: bool = False
+    relationship_count: int = 0
+    strongest_relationship_type: Optional[str] = None
+    relationship_path_summary: List[str]
+    warnings: List[str]
+
+
+class PartnershipEvidenceContactSection(BaseModel):
+    has_website: bool = False
+    has_email: bool = False
+    has_phone: bool = False
+    has_social: bool = False
+    contact_count: int = 0
+    verified_contact_count: int = 0
+    missing_source_count: int = 0
+    recommended_contact: Optional[PartnershipActionPlanUsesContact] = None
+    warnings: List[str]
+
+
+class PartnershipEvidenceRecommendationSection(BaseModel):
+    recommendation_score: Optional[int] = None
+    priority: Optional[RecommendationPriority] = None
+    confidence: float = 0.0
+    reason_codes: List[str]
+    risks: List[str]
+    warnings: List[str]
+
+
+class PartnershipEvidenceActionPlanSection(BaseModel):
+    plan_available: bool = False
+    blocked: bool = False
+    step_count: int = 0
+    recommended_channel: Optional[ActionPlanRecommendedChannel] = None
+    risk_level: Optional[ActionPlanRiskLevel] = None
+    first_steps: List[str]
+    warnings: List[str]
+
+
+class PartnershipEvidenceSections(BaseModel):
+    score_evidence: PartnershipEvidenceScoreSection
+    relationship_evidence: PartnershipEvidenceRelationshipSection
+    contact_evidence: PartnershipEvidenceContactSection
+    recommendation_evidence: PartnershipEvidenceRecommendationSection
+    action_plan_evidence: PartnershipEvidenceActionPlanSection
+
+
+class PartnershipEvidenceRiskItem(BaseModel):
+    risk_code: str
+    severity: EvidenceBriefRiskSeverity
+    description: str
+    mitigation: str
+
+
+class PartnershipEvidenceAudit(BaseModel):
+    generated_by: str
+    no_llm: bool = True
+    source_modules: List[str]
+    missing_modules: List[str]
+
+
+class PartnershipEvidenceBriefPayload(BaseModel):
+    organization: PartnershipEvidenceBriefOrganization
+    target_org: Optional[PartnershipEvidenceBriefTargetOrg] = None
+    summary: PartnershipEvidenceBriefSummary
+    decision_rationale: PartnershipEvidenceDecisionRationale
+    evidence_sections: PartnershipEvidenceSections
+    risk_register: List[PartnershipEvidenceRiskItem]
+    recommended_next_actions: List[str]
+    do_not_proceed_if: List[str]
+    audit: PartnershipEvidenceAudit
+    warnings: List[str]
