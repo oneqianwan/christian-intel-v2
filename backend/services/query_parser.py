@@ -24,10 +24,12 @@ class QueryParser:
     CONTACT_RESPONSE_CONTRACT = "contact_lookup"
     RELATIONSHIP_GRAPH_INTENT_NAME = "organization_relationship_graph_lookup"
     RELATIONSHIP_GRAPH_RESPONSE_CONTRACT = "relationship_graph"
-    ACTION_PLAN_INTENT_NAME = "organization_partnership_action_plan_lookup"
-    ACTION_PLAN_RESPONSE_CONTRACT = "partnership_action_plan"
     RECOMMENDATION_INTENT_NAME = "organization_partnership_recommendation_lookup"
     RECOMMENDATION_RESPONSE_CONTRACT = "partnership_recommendations"
+    ACTION_PLAN_INTENT_NAME = "organization_partnership_action_plan_lookup"
+    ACTION_PLAN_RESPONSE_CONTRACT = "partnership_action_plan"
+    EVIDENCE_BRIEF_INTENT_NAME = "organization_partnership_evidence_brief_lookup"
+    EVIDENCE_BRIEF_RESPONSE_CONTRACT = "partnership_evidence_brief"
 
     """规则解析器：匹配常见查询模式，直接返回数据库结果"""
 
@@ -179,6 +181,34 @@ class QueryParser:
         r"如何推进合作",
     ]
 
+    EVIDENCE_BRIEF_KEYWORDS = [
+        r"evidence\s+brief",
+        r"partnership\s+evidence\s+brief",
+        r"decision\s+brief",
+        r"decision\s+rationale",
+        r"why\s+recommend",
+        r"why\s+should\s+we\s+contact",
+        r"why\s+should\s+.+?\s+contact",
+        r"evidence\s+behind\s+the\s+recommendation",
+        r"recommendation\s+evidence",
+        r"brief\s+me\s+on\s+this\s+partner",
+        r"partnership\s+brief",
+        r"risk\s+evidence",
+        r"why\s+should\s+.+?\s+contact\s+this\s+partner",
+        r"证据简报",
+        r"合作证据简报",
+        r"决策简报",
+        r"决策依据",
+        r"为什么推荐",
+        r"推荐依据是什么",
+        r"证据是什么",
+        r"风险依据",
+        r"给我证据报告",
+        r"给我合作分析简报",
+        r"为什么应该联系",
+        r"为什么不应该联系",
+    ]
+
     PROFILE_KEYWORDS = [
         r"profile",
         r"介绍",
@@ -286,6 +316,9 @@ class QueryParser:
 
         if self._is_existence_query(msg):
             return self._handle_existence_query(msg, conversation_id=conversation_id)
+
+        if self._is_evidence_brief_query(msg):
+            return self._handle_evidence_brief_query(msg, conversation_id=conversation_id)
 
         if self._is_action_plan_query(msg):
             return self._handle_action_plan_query(msg, conversation_id=conversation_id)
@@ -498,6 +531,46 @@ class QueryParser:
         if any(re.search(kw, raw, re.IGNORECASE) for kw in graph_only_keywords):
             return False
         return any(re.search(kw, raw, re.IGNORECASE) for kw in self.ACTION_PLAN_KEYWORDS)
+
+    def _is_evidence_brief_query(self, msg: str) -> bool:
+        raw = str(msg or "").strip()
+        if not raw:
+            return False
+        if self._is_score_query(raw):
+            return False
+        contact_only_keywords = [
+            r"how\s+can\s+i\s+contact",
+            r"how\s+do\s+i\s+reach",
+            r"contact\s+information",
+            r"public\s+contact",
+            r"联系方式",
+            r"联系信息",
+            r"怎么联系",
+            r"如何联系",
+            r"邮箱",
+            r"电话",
+            r"官网",
+            r"网站",
+            r"社媒",
+            r"社交媒体",
+        ]
+        if any(re.search(kw, raw, re.IGNORECASE) for kw in contact_only_keywords):
+            return False
+        graph_only_keywords = [
+            r"relationship\s+graph",
+            r"relationship\s+network",
+            r"关系图谱",
+            r"关系网络",
+            r"合作网络",
+            r"关系边",
+        ]
+        if any(re.search(kw, raw, re.IGNORECASE) for kw in graph_only_keywords):
+            return False
+        if self._is_recommendation_query(raw):
+            return False
+        if self._is_action_plan_query(raw):
+            return False
+        return any(re.search(kw, raw, re.IGNORECASE) for kw in self.EVIDENCE_BRIEF_KEYWORDS)
 
     def _extract_requested_contacts(self, msg: str) -> List[str]:
         raw = str(msg or "")
@@ -782,6 +855,125 @@ class QueryParser:
             "target_organization_name": self._extract_action_plan_target_org_name(msg) or "",
             "target_org_id": self._extract_action_plan_target_org_id(msg) or "",
             "response_contract": self.ACTION_PLAN_RESPONSE_CONTRACT,
+            "requires_database_lookup": True,
+        }
+
+    def _clean_evidence_brief_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:give\s+me|show\s+me|brief\s+me\s+on|what\s+is|what's|why\s+should|why\s+do|explain|帮我|给我|请给我|请生成|生成|说明|告诉我)\s+",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(
+            r"(?:的)?(?:合作证据简报|证据简报|决策简报|合作分析简报|证据报告|决策依据|推荐依据是什么|为什么推荐|为什么应该联系|为什么不应该联系|evidence\s+brief|partnership\s+evidence\s+brief|decision\s+brief|decision\s+rationale|recommendation\s+evidence|partnership\s+brief)$",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"\s+target[_\-\s]?org[_\-\s]?id\s*[:=]\s*[A-Za-z0-9._\-]+$", "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _clean_evidence_brief_target_candidate(self, candidate: str) -> Optional[str]:
+        clean = (candidate or "").strip()
+        if not clean:
+            return None
+        clean = re.sub(
+            r"^(?:the\s+recommended\s+partner|recommended\s+partner|目标机构|推荐机构|合作对象)\s*",
+            "",
+            clean,
+            flags=re.IGNORECASE,
+        )
+        clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
+        clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
+        if len(clean) <= 1:
+            return None
+        return clean
+
+    def _extract_evidence_brief_target_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        patterns = [
+            r"给我\s+(.+?)\s+联系\s+(.+?)\s+的(?:合作)?证据简报(?:\?|？|$)",
+            r"(.+?)\s+联系\s+(.+?)\s+的(?:合作)?证据简报(?:\?|？|$)",
+            r"give\s+me\s+(?:an?\s+)?(?:partnership\s+)?evidence\s+brief\s+for\s+(.+?)\s+(?:to\s+contact|contacting)\s+(.+?)(?:\?|？|$)",
+            r"why\s+should\s+(.+?)\s+contact\s+(.+?)(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            target_candidate = self._clean_evidence_brief_target_candidate(match.group(2) or "")
+            if target_candidate:
+                return target_candidate
+        return None
+
+    def _extract_evidence_brief_target_org_id(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        match = re.search(r"target[_\-\s]?org[_\-\s]?id\s*[:=]\s*([A-Za-z0-9._\-]+)", raw, re.IGNORECASE)
+        if not match:
+            return None
+        candidate = str(match.group(1) or "").strip()
+        return candidate or None
+
+    def _extract_evidence_brief_org_name(self, msg: str) -> Optional[str]:
+        raw = str(msg or "").strip()
+        targeted_patterns = [
+            r"给我\s+(.+?)\s+联系\s+(.+?)\s+的(?:合作)?证据简报(?:\?|？|$)",
+            r"(.+?)\s+联系\s+(.+?)\s+的(?:合作)?证据简报(?:\?|？|$)",
+            r"give\s+me\s+(?:an?\s+)?(?:partnership\s+)?evidence\s+brief\s+for\s+(.+?)\s+(?:to\s+contact|contacting)\s+(.+?)(?:\?|？|$)",
+            r"why\s+should\s+(.+?)\s+contact\s+(.+?)(?:\?|？|$)",
+        ]
+        for pattern in targeted_patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_evidence_brief_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+
+        patterns = [
+            r"give\s+me\s+(?:an?\s+)?(?:partnership\s+)?evidence\s+brief\s+for\s+(.+?)(?:\?|？|$)",
+            r"show\s+me\s+the\s+evidence\s+behind\s+the\s+recommendation\s+for\s+(.+?)(?:\?|？|$)",
+            r"what\s+is\s+the\s+decision\s+rationale\s+for\s+(.+?)(?:\?|？|$)",
+            r"why\s+should\s+(.+?)\s+contact\s+this\s+partner(?:\?|？|$)",
+            r"brief\s+me\s+on\s+(.+?)(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的(?:合作)?证据简报(?:\?|？|$)",
+            r"给我\s+(.+?)\s+的决策简报(?:\?|？|$)",
+            r"(.+?)\s+的合作证据简报(?:\?|？|$)",
+            r"(.+?)\s+的决策依据是什么(?:\?|？|$)",
+            r"为什么推荐\s+(.+?)(?:\?|？|$)",
+            r"为什么应该联系\s+(.+?)(?:\?|？|$)",
+            r"为什么不应该联系\s+(.+?)(?:\?|？|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, raw, re.IGNORECASE)
+            if not match:
+                continue
+            candidate = self._clean_evidence_brief_org_candidate(match.group(1) or "")
+            if candidate:
+                return candidate
+        return None
+
+    def _build_evidence_brief_lookup_intent(self, msg: str) -> Optional[Dict]:
+        if not self._is_evidence_brief_query(msg):
+            return None
+        return {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": self.EVIDENCE_BRIEF_INTENT_NAME,
+            "organization_name": self._extract_evidence_brief_org_name(msg) or "",
+            "target_organization_name": self._extract_evidence_brief_target_org_name(msg) or "",
+            "target_org_id": self._extract_evidence_brief_target_org_id(msg) or "",
+            "response_contract": self.EVIDENCE_BRIEF_RESPONSE_CONTRACT,
             "requires_database_lookup": True,
         }
 
@@ -1381,6 +1573,10 @@ class QueryParser:
     def _handle_action_plan_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         _ = conversation_id
         return self._build_action_plan_lookup_intent(msg)
+
+    def _handle_evidence_brief_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
+        _ = conversation_id
+        return self._build_evidence_brief_lookup_intent(msg)
 
     def _handle_compare_query(self, msg: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         """处理对比查询"""

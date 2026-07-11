@@ -1278,6 +1278,13 @@ class Brain:
         response_contract = str(parsed_result.get("response_contract") or "").strip()
         return intent == "organization_partnership_action_plan_lookup" or response_contract == "partnership_action_plan"
 
+    def _is_evidence_brief_lookup_parsed_result(self, parsed_result: Optional[dict]) -> bool:
+        if not isinstance(parsed_result, dict):
+            return False
+        intent = str(parsed_result.get("intent") or "").strip()
+        response_contract = str(parsed_result.get("response_contract") or "").strip()
+        return intent == "organization_partnership_evidence_brief_lookup" or response_contract == "partnership_evidence_brief"
+
     def _normalize_requested_scores(self, parsed_result: Optional[dict]) -> list[str]:
         if not isinstance(parsed_result, dict):
             return ["people_score", "digital_score", "intel_score"]
@@ -1429,6 +1436,47 @@ class Brain:
             )
         return evidence
 
+    def _evidence_brief_evidence_from_payload(self, evidence_brief_payload: dict) -> list[dict]:
+        evidence: list[dict] = []
+        organization = evidence_brief_payload.get("organization") or {}
+        target_org = evidence_brief_payload.get("target_org") or {}
+        summary = evidence_brief_payload.get("summary") or {}
+        rationale = evidence_brief_payload.get("decision_rationale") or {}
+        risk_register = list(evidence_brief_payload.get("risk_register") or [])
+
+        if organization or target_org:
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f"{organization.get('name') or 'organization'} -> {target_org.get('name') or 'evidence_brief'}",
+                        "source_name": str(target_org.get("source_name") or organization.get("source_name") or "partnership_evidence_brief"),
+                        "url": str(target_org.get("source_url") or organization.get("source_url") or ""),
+                        "confidence": float(summary.get("confidence") or 0.0),
+                        "published_at": "",
+                        "updated_at": str(organization.get("updated_at") or ""),
+                        "type": "partnership_evidence_brief",
+                        "snippet": str(rationale.get("headline") or ""),
+                    }
+                )
+            )
+
+        if risk_register:
+            evidence.append(
+                self._normalize_evidence_item(
+                    {
+                        "title": f"{target_org.get('name') or organization.get('name') or 'organization'} risk register",
+                        "source_name": "partnership_evidence_brief",
+                        "url": str(target_org.get("source_url") or organization.get("source_url") or ""),
+                        "confidence": float(summary.get("confidence") or 0.0),
+                        "published_at": "",
+                        "updated_at": str(organization.get("updated_at") or ""),
+                        "type": "partnership_evidence_risk",
+                        "snippet": ", ".join(item.get("risk_code") or "" for item in risk_register[:3]),
+                    }
+                )
+            )
+        return evidence
+
     def _empty_recommendation_payload(self, *, warning: str) -> dict:
         return {
             "organization": None,
@@ -1498,6 +1546,103 @@ class Brain:
                     "warnings": [warning],
                     "recommended_next_action": "research_more",
                 },
+            },
+            "warnings": [warning],
+            "found": found,
+        }
+
+    def _empty_evidence_brief_payload(
+        self,
+        *,
+        warning: str,
+        found: bool = True,
+        organization: Optional[dict] = None,
+        target_org: Optional[dict] = None,
+    ) -> dict:
+        severity = "high" if warning in {"organization_not_found", "target_organization_not_found", "no_recommendation_candidates_found", "insufficient_evidence"} else "medium"
+        return {
+            "organization": organization,
+            "target_org": target_org,
+            "summary": {
+                "brief_available": False,
+                "decision": "research_more",
+                "priority": "low",
+                "confidence": 0.0,
+                "risk_level": "high",
+                "evidence_count": 0,
+                "missing_evidence_count": 1,
+                "recommended_channel": "research_first",
+            },
+            "decision_rationale": {
+                "headline": "",
+                "reason_codes": [],
+                "supporting_points": [],
+                "limiting_factors": [warning],
+            },
+            "evidence_sections": {
+                "score_evidence": {
+                    "people_score": None,
+                    "digital_score": None,
+                    "intel_score": None,
+                    "strengths": [],
+                    "weaknesses": [],
+                    "warnings": [],
+                },
+                "relationship_evidence": {
+                    "has_relationship_path": False,
+                    "relationship_count": 0,
+                    "strongest_relationship_type": None,
+                    "relationship_path_summary": [],
+                    "warnings": [],
+                },
+                "contact_evidence": {
+                    "has_website": False,
+                    "has_email": False,
+                    "has_phone": False,
+                    "has_social": False,
+                    "contact_count": 0,
+                    "verified_contact_count": 0,
+                    "missing_source_count": 0,
+                    "recommended_contact": None,
+                    "warnings": [],
+                },
+                "recommendation_evidence": {
+                    "recommendation_score": None,
+                    "priority": None,
+                    "confidence": 0.0,
+                    "reason_codes": [],
+                    "risks": [],
+                    "warnings": [warning],
+                },
+                "action_plan_evidence": {
+                    "plan_available": False,
+                    "blocked": True,
+                    "step_count": 0,
+                    "recommended_channel": "research_first",
+                    "risk_level": "high",
+                    "first_steps": [],
+                    "warnings": [warning],
+                },
+            },
+            "risk_register": [
+                {
+                    "risk_code": warning,
+                    "severity": severity,
+                    "description": warning.replace("_", " "),
+                    "mitigation": "Review the available database evidence before proceeding.",
+                }
+            ],
+            "recommended_next_actions": ["research_more"],
+            "do_not_proceed_if": [
+                "target organization identity is unclear",
+                "no public contact channel exists",
+                "evidence is insufficient",
+            ],
+            "audit": {
+                "generated_by": "rule_based_evidence_brief",
+                "no_llm": True,
+                "source_modules": [],
+                "missing_modules": ["partnership_evidence_brief"],
             },
             "warnings": [warning],
             "found": found,
@@ -1889,6 +2034,146 @@ class Brain:
                 lines.append(f"- {warning}")
         else:
             lines.append("- none")
+        lines.extend(
+            [
+                "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                "llm_used=false",
+            ]
+        )
+        return "\n".join(lines).strip()
+
+    def _format_evidence_brief_lookup_answer(self, *, evidence_brief_payload: dict, lang: str) -> str:
+        organization = evidence_brief_payload.get("organization") or {}
+        target_org = evidence_brief_payload.get("target_org") or {}
+        summary = evidence_brief_payload.get("summary") or {}
+        rationale = evidence_brief_payload.get("decision_rationale") or {}
+        warnings = list(evidence_brief_payload.get("warnings") or [])
+        risks = list(evidence_brief_payload.get("risk_register") or [])
+        organization_name = str(organization.get("name") or "Unknown Organization")
+        target_name = str(target_org.get("name") or "Unknown Target")
+
+        if "organization_name_missing" in warnings:
+            if lang == "zh":
+                return (
+                    "当前证据简报查询缺少明确机构名称。\n"
+                    "status=organization_name_missing\n"
+                    "response_contract=partnership_evidence_brief\n"
+                    "请明确说明要为哪个机构生成合作证据简报，例如：给我 Harbor Church 的合作证据简报。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The evidence-brief query does not include a clear organization name.\n"
+                "status=organization_name_missing\n"
+                "response_contract=partnership_evidence_brief\n"
+                "Please specify which organization needs a partnership evidence brief, for example: Give me an evidence brief for Harbor Church.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if "target_organization_not_found" in warnings:
+            if lang == "zh":
+                return (
+                    "数据库中没有找到目标机构。\n"
+                    "status=target_not_found\n"
+                    "response_contract=partnership_evidence_brief\n"
+                    "我不会编造目标机构、联系方式、关系路径或推荐理由。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The target organization was not found in the database.\n"
+                "status=target_not_found\n"
+                "response_contract=partnership_evidence_brief\n"
+                "I will not fabricate a target organization, contacts, relationship paths, or recommendation reasons.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if not bool(evidence_brief_payload.get("found", True)) or not organization:
+            if lang == "zh":
+                return (
+                    "数据库中没有找到该机构。\n"
+                    "status=not_found\n"
+                    "response_contract=partnership_evidence_brief\n"
+                    "我不会编造机构、联系方式、关系路径或决策依据。\n"
+                    "数据来源：本地 intelligence database。\n"
+                    "llm_used=false"
+                )
+            return (
+                "The organization was not found in the database.\n"
+                "status=not_found\n"
+                "response_contract=partnership_evidence_brief\n"
+                "I will not fabricate an organization, contacts, relationship paths, or decision rationale.\n"
+                "Data source: local intelligence database.\n"
+                "llm_used=false"
+            )
+
+        if not bool(summary.get("brief_available")):
+            if lang == "zh":
+                lines = [
+                    "当前数据库没有足够证据生成合作证据简报。",
+                    "status=brief_unavailable",
+                    "response_contract=partnership_evidence_brief",
+                    f"机构名称：{organization_name}",
+                    "我不会编造推荐理由、联系方式或关系路径。",
+                    "warnings:",
+                ]
+            else:
+                lines = [
+                    "The current database does not have enough evidence to generate a partnership evidence brief.",
+                    "status=brief_unavailable",
+                    "response_contract=partnership_evidence_brief",
+                    f"Organization: {organization_name}",
+                    "I will not fabricate recommendation reasons, contacts, or relationship paths.",
+                    "warnings:",
+                ]
+            for warning in warnings or ["insufficient_evidence"]:
+                lines.append(f"- {warning}")
+            lines.extend(
+                [
+                    "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
+                    "llm_used=false",
+                ]
+            )
+            return "\n".join(lines)
+
+        if lang == "zh":
+            lines = [
+                f"{organization_name} 的合作证据简报如下（数据库规则生成，不调用 LLM）：",
+                "response_contract=partnership_evidence_brief",
+                f"机构名称：{organization_name}",
+                f"目标机构：{target_name}",
+                f"decision: {summary.get('decision')}",
+                f"priority: {summary.get('priority')}",
+                f"confidence: {summary.get('confidence')}",
+                f"risk_level: {summary.get('risk_level')}",
+                f"headline: {rationale.get('headline') or ''}",
+                "supporting_points:",
+            ]
+        else:
+            lines = [
+                f"Partnership evidence brief for {organization_name} (generated from database rules, without LLM):",
+                "response_contract=partnership_evidence_brief",
+                f"Organization: {organization_name}",
+                f"Target organization: {target_name}",
+                f"decision: {summary.get('decision')}",
+                f"priority: {summary.get('priority')}",
+                f"confidence: {summary.get('confidence')}",
+                f"risk_level: {summary.get('risk_level')}",
+                f"headline: {rationale.get('headline') or ''}",
+                "supporting_points:",
+            ]
+
+        supporting_points = list(rationale.get("supporting_points") or [])[:3]
+        for point in supporting_points or ["none"]:
+            lines.append(f"- {point}")
+
+        lines.append("risks:")
+        risk_items = [item.get("risk_code") or "" for item in risks[:3]]
+        for item in risk_items or ["none"]:
+            lines.append(f"- {item}")
+
         lines.extend(
             [
                 "数据来源：本地 intelligence database。" if lang == "zh" else "Data source: local intelligence database.",
@@ -2583,6 +2868,163 @@ class Brain:
             "evidence": self._contact_evidence_from_payload(filtered_payload),
             "organization_name": organization_name_from_payload,
             "contact_lookup": filtered_payload,
+            "data_source": "database",
+            "llm_used": False,
+            "route": route,
+        }
+
+    def _resolve_evidence_brief_lookup_if_applicable(
+        self,
+        *,
+        user_message: str,
+        conversation_id: str,
+        route: str = "simple",
+    ) -> Optional[dict]:
+        if not re.search(
+            r"evidence\s+brief|partnership\s+evidence\s+brief|decision\s+brief|decision\s+rationale|why\s+recommend|why\s+should\s+we\s+contact|why\s+should\s+.+?\s+contact|evidence\s+behind\s+the\s+recommendation|recommendation\s+evidence|brief\s+me\s+on\s+this\s+partner|partnership\s+brief|risk\s+evidence|证据简报|合作证据简报|决策简报|决策依据|为什么推荐|推荐依据是什么|证据是什么|风险依据|给我证据报告|给我合作分析简报|为什么应该联系|为什么不应该联系",
+            user_message or "",
+            re.IGNORECASE,
+        ):
+            return None
+
+        parser = None
+        try:
+            from .query_parser import QueryParser
+
+            parser = QueryParser()
+            parsed_result = parser.parse(user_message, conversation_id=conversation_id)
+        finally:
+            if parser:
+                parser.close()
+
+        if not self._is_evidence_brief_lookup_parsed_result(parsed_result):
+            return None
+
+        organization_name = str((parsed_result or {}).get("organization_name") or "").strip()
+        target_organization_name = str((parsed_result or {}).get("target_organization_name") or "").strip()
+        target_org_id = str((parsed_result or {}).get("target_org_id") or "").strip()
+        lang = "zh" if re.search(r"[\u4e00-\u9fff]", user_message or "") else "en"
+
+        if not organization_name:
+            evidence_brief_payload = self._empty_evidence_brief_payload(warning="organization_name_missing")
+            evidence_brief_payload["intent"] = "organization_partnership_evidence_brief_lookup"
+            evidence_brief_payload["source"] = "database"
+            evidence_brief_payload["generated_by"] = "brain_evidence_brief_lookup"
+            evidence_brief_payload["no_llm"] = True
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_evidence_brief_lookup_answer(evidence_brief_payload=evidence_brief_payload, lang=lang),
+                "evidence": [],
+                "organization_name": "",
+                "partnership_evidence_brief": evidence_brief_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        source_org = self._find_organization_for_score_lookup(organization_name)
+        if source_org is None:
+            evidence_brief_payload = self._empty_evidence_brief_payload(warning="organization_not_found", found=False)
+            evidence_brief_payload["intent"] = "organization_partnership_evidence_brief_lookup"
+            evidence_brief_payload["source"] = "database"
+            evidence_brief_payload["generated_by"] = "brain_evidence_brief_lookup"
+            evidence_brief_payload["no_llm"] = True
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_evidence_brief_lookup_answer(evidence_brief_payload=evidence_brief_payload, lang=lang),
+                "evidence": [],
+                "organization_name": organization_name,
+                "partnership_evidence_brief": evidence_brief_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        resolved_target_org = None
+        if target_org_id:
+            db_gen = None
+            try:
+                from models.database import OrganizationProfile, get_db
+
+                db_gen = get_db()
+                db = next(db_gen)
+                resolved_target_org = db.query(OrganizationProfile).filter(OrganizationProfile.id == target_org_id).first()
+                if resolved_target_org is not None:
+                    db.expunge(resolved_target_org)
+            finally:
+                if db_gen is not None:
+                    db_gen.close()
+        elif target_organization_name:
+            resolved_target_org = self._find_organization_for_score_lookup(target_organization_name)
+
+        if (target_org_id or target_organization_name) and resolved_target_org is None:
+            evidence_brief_payload = self._empty_evidence_brief_payload(
+                warning="target_organization_not_found",
+                organization={
+                    "id": getattr(source_org, "id", None),
+                    "name": getattr(source_org, "name", organization_name),
+                    "source_url": getattr(source_org, "source_url", None),
+                    "source_name": getattr(source_org, "source_name", None),
+                    "updated_at": getattr(source_org, "updated_at", None),
+                },
+            )
+            evidence_brief_payload["intent"] = "organization_partnership_evidence_brief_lookup"
+            evidence_brief_payload["source"] = "database"
+            evidence_brief_payload["generated_by"] = "brain_evidence_brief_lookup"
+            evidence_brief_payload["no_llm"] = True
+            return {
+                "parsed_result": parsed_result,
+                "answer": self._format_evidence_brief_lookup_answer(evidence_brief_payload=evidence_brief_payload, lang=lang),
+                "evidence": [],
+                "organization_name": getattr(source_org, "name", organization_name),
+                "partnership_evidence_brief": evidence_brief_payload,
+                "data_source": "database",
+                "llm_used": False,
+                "route": route,
+            }
+
+        db_gen = None
+        try:
+            from models.database import get_db
+            from services.partnership_evidence_brief import build_partnership_evidence_brief
+
+            db_gen = get_db()
+            db = next(db_gen)
+            evidence_brief_payload = build_partnership_evidence_brief(
+                db=db,
+                org_id=str(getattr(source_org, "id")),
+                target_org_id=str(getattr(resolved_target_org, "id")) if resolved_target_org is not None else None,
+            )
+        except LookupError as exc:
+            message = str(exc)
+            if message == "target_org_not_found":
+                evidence_brief_payload = self._empty_evidence_brief_payload(
+                    warning="target_organization_not_found",
+                    organization={
+                        "id": getattr(source_org, "id", None),
+                        "name": getattr(source_org, "name", organization_name),
+                        "source_url": getattr(source_org, "source_url", None),
+                        "source_name": getattr(source_org, "source_name", None),
+                        "updated_at": getattr(source_org, "updated_at", None),
+                    },
+                )
+            else:
+                evidence_brief_payload = self._empty_evidence_brief_payload(warning="organization_not_found", found=False)
+        finally:
+            if db_gen is not None:
+                db_gen.close()
+
+        evidence_brief_payload["intent"] = "organization_partnership_evidence_brief_lookup"
+        evidence_brief_payload["source"] = "database"
+        evidence_brief_payload["generated_by"] = "brain_evidence_brief_lookup"
+        evidence_brief_payload["no_llm"] = True
+        organization_name_from_payload = str(((evidence_brief_payload.get("organization") or {}).get("name")) or organization_name)
+        return {
+            "parsed_result": parsed_result,
+            "answer": self._format_evidence_brief_lookup_answer(evidence_brief_payload=evidence_brief_payload, lang=lang),
+            "evidence": self._evidence_brief_evidence_from_payload(evidence_brief_payload),
+            "organization_name": organization_name_from_payload,
+            "partnership_evidence_brief": evidence_brief_payload,
             "data_source": "database",
             "llm_used": False,
             "route": route,
@@ -5065,6 +5507,19 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            evidence_brief_lookup_result = self._resolve_evidence_brief_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="simple",
+            )
+            if evidence_brief_lookup_result is not None:
+                result = {
+                    "answer": self._clean_output(evidence_brief_lookup_result.get("answer") or ""),
+                    "evidence": self._merge_evidence(evidence_brief_lookup_result.get("evidence") or []),
+                    "partnership_evidence_brief": evidence_brief_lookup_result.get("partnership_evidence_brief") or {},
+                }
+                span.set_output_obj(result)
+                return result
             action_plan_lookup_result = self._resolve_action_plan_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
@@ -5562,6 +6017,43 @@ class Brain:
                     Reason="product_intent_direct_answer",
                     conversation_id=conversation_id,
                     parser_result=product_direct_result,
+                    parser_result_direct_answer=True,
+                    parser_result_data_found=True,
+                )
+                return
+            evidence_brief_lookup_result = self._resolve_evidence_brief_lookup_if_applicable(
+                user_message=user_message,
+                conversation_id=conversation_id,
+                route="stream",
+            )
+            if evidence_brief_lookup_result is not None:
+                direct_answer = True
+                parser_result = evidence_brief_lookup_result.get("parsed_result")
+                response_text = str(evidence_brief_lookup_result.get("answer") or "")
+                evidence = evidence_brief_lookup_result.get("evidence") or []
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                yield {
+                    "type": "done",
+                    "full_content": response_text,
+                    "evidence": self._merge_evidence(evidence),
+                    "partnership_evidence_brief": evidence_brief_lookup_result.get("partnership_evidence_brief") or {},
+                    "direct_answer": True,
+                    "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                }
+                span.set_output_obj(
+                    {
+                        "done": True,
+                        "partnership_evidence_brief": True,
+                        "organization_name": evidence_brief_lookup_result.get("organization_name"),
+                    }
+                )
+                _brain_stream_trace(
+                    "RETURN_ID=EVIDENCE_BRIEF_LOOKUP",
+                    Reason="evidence_brief_lookup_db_return",
+                    conversation_id=conversation_id,
+                    parser_result=parser_result,
+                    parser_result_response=response_text,
                     parser_result_direct_answer=True,
                     parser_result_data_found=True,
                 )
