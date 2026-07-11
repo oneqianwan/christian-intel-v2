@@ -7,11 +7,13 @@ import { registerChatAbortHandler } from '../features/chat/cleanup'
 import { useConversationStore } from '../stores/conversationStore'
 import { useMessageStore } from '../stores/messageStore'
 import { ChatApiError, buildApiUrl, sendChatStream, fetchMessages, createConversation } from '../services/api'
+import type { ContactPayload } from '../types/contactIntelligence'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 import GlobalIntelCard from './GlobalIntelCard'
 import AgentAlerts from './AgentAlerts'
 import { CollectionPanel } from './CollectionPanel'
 import { OntologyFilter } from './OntologyFilter'
+import { ContactCard } from './ContactCard'
 import { InvestorMatchCard, type InvestorMatch } from './InvestorMatchCard'
 import { TaskPanel } from './TaskPanel'
 import { IntelGraph } from './IntelGraph'
@@ -52,7 +54,7 @@ type MatchPayload = {
   matches: InvestorMatch[]
 }
 
-type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload
+type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload | ContactPayload
 
 const md5 = (input: string): string => {
   const text = unescape(encodeURIComponent(String(input || '')))
@@ -185,6 +187,15 @@ const hasRelationshipGraphPayload = (value: unknown): value is RelationshipGraph
   const candidate = value as Record<string, unknown>
   return Array.isArray(candidate.nodes) &&
     Array.isArray(candidate.edges) &&
+    Array.isArray(candidate.warnings) &&
+    typeof candidate.summary === 'object' &&
+    candidate.summary !== null
+}
+
+const hasContactPayload = (value: unknown): value is ContactPayload => {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return Array.isArray(candidate.contacts) &&
     Array.isArray(candidate.warnings) &&
     typeof candidate.summary === 'object' &&
     candidate.summary !== null
@@ -845,6 +856,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
           status: m.status,
           scope: m.scope,
           relationship_graph: hasRelationshipGraphPayload(m.relationship_graph) ? m.relationship_graph : undefined,
+          contact_lookup: hasContactPayload(m.contact_lookup) ? m.contact_lookup : undefined,
         }))
       }).catch(async (error) => {
         if (error instanceof ChatApiError && error.status === 401) {
@@ -881,6 +893,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
             status: m.status,
             scope: m.scope,
             relationship_graph: hasRelationshipGraphPayload(m.relationship_graph) ? m.relationship_graph : undefined,
+            contact_lookup: hasContactPayload(m.contact_lookup) ? m.contact_lookup : undefined,
           })
         )
       } catch (e) {
@@ -1253,6 +1266,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 ? data.relationship_graph
                 : hasRelationshipGraphPayload(delivery.relationship_graph)
                   ? delivery.relationship_graph
+                  : undefined,
+              contact_lookup: hasContactPayload(data.contact_lookup)
+                ? data.contact_lookup
+                : hasContactPayload(delivery.contact_lookup)
+                  ? delivery.contact_lookup
                   : undefined,
             })
             streamContentRef.current = ''
@@ -1631,6 +1649,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
             (() => {
               const visibleContent = msg.content
               const relationshipGraph = hasRelationshipGraphPayload(msg.relationship_graph) ? msg.relationship_graph : null
+              const contactLookup = hasContactPayload(msg.contact_lookup) ? msg.contact_lookup : null
               return (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '86%' }}>
               {msg.role === 'assistant' && renderAssistantAvatar(60, 56, '#eef4ff')}
@@ -1653,6 +1672,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 {msg.role === 'assistant' && relationshipGraph && (
                   <div style={{ marginTop: '12px' }}>
                     <IntelGraph graph={relationshipGraph} />
+                  </div>
+                )}
+                {msg.role === 'assistant' && contactLookup && (
+                  <div style={{ marginTop: '12px' }}>
+                    <ContactCard payload={contactLookup} />
                   </div>
                 )}
                 {msg.role === 'assistant' && ['intelligence_brief', 'analysis_brief', 'contact_full'].includes(msg.delivery_type || '') && parseBriefItems(visibleContent).length > 0 && (
