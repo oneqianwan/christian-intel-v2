@@ -11,9 +11,11 @@ import {
 import { isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
 import { ContactCard } from '../components/ContactCard'
 import { IntelGraph } from '../components/IntelGraph'
+import { RecommendationCard } from '../components/RecommendationCard'
 import { WatchButton } from '../components/WatchButton'
 import { buildApiUrl } from '../services/api'
 import type { ContactPayload } from '../types/contactIntelligence'
+import type { PartnershipRecommendationPayload } from '../types/partnershipRecommendation'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 
 interface OrgDetail {
@@ -88,12 +90,15 @@ export function OrgDetailPage() {
   const [relations, setRelations] = useState<Relation[]>([])
   const [relationshipGraph, setRelationshipGraph] = useState<RelationshipGraphPayload | null>(null)
   const [contactPayload, setContactPayload] = useState<ContactPayload | null>(null)
+  const [recommendationPayload, setRecommendationPayload] = useState<PartnershipRecommendationPayload | null>(null)
   const [timeline, setTimeline] = useState<IntelItem[]>([])
   const [loading, setLoading] = useState(true)
   const [relationsLoading, setRelationsLoading] = useState(false)
   const [relationsError, setRelationsError] = useState<string | null>(null)
   const [contactsLoading, setContactsLoading] = useState(false)
   const [contactsError, setContactsError] = useState<string | null>(null)
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false)
+  const [recommendationsError, setRecommendationsError] = useState<string | null>(null)
   const relationTypeMap: Record<string, string> = {
     invested_in: '投资',
     co_invested: '共同投资',
@@ -110,6 +115,7 @@ export function OrgDetailPage() {
     void fetchRelations()
     void fetchTimeline()
     void fetchContacts()
+    void fetchRecommendations()
   }, [orgId])
 
   const fetchOrg = async () => {
@@ -171,6 +177,23 @@ export function OrgDetailPage() {
       setContactsError('联系方式加载失败，当前不显示任何假联系方式。')
     } finally {
       setContactsLoading(false)
+    }
+  }
+
+  const fetchRecommendations = async () => {
+    setRecommendationsLoading(true)
+    setRecommendationsError(null)
+    try {
+      const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}/recommendations`))
+      if (!res.ok) throw new Error('fetch recommendations failed')
+      const data = await res.json()
+      setRecommendationPayload(data || null)
+    } catch (e) {
+      console.error('Failed to fetch recommendations:', e)
+      setRecommendationPayload(null)
+      setRecommendationsError('推荐数据加载失败。')
+    } finally {
+      setRecommendationsLoading(false)
     }
   }
 
@@ -428,6 +451,30 @@ export function OrgDetailPage() {
         </div>
 
         <div>
+          <div style={{ ...cardStyle, marginBottom: 24 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Partnership Recommendations</h3>
+            {recommendationsLoading ? (
+              <div style={{ color: '#64748b', fontSize: 13 }}>Loading partnership recommendations...</div>
+            ) : recommendationPayload ? (
+              <RecommendationCard payload={recommendationPayload} errorMessage={recommendationsError} />
+            ) : recommendationsError ? (
+              <div
+                style={{
+                  color: '#b91c1c',
+                  fontSize: 13,
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                }}
+              >
+                {recommendationsError}
+              </div>
+            ) : (
+              <div style={{ color: '#999', fontSize: 13 }}>No recommendation payload available</div>
+            )}
+          </div>
+
           <div style={{ ...cardStyle, marginBottom: 24 }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Contact Intelligence</h3>
             {contactsLoading ? (
