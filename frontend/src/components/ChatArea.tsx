@@ -8,8 +8,10 @@ import { useConversationStore } from '../stores/conversationStore'
 import { useMessageStore } from '../stores/messageStore'
 import { ChatApiError, buildApiUrl, sendChatStream, fetchMessages, createConversation } from '../services/api'
 import type { ContactPayload } from '../types/contactIntelligence'
+import type { PartnershipActionPlanPayload } from '../types/partnershipActionPlan'
 import type { PartnershipRecommendationPayload } from '../types/partnershipRecommendation'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
+import { ActionPlanCard } from './ActionPlanCard'
 import GlobalIntelCard from './GlobalIntelCard'
 import AgentAlerts from './AgentAlerts'
 import { CollectionPanel } from './CollectionPanel'
@@ -56,7 +58,7 @@ type MatchPayload = {
   matches: InvestorMatch[]
 }
 
-type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload | ContactPayload | PartnershipRecommendationPayload
+type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload | ContactPayload | PartnershipRecommendationPayload | PartnershipActionPlanPayload
 
 const md5 = (input: string): string => {
   const text = unescape(encodeURIComponent(String(input || '')))
@@ -210,6 +212,17 @@ const hasPartnershipRecommendationPayload = (value: unknown): value is Partnersh
     Array.isArray(candidate.warnings) &&
     typeof candidate.summary === 'object' &&
     candidate.summary !== null
+}
+
+const hasPartnershipActionPlanPayload = (value: unknown): value is PartnershipActionPlanPayload => {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return Array.isArray(candidate.action_plan) &&
+    Array.isArray(candidate.warnings) &&
+    typeof candidate.summary === 'object' &&
+    candidate.summary !== null &&
+    typeof candidate.evidence === 'object' &&
+    candidate.evidence !== null
 }
 
 const stripMetaBlocks = (content: string): string =>
@@ -869,6 +882,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
           relationship_graph: hasRelationshipGraphPayload(m.relationship_graph) ? m.relationship_graph : undefined,
           contact_lookup: hasContactPayload(m.contact_lookup) ? m.contact_lookup : undefined,
           partnership_recommendations: hasPartnershipRecommendationPayload(m.partnership_recommendations) ? m.partnership_recommendations : undefined,
+          partnership_action_plan: hasPartnershipActionPlanPayload(m.partnership_action_plan) ? m.partnership_action_plan : undefined,
         }))
       }).catch(async (error) => {
         if (error instanceof ChatApiError && error.status === 401) {
@@ -907,6 +921,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
             relationship_graph: hasRelationshipGraphPayload(m.relationship_graph) ? m.relationship_graph : undefined,
             contact_lookup: hasContactPayload(m.contact_lookup) ? m.contact_lookup : undefined,
             partnership_recommendations: hasPartnershipRecommendationPayload(m.partnership_recommendations) ? m.partnership_recommendations : undefined,
+            partnership_action_plan: hasPartnershipActionPlanPayload(m.partnership_action_plan) ? m.partnership_action_plan : undefined,
           })
         )
       } catch (e) {
@@ -1290,6 +1305,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 : hasPartnershipRecommendationPayload(delivery.partnership_recommendations)
                   ? delivery.partnership_recommendations
                   : undefined,
+              partnership_action_plan: hasPartnershipActionPlanPayload(data.partnership_action_plan)
+                ? data.partnership_action_plan
+                : hasPartnershipActionPlanPayload(delivery.partnership_action_plan)
+                  ? delivery.partnership_action_plan
+                  : undefined,
             })
             streamContentRef.current = ''
             setStreamingContent('')
@@ -1669,6 +1689,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
               const relationshipGraph = hasRelationshipGraphPayload(msg.relationship_graph) ? msg.relationship_graph : null
               const contactLookup = hasContactPayload(msg.contact_lookup) ? msg.contact_lookup : null
               const recommendationLookup = hasPartnershipRecommendationPayload(msg.partnership_recommendations) ? msg.partnership_recommendations : null
+              const actionPlanLookup = hasPartnershipActionPlanPayload(msg.partnership_action_plan) ? msg.partnership_action_plan : null
               return (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '86%' }}>
               {msg.role === 'assistant' && renderAssistantAvatar(60, 56, '#eef4ff')}
@@ -1701,6 +1722,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 {msg.role === 'assistant' && recommendationLookup && (
                   <div style={{ marginTop: '12px' }}>
                     <RecommendationCard payload={recommendationLookup} />
+                  </div>
+                )}
+                {msg.role === 'assistant' && actionPlanLookup && (
+                  <div style={{ marginTop: '12px' }}>
+                    <ActionPlanCard payload={actionPlanLookup} />
                   </div>
                 )}
                 {msg.role === 'assistant' && ['intelligence_brief', 'analysis_brief', 'contact_full'].includes(msg.delivery_type || '') && parseBriefItems(visibleContent).length > 0 && (

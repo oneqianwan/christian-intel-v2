@@ -9,12 +9,14 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
+import { ActionPlanCard } from '../components/ActionPlanCard'
 import { ContactCard } from '../components/ContactCard'
 import { IntelGraph } from '../components/IntelGraph'
 import { RecommendationCard } from '../components/RecommendationCard'
 import { WatchButton } from '../components/WatchButton'
 import { buildApiUrl } from '../services/api'
 import type { ContactPayload } from '../types/contactIntelligence'
+import type { PartnershipActionPlanPayload } from '../types/partnershipActionPlan'
 import type { PartnershipRecommendationPayload } from '../types/partnershipRecommendation'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 
@@ -91,6 +93,7 @@ export function OrgDetailPage() {
   const [relationshipGraph, setRelationshipGraph] = useState<RelationshipGraphPayload | null>(null)
   const [contactPayload, setContactPayload] = useState<ContactPayload | null>(null)
   const [recommendationPayload, setRecommendationPayload] = useState<PartnershipRecommendationPayload | null>(null)
+  const [actionPlanPayload, setActionPlanPayload] = useState<PartnershipActionPlanPayload | null>(null)
   const [timeline, setTimeline] = useState<IntelItem[]>([])
   const [loading, setLoading] = useState(true)
   const [relationsLoading, setRelationsLoading] = useState(false)
@@ -99,6 +102,8 @@ export function OrgDetailPage() {
   const [contactsError, setContactsError] = useState<string | null>(null)
   const [recommendationsLoading, setRecommendationsLoading] = useState(false)
   const [recommendationsError, setRecommendationsError] = useState<string | null>(null)
+  const [actionPlanLoading, setActionPlanLoading] = useState(false)
+  const [actionPlanError, setActionPlanError] = useState<string | null>(null)
   const relationTypeMap: Record<string, string> = {
     invested_in: '投资',
     co_invested: '共同投资',
@@ -116,6 +121,7 @@ export function OrgDetailPage() {
     void fetchTimeline()
     void fetchContacts()
     void fetchRecommendations()
+    void fetchActionPlan()
   }, [orgId])
 
   const fetchOrg = async () => {
@@ -194,6 +200,23 @@ export function OrgDetailPage() {
       setRecommendationsError('推荐数据加载失败。')
     } finally {
       setRecommendationsLoading(false)
+    }
+  }
+
+  const fetchActionPlan = async () => {
+    setActionPlanLoading(true)
+    setActionPlanError(null)
+    try {
+      const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}/action-plan`))
+      if (!res.ok) throw new Error('fetch action plan failed')
+      const data = await res.json()
+      setActionPlanPayload(data || null)
+    } catch (e) {
+      console.error('Failed to fetch action plan:', e)
+      setActionPlanPayload(null)
+      setActionPlanError('行动计划加载失败。')
+    } finally {
+      setActionPlanLoading(false)
     }
   }
 
@@ -451,6 +474,30 @@ export function OrgDetailPage() {
         </div>
 
         <div>
+          <div style={{ ...cardStyle, marginBottom: 24 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Partnership Action Plan</h3>
+            {actionPlanLoading ? (
+              <div style={{ color: '#64748b', fontSize: 13 }}>Loading partnership action plan...</div>
+            ) : actionPlanPayload ? (
+              <ActionPlanCard payload={actionPlanPayload} errorMessage={actionPlanError} />
+            ) : actionPlanError ? (
+              <div
+                style={{
+                  color: '#b91c1c',
+                  fontSize: 13,
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                }}
+              >
+                {actionPlanError}
+              </div>
+            ) : (
+              <div style={{ color: '#999', fontSize: 13 }}>No action plan payload available</div>
+            )}
+          </div>
+
           <div style={{ ...cardStyle, marginBottom: 24 }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Partnership Recommendations</h3>
             {recommendationsLoading ? (
