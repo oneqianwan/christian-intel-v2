@@ -125,6 +125,7 @@ class IntentRouterFinal:
         normalized_query = self._normalize_query(raw_query)
         language = self._detect_language(raw_query)
         context_reference = self._has_context_reference(raw_query)
+        organization_resolution = self.parser.resolve_organization_entities(raw_query, use_db=False)
 
         if not raw_query:
             return self._finalize_result(
@@ -142,6 +143,7 @@ class IntentRouterFinal:
                 safe_default_intent="unsupported_or_ambiguous",
                 routing_decision="unsupported",
                 warnings=["empty_query"],
+                organization_resolution=organization_resolution,
             )
 
         candidates: list[dict[str, Any]] = []
@@ -153,7 +155,7 @@ class IntentRouterFinal:
             self._build_evidence_brief_candidate,
             self._build_recommendation_candidate,
         ):
-            candidate = builder(raw_query)
+            candidate = builder(raw_query, organization_resolution)
             if candidate:
                 candidates.append(candidate)
 
@@ -181,6 +183,7 @@ class IntentRouterFinal:
                     safe_default_intent="unsupported_or_ambiguous",
                     routing_decision="ask_clarification",
                     warnings=warnings,
+                    organization_resolution=organization_resolution,
                 )
 
             if self._is_general_chat(raw_query):
@@ -206,6 +209,7 @@ class IntentRouterFinal:
                     safe_default_intent="general_chat",
                     routing_decision="direct",
                     warnings=[],
+                    organization_resolution=organization_resolution,
                 )
 
             warnings = []
@@ -228,6 +232,7 @@ class IntentRouterFinal:
                 safe_default_intent="unsupported_or_ambiguous",
                 routing_decision="ask_clarification" if context_reference else "unsupported",
                 warnings=warnings,
+                organization_resolution=organization_resolution,
             )
 
         primary = candidates[0]
@@ -255,6 +260,21 @@ class IntentRouterFinal:
         organization_name = primary.get("organization_name")
         target_organization_name = primary.get("target_organization_name")
         target_org_id = primary.get("target_org_id")
+
+        if organization_resolution.get("resolution_status") == "ambiguous":
+            organization_name = None
+            warnings.append("multiple_organization_candidates")
+            if "organization_name" not in missing_parameters:
+                missing_parameters.append("organization_name")
+        elif organization_resolution.get("resolution_status") == "context_required":
+            organization_name = None
+        elif organization_resolution.get("organization_name"):
+            organization_name = organization_resolution.get("organization_name")
+
+        if organization_resolution.get("target_organization_name"):
+            target_organization_name = organization_resolution.get("target_organization_name")
+        if organization_resolution.get("target_organization_id"):
+            target_org_id = organization_resolution.get("target_organization_id")
 
         if context_reference and not organization_name:
             missing_parameters.append("organization_context")
@@ -290,6 +310,7 @@ class IntentRouterFinal:
             safe_default_intent=safe_default_intent,
             routing_decision=routing_decision,
             warnings=warnings,
+            organization_resolution=organization_resolution,
         )
 
     def _normalize_query(self, query: str) -> str:
@@ -341,7 +362,7 @@ class IntentRouterFinal:
         raw = str(query or "").strip()
         if any(re.search(pattern, raw, re.IGNORECASE) for pattern in self.BROAD_ANALYSIS_PATTERNS):
             if not any(
-                builder(raw)
+                builder(raw, None)
                 for builder in (
                     self._build_score_candidate,
                     self._build_contact_candidate,
@@ -417,74 +438,105 @@ class IntentRouterFinal:
             "reason_codes": reason_codes,
         }
 
-    def _build_score_candidate(self, query: str) -> Optional[dict[str, Any]]:
+    def _resolved_organization_name(self, resolution: Optional[dict[str, Any]]) -> Optional[str]:
+        if not isinstance(resolution, dict):
+            return None
+        status = str(resolution.get("resolution_status") or "").strip()
+        if status in {"context_required", "missing", "unresolved", "ambiguous"}:
+            return None
+        clean = str(resolution.get("organization_name") or "").strip()
+        return clean or None
+
+    def _resolved_target_organization_name(self, resolution: Optional[dict[str, Any]]) -> Optional[str]:
+        if not isinstance(resolution, dict):
+            return None
+        clean = str(resolution.get("target_organization_name") or "").strip()
+        return clean or None
+
+    def _resolved_target_organization_id(self, resolution: Optional[dict[str, Any]]) -> Optional[str]:
+        if not isinstance(resolution, dict):
+            return None
+        clean = str(resolution.get("target_organization_id") or "").strip()
+        return clean or None
+
+    def _build_score_candidate(self, query: str, organization_resolution: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         if not self.parser._is_score_query(query):
             return None
         return self._build_candidate(
             intent="organization_score_lookup",
             query=query,
             keyword_patterns=list(self.parser.SCORE_KEYWORDS),
-            organization_name=self._extract_with_context_guard(query, self.parser._extract_score_org_name),
+            organization_name=self._resolved_organization_name(organization_resolution)
+            or self._extract_with_context_guard(query, self.parser._extract_score_org_name),
             base_confidence=0.82,
         )
 
-    def _build_contact_candidate(self, query: str) -> Optional[dict[str, Any]]:
+    def _build_contact_candidate(self, query: str, organization_resolution: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         if not self.parser._is_contact_query(query):
             return None
         return self._build_candidate(
             intent="organization_contact_lookup",
             query=query,
             keyword_patterns=list(self.parser.CONTACT_KEYWORDS),
-            organization_name=self._extract_with_context_guard(query, self.parser._extract_contact_org_name),
+            organization_name=self._resolved_organization_name(organization_resolution)
+            or self._extract_with_context_guard(query, self.parser._extract_contact_org_name),
             base_confidence=0.8,
         )
 
-    def _build_graph_candidate(self, query: str) -> Optional[dict[str, Any]]:
+    def _build_graph_candidate(self, query: str, organization_resolution: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         if not self.parser._is_relationship_graph_query(query):
             return None
         return self._build_candidate(
             intent="organization_relationship_graph_lookup",
             query=query,
             keyword_patterns=list(self.parser.RELATIONSHIP_GRAPH_KEYWORDS),
-            organization_name=self._extract_with_context_guard(query, self.parser._extract_relationship_graph_org_name),
+            organization_name=self._resolved_organization_name(organization_resolution)
+            or self._extract_with_context_guard(query, self.parser._extract_relationship_graph_org_name),
             base_confidence=0.78,
         )
 
-    def _build_recommendation_candidate(self, query: str) -> Optional[dict[str, Any]]:
+    def _build_recommendation_candidate(self, query: str, organization_resolution: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         if not self.parser._is_recommendation_query(query):
             return None
         return self._build_candidate(
             intent="organization_partnership_recommendation_lookup",
             query=query,
             keyword_patterns=list(self.parser.RECOMMENDATION_KEYWORDS),
-            organization_name=self._extract_with_context_guard(query, self.parser._extract_recommendation_org_name),
+            organization_name=self._resolved_organization_name(organization_resolution)
+            or self._extract_with_context_guard(query, self.parser._extract_recommendation_org_name),
             base_confidence=0.74,
         )
 
-    def _build_action_plan_candidate(self, query: str) -> Optional[dict[str, Any]]:
+    def _build_action_plan_candidate(self, query: str, organization_resolution: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         if not self.parser._is_action_plan_query(query):
             return None
         return self._build_candidate(
             intent="organization_partnership_action_plan_lookup",
             query=query,
             keyword_patterns=list(self.parser.ACTION_PLAN_KEYWORDS),
-            organization_name=self._extract_with_context_guard(query, self.parser._extract_action_plan_org_name),
-            target_organization_name=self.parser._extract_action_plan_target_org_name(query),
-            target_org_id=self.parser._extract_action_plan_target_org_id(query),
+            organization_name=self._resolved_organization_name(organization_resolution)
+            or self._extract_with_context_guard(query, self.parser._extract_action_plan_org_name),
+            target_organization_name=self._resolved_target_organization_name(organization_resolution)
+            or self.parser._extract_action_plan_target_org_name(query),
+            target_org_id=self._resolved_target_organization_id(organization_resolution)
+            or self.parser._extract_action_plan_target_org_id(query),
             base_confidence=0.76,
             extra_reason_codes=["progress_query_action_plan_default"] if self._is_progress_query(query) else None,
         )
 
-    def _build_evidence_brief_candidate(self, query: str) -> Optional[dict[str, Any]]:
+    def _build_evidence_brief_candidate(self, query: str, organization_resolution: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         if not self.parser._is_evidence_brief_query(query):
             return None
         return self._build_candidate(
             intent="organization_partnership_evidence_brief_lookup",
             query=query,
             keyword_patterns=list(self.parser.EVIDENCE_BRIEF_KEYWORDS),
-            organization_name=self._extract_with_context_guard(query, self.parser._extract_evidence_brief_org_name),
-            target_organization_name=self.parser._extract_evidence_brief_target_org_name(query),
-            target_org_id=self.parser._extract_evidence_brief_target_org_id(query),
+            organization_name=self._resolved_organization_name(organization_resolution)
+            or self._extract_with_context_guard(query, self.parser._extract_evidence_brief_org_name),
+            target_organization_name=self._resolved_target_organization_name(organization_resolution)
+            or self.parser._extract_evidence_brief_target_org_name(query),
+            target_org_id=self._resolved_target_organization_id(organization_resolution)
+            or self.parser._extract_evidence_brief_target_org_id(query),
             base_confidence=0.77,
         )
 
@@ -577,6 +629,7 @@ class IntentRouterFinal:
         safe_default_intent: str,
         routing_decision: str,
         warnings: list[str],
+        organization_resolution: Optional[dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         confidence = 0.0
         if candidate_intents:
@@ -599,6 +652,15 @@ class IntentRouterFinal:
             "routing_decision": routing_decision,
             "warnings": list(dict.fromkeys(warnings)),
         }
+        if isinstance(organization_resolution, dict):
+            result["organization_resolution"] = organization_resolution
+            target_resolution = {
+                "target_organization_name": organization_resolution.get("target_organization_name"),
+                "target_organization_id": organization_resolution.get("target_organization_id"),
+                "target_canonical_name": organization_resolution.get("target_canonical_name"),
+                "target_candidates": organization_resolution.get("target_candidates") or [],
+            }
+            result["target_organization_resolution"] = target_resolution
         response_contract = self.INTENT_TO_RESPONSE_CONTRACT.get(intent)
         if response_contract:
             result["response_contract"] = response_contract

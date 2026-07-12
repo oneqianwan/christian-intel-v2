@@ -9,6 +9,7 @@ from typing import Dict, Optional, List
 from sqlalchemy import or_, func
 
 from models.database import IntelligenceItem, OrganizationProfile, RelationEdge, get_db_session
+from services.organization_resolver import OrganizationResolver
 from services.intent_router_final import IntentRouterFinal
 from services.welcome_trace import emit_welcome_trace, register_welcome_reply
 
@@ -277,6 +278,23 @@ class QueryParser:
     def __init__(self):
         self.db = get_db_session()
         self._lang = "en"
+        self._organization_resolver = OrganizationResolver()
+
+    def resolve_organization_entities(
+        self,
+        user_message: str,
+        *,
+        alias_map: Optional[Dict[str, str]] = None,
+        known_organizations: Optional[List[object]] = None,
+        db=None,
+        use_db: bool = True,
+    ) -> Dict:
+        return self._organization_resolver.resolve_organization(
+            user_message or "",
+            db=(db if db is not None else self.db) if use_db else None,
+            alias_map=alias_map,
+            known_organizations=known_organizations,
+        )
 
     def _has_context_reference(self, text: str) -> bool:
         raw = str(text or "").strip()
