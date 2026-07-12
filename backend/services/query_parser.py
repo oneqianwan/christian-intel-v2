@@ -9,6 +9,7 @@ from typing import Dict, Optional, List
 from sqlalchemy import or_, func
 
 from models.database import IntelligenceItem, OrganizationProfile, RelationEdge, get_db_session
+from services.intent_router_final import IntentRouterFinal
 from services.welcome_trace import emit_welcome_trace, register_welcome_reply
 
 
@@ -30,6 +31,14 @@ class QueryParser:
     ACTION_PLAN_RESPONSE_CONTRACT = "partnership_action_plan"
     EVIDENCE_BRIEF_INTENT_NAME = "organization_partnership_evidence_brief_lookup"
     EVIDENCE_BRIEF_RESPONSE_CONTRACT = "partnership_evidence_brief"
+    FINAL_SUPPORTED_LOOKUP_INTENTS = {
+        SCORE_INTENT_NAME,
+        RELATIONSHIP_GRAPH_INTENT_NAME,
+        CONTACT_INTENT_NAME,
+        RECOMMENDATION_INTENT_NAME,
+        ACTION_PLAN_INTENT_NAME,
+        EVIDENCE_BRIEF_INTENT_NAME,
+    }
 
     """规则解析器：匹配常见查询模式，直接返回数据库结果"""
 
@@ -159,7 +168,10 @@ class QueryParser:
         r"next\s+steps",
         r"outreach\s+plan",
         r"partnership\s+action\s+plan",
+        r"how\s+to\s+proceed",
         r"how\s+should\s+we\s+proceed",
+        r"how\s+to\s+move\s+forward",
+        r"next\s+move",
         r"how\s+should\s+they\s+approach",
         r"what\s+should\s+we\s+do\s+next",
         r"create\s+(?:an?\s+)?plan",
@@ -167,7 +179,14 @@ class QueryParser:
         r"follow[\-\s]?up\s+plan",
         r"合作行动计划",
         r"行动计划",
+        r"怎么推进",
+        r"如何推进",
         r"推进合作",
+        r"合作怎么推进",
+        r"接下来怎么推进",
+        r"下一步怎么推进",
+        r"后续怎么做",
+        r"怎么落地",
         r"怎么推进合作",
         r"怎么联系下一步",
         r"先做什么",
@@ -187,8 +206,12 @@ class QueryParser:
         r"decision\s+brief",
         r"decision\s+rationale",
         r"why\s+recommend",
+        r"why\s+recommended",
+        r"why\s+should\s+i\s+contact",
         r"why\s+should\s+we\s+contact",
         r"why\s+should\s+.+?\s+contact",
+        r"why\s+worth\s+contacting",
+        r"why\s+should\s+.+?\s+be\s+contacted",
         r"evidence\s+behind\s+the\s+recommendation",
         r"recommendation\s+evidence",
         r"brief\s+me\s+on\s+this\s+partner",
@@ -200,8 +223,12 @@ class QueryParser:
         r"决策简报",
         r"决策依据",
         r"为什么推荐",
+        r"推荐依据",
+        r"为什么值得联系",
+        r"为什么这个机构值得联系",
         r"推荐依据是什么",
         r"证据是什么",
+        r"合作证据",
         r"风险依据",
         r"给我证据报告",
         r"给我合作分析简报",
@@ -232,9 +259,53 @@ class QueryParser:
         r"functions",
     ]
 
+    CONTEXT_REFERENCE_PATTERNS = [
+        r"这个机构",
+        r"该机构",
+        r"刚才那个机构",
+        r"这个教会",
+        r"刚才那个教会",
+        r"^它$",
+        r"\bthis\s+organization\b",
+        r"\bthat\s+organization\b",
+        r"\bthis\s+church\b",
+        r"\bthat\s+church\b",
+        r"^\s*it\s*$",
+        r"^\s*them\s*$",
+    ]
+
     def __init__(self):
         self.db = get_db_session()
         self._lang = "en"
+
+    def _has_context_reference(self, text: str) -> bool:
+        raw = str(text or "").strip()
+        if not raw:
+            return False
+        return any(re.search(pattern, raw, re.IGNORECASE) for pattern in self.CONTEXT_REFERENCE_PATTERNS)
+
+    def _looks_like_query_phrase(self, text: str) -> bool:
+        raw = str(text or "").strip()
+        if not raw:
+            return False
+        query_like_patterns = [
+            r"^(?:what|how|why|give|show|tell|create|build|draft)\b",
+            r"^(?:给我|请给我|请生成|生成|帮我|告诉我|说明|查一下|查询)\b",
+            r"\b(?:contact|info|information|action\s+plan|next\s+steps|execution\s+plan|follow[\-\s]?up\s+plan|relationship\s+graph|relationship\s+network|score|scores|why\s+recommend|decision\s+rationale|evidence\s+brief|recommendation\s+evidence)\b",
+            r"(?:怎么联系|如何联系|联系方式|行动计划|下一步|怎么推进|如何推进|证据简报|推荐依据|决策依据|为什么推荐|为什么应该联系|为什么不应该联系|关系图谱|关系网络|评分是多少|评分多少|评分|分数)",
+        ]
+        return any(re.search(pattern, raw, re.IGNORECASE) for pattern in query_like_patterns)
+
+    def _normalize_org_candidate(self, candidate: str) -> Optional[str]:
+        clean = re.sub(r"\s+", " ", str(candidate or "").strip()).strip(" \t\r\n\"'`")
+        clean = clean.rstrip(" .?!,;:，；：。！？")
+        if len(clean) <= 1:
+            return None
+        if self._has_context_reference(clean):
+            return None
+        if self._looks_like_query_phrase(clean):
+            return None
+        return clean or None
 
     def parse(self, user_message: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
         msg = (user_message or "").strip()
@@ -317,6 +388,11 @@ class QueryParser:
         if self._is_existence_query(msg):
             return self._handle_existence_query(msg, conversation_id=conversation_id)
 
+        final_intent_result = self.parse_intent_final(msg, conversation_id=conversation_id)
+        legacy_lookup_result = self._legacy_lookup_intent_from_final(msg, final_intent_result)
+        if legacy_lookup_result is not None:
+            return legacy_lookup_result
+
         if self._is_evidence_brief_query(msg):
             return self._handle_evidence_brief_query(msg, conversation_id=conversation_id)
 
@@ -351,6 +427,57 @@ class QueryParser:
             return self._handle_intelligence_timeline(msg, conversation_id=conversation_id)
 
         return None
+
+    def parse_intent_final(self, user_message: str, conversation_id: Optional[str] = None) -> Dict:
+        _ = conversation_id
+        router = IntentRouterFinal(self)
+        return router.route(user_message or "")
+
+    def _legacy_lookup_intent_from_final(self, msg: str, final_result: Optional[Dict]) -> Optional[Dict]:
+        if not isinstance(final_result, dict):
+            return None
+
+        intent = str(final_result.get("intent") or "").strip()
+        if intent not in self.FINAL_SUPPORTED_LOOKUP_INTENTS:
+            return None
+
+        organization_name = str(final_result.get("organization_name") or "").strip()
+        target_organization_name = str(final_result.get("target_organization_name") or "").strip()
+        target_org_id = str(final_result.get("target_org_id") or "").strip()
+
+        # Preserve Phase 5.9 behavior for intents that previously required an explicit org name.
+        if intent in {
+            self.SCORE_INTENT_NAME,
+            self.CONTACT_INTENT_NAME,
+            self.RELATIONSHIP_GRAPH_INTENT_NAME,
+        } and not organization_name:
+            return None
+
+        legacy_result: Dict[str, object] = {
+            "data_found": False,
+            "direct_answer": False,
+            "intent": intent,
+            "organization_name": organization_name,
+            "response_contract": final_result.get("response_contract") or "",
+            "requires_database_lookup": True,
+            "final_intent_result": final_result,
+        }
+
+        if intent == self.SCORE_INTENT_NAME:
+            legacy_result["requested_scores"] = self._extract_requested_scores(msg)
+        elif intent == self.CONTACT_INTENT_NAME:
+            legacy_result["requested_contacts"] = self._extract_requested_contacts(msg)
+        elif intent == self.RELATIONSHIP_GRAPH_INTENT_NAME:
+            legacy_result["depth"] = 1
+            legacy_result["include_unverified"] = False
+        elif intent == self.ACTION_PLAN_INTENT_NAME:
+            legacy_result["target_organization_name"] = target_organization_name
+            legacy_result["target_org_id"] = target_org_id
+        elif intent == self.EVIDENCE_BRIEF_INTENT_NAME:
+            legacy_result["target_organization_name"] = target_organization_name
+            legacy_result["target_org_id"] = target_org_id
+
+        return legacy_result
 
     def close(self) -> None:
         try:
@@ -410,9 +537,7 @@ class QueryParser:
         clean = re.sub(r"(?:的)?(?:people|digital|intel|composite|overall)\s+score(?:s)?\s*$", "", clean, flags=re.IGNORECASE)
         clean = re.sub(r"(?:的)?(?:score(?:s)?|评分|分数|得分)\s*$", "", clean, flags=re.IGNORECASE)
         clean = re.sub(r"\s+", " ", clean).strip(" \t\r\n?？!！,，.。:：;；\"'`/()[]{}")
-        if len(clean) <= 1:
-            return None
-        return clean
+        return self._normalize_org_candidate(clean)
 
     def _extract_score_org_name(self, msg: str) -> Optional[str]:
         raw = (msg or "").strip()
@@ -566,8 +691,6 @@ class QueryParser:
         ]
         if any(re.search(kw, raw, re.IGNORECASE) for kw in graph_only_keywords):
             return False
-        if self._is_recommendation_query(raw):
-            return False
         if self._is_action_plan_query(raw):
             return False
         return any(re.search(kw, raw, re.IGNORECASE) for kw in self.EVIDENCE_BRIEF_KEYWORDS)
@@ -619,9 +742,7 @@ class QueryParser:
         clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
         clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
         clean = clean.rstrip(" .?!,;:，；：。！？")
-        if len(clean) <= 1:
-            return None
-        return clean
+        return self._normalize_org_candidate(clean)
 
     def _extract_contact_org_name(self, msg: str) -> Optional[str]:
         raw = str(msg or "").strip()
@@ -702,9 +823,7 @@ class QueryParser:
         clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
         clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
         clean = clean.rstrip(" .?!,;:，；：。！？")
-        if len(clean) <= 1:
-            return None
-        return clean
+        return self._normalize_org_candidate(clean)
 
     def _extract_recommendation_org_name(self, msg: str) -> Optional[str]:
         raw = str(msg or "").strip()
@@ -761,9 +880,7 @@ class QueryParser:
         clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
         clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
         clean = clean.rstrip(" .?!,;:，；：。！？")
-        if len(clean) <= 1:
-            return None
-        return clean
+        return self._normalize_org_candidate(clean)
 
     def _clean_action_plan_target_candidate(self, candidate: str) -> Optional[str]:
         clean = (candidate or "").strip()
@@ -825,9 +942,18 @@ class QueryParser:
 
         patterns = [
             r"what\s+are\s+the\s+next\s+steps\s+for\s+(.+?)(?:\?|？|$)",
+            r"how\s+to\s+proceed\s+with\s+(.+?)(?:\?|？|$)",
+            r"how\s+should\s+we\s+proceed\s+with\s+(.+?)(?:\?|？|$)",
+            r"how\s+to\s+move\s+forward\s+with\s+(.+?)(?:\?|？|$)",
             r"create\s+(?:an?\s+)?(?:outreach\s+|partnership\s+)?action\s+plan\s+for\s+(.+?)(?:\?|？|$)",
             r"give\s+me\s+(?:an?\s+)?(?:outreach\s+|partnership\s+)?action\s+plan\s+for\s+(.+?)(?:\?|？|$)",
             r"(.+?)\s+next\s+steps(?:\?|？|$)",
+            r"(.+?)\s+怎么推进(?:\?|？|$)",
+            r"(.+?)\s+如何推进(?:\?|？|$)",
+            r"(.+?)\s+接下来怎么推进(?:\?|？|$)",
+            r"(.+?)\s+下一步怎么推进(?:\?|？|$)",
+            r"(.+?)\s+后续怎么做(?:\?|？|$)",
+            r"(.+?)\s+怎么落地(?:\?|？|$)",
             r"(.+?)\s+下一步应该怎么做(?:\?|？|$)",
             r"(.+?)\s+下一步怎么做(?:\?|？|$)",
             r"给我\s+(.+?)\s+的(?:合作)?行动计划(?:\?|？|$)",
@@ -878,9 +1004,7 @@ class QueryParser:
         clean = re.sub(r"(?:\?|？|。|！|!|\.)+$", "", clean).strip()
         clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
         clean = clean.rstrip(" .?!,;:，；：。！？")
-        if len(clean) <= 1:
-            return None
-        return clean
+        return self._normalize_org_candidate(clean)
 
     def _clean_evidence_brief_target_candidate(self, candidate: str) -> Optional[str]:
         clean = (candidate or "").strip()
@@ -1433,17 +1557,19 @@ class QueryParser:
 
     def _extract_org_name(self, msg: str) -> Optional[str]:
         raw = (msg or "").strip()
+        if self._has_context_reference(raw):
+            return None
         score_of = re.search(r"(?:people|digital|intel|composite)?\s*score\s+of\s+(.+?)(?:\?|$)", raw, flags=re.IGNORECASE)
         if score_of:
             candidate = (score_of.group(1) or "").strip()
             if candidate:
-                return candidate
+                return self._normalize_org_candidate(candidate)
 
         zh_score = re.search(r"(.+?)(?:的)?(?:评分|分数)(?:是多少|多少|为多少)?", raw)
         if zh_score:
             candidate = (zh_score.group(1) or "").strip()
             if candidate and len(candidate) > 1:
-                return candidate
+                return self._normalize_org_candidate(candidate)
 
         clean = raw
         replacements = [
@@ -1470,7 +1596,7 @@ class QueryParser:
         clean = re.sub(r"\s+", " ", clean).strip()
 
         if len(clean) > 2:
-            return clean
+            return self._normalize_org_candidate(clean)
         return None
 
     def _find_organization(self, name: str) -> List[OrganizationProfile]:
@@ -1513,9 +1639,7 @@ class QueryParser:
         )
         clean = re.sub(r"(?:\?|？|。|！|!)+$", "", clean).strip()
         clean = re.sub(r"\s+", " ", clean).strip(" \"'`")
-        if len(clean) <= 1:
-            return None
-        return clean
+        return self._normalize_org_candidate(clean)
 
     def _extract_relationship_graph_org_name(self, msg: str) -> Optional[str]:
         raw = str(msg or "").strip()
