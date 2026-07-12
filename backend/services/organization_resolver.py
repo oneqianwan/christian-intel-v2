@@ -44,7 +44,7 @@ class OrganizationResolver:
     ]
 
     LEADING_PHRASE_PATTERNS = [
-        r"^(?:give\s+me|show\s+me|tell\s+me|contact\s+info\s+for|what\s+is\s+the\s+contact\s+information\s+for|what\s+are\s+the\s+next\s+steps\s+for|create\s+(?:an?\s+)?action\s+plan\s+for|give\s+me\s+(?:an?\s+)?evidence\s+brief\s+for)\s+",
+        r"^(?:give\s+me|show\s+me|tell\s+me|contact\s+info\s+for|what\s+is\s+the\s+contact\s+information\s+for|what\s+are\s+the\s+next\s+steps\s+for|how\s+can\s+i\s+contact|how\s+do\s+i\s+contact|create\s+(?:an?\s+)?action\s+plan\s+for|give\s+me\s+(?:an?\s+)?evidence\s+brief\s+for)\s+",
         r"^(?:给我|请给我|请生成|生成|帮我|告诉我|说明|查一下|查询|联系一下)\s+",
     ]
 
@@ -282,6 +282,8 @@ class OrganizationResolver:
         patterns = [
             r"contact\s+info\s+for\s+(.+?)(?:\?|？|$)",
             r"what\s+is\s+the\s+contact\s+information\s+for\s+(.+?)(?:\?|？|$)",
+            r"how\s+can\s+i\s+contact\s+(.+?)(?:\?|？|$)",
+            r"how\s+do\s+i\s+contact\s+(.+?)(?:\?|？|$)",
             r"what\s+are\s+the\s+next\s+steps\s+for\s+(.+?)(?:\?|？|$)",
             r"give\s+me\s+(?:an?\s+)?(?:partnership\s+)?evidence\s+brief\s+for\s+(.+?)(?:\?|？|$)",
             r"show\s+me\s+the\s+relationship\s+graph\s+of\s+(.+?)(?:\?|？|$)",

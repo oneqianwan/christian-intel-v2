@@ -585,6 +585,24 @@ STOPWORDS = {
 class Brain:
     """LLM中枢大脑"""
 
+    ORCHESTRATION_LOOKUP_INTENTS = {
+        "organization_score_lookup",
+        "organization_relationship_graph_lookup",
+        "organization_contact_lookup",
+        "organization_partnership_recommendation_lookup",
+        "organization_partnership_action_plan_lookup",
+        "organization_partnership_evidence_brief_lookup",
+        "unsupported_or_ambiguous",
+    }
+
+    ORCHESTRATION_MODULE_TO_RESPONSE_KEY = {
+        "contact_intelligence": "contact_lookup",
+        "relationship_graph": "relationship_graph",
+        "partnership_recommender": "partnership_recommendations",
+        "partnership_action_planner": "partnership_action_plan",
+        "partnership_evidence_brief": "partnership_evidence_brief",
+    }
+
     def __init__(self):
         self.conversation_id: Optional[str] = None
         self._current_session_id: Optional[str] = None
@@ -676,6 +694,97 @@ class Brain:
 
     def _get_answer_composer_service(self, *, conversation_id: str = ""):
         return self._resolve_service("answer_composer", conversation_id=conversation_id)
+
+    def _get_orchestration_decision(self, user_message: str, conversation_id: str) -> dict:
+        _ = conversation_id
+        from services.brain_orchestrator import BrainOrchestrator
+
+        orchestrator = BrainOrchestrator()
+        return orchestrator.orchestrate(user_message)
+
+    def _should_handle_orchestration_decision(self, decision: Optional[dict]) -> bool:
+        if not isinstance(decision, dict):
+            return False
+        selected_intent = str(decision.get("selected_intent") or "").strip()
+        route_status = str(decision.get("route_status") or "").strip()
+        if selected_intent == "general_chat":
+            return False
+        if route_status != "ready":
+            return True
+        return selected_intent in self.ORCHESTRATION_LOOKUP_INTENTS
+
+    def _run_orchestrated_lookup(self, *, decision: dict, user_message: str, conversation_id: str, route: str) -> Optional[dict]:
+        selected_module = str(decision.get("selected_module") or "").strip()
+        resolver_map = {
+            "score_lookup": self._resolve_score_lookup_if_applicable,
+            "relationship_graph": self._resolve_relationship_graph_if_applicable,
+            "contact_intelligence": self._resolve_contact_lookup_if_applicable,
+            "partnership_recommender": self._resolve_recommendation_lookup_if_applicable,
+            "partnership_action_planner": self._resolve_action_plan_lookup_if_applicable,
+            "partnership_evidence_brief": self._resolve_evidence_brief_lookup_if_applicable,
+        }
+        resolver = resolver_map.get(selected_module)
+        if resolver is None:
+            return None
+        return resolver(user_message=user_message, conversation_id=conversation_id, route=route)
+
+    def _format_orchestration_safe_text(self, *, decision: dict, user_message: str) -> str:
+        route_status = str(decision.get("route_status") or "blocked").strip() or "blocked"
+        prompt = str(decision.get("clarification_prompt") or "").strip()
+        if not prompt:
+            if route_status == "unsupported":
+                prompt = (
+                    "请明确你要查询评分、关系图谱、联系方式、推荐、行动计划或证据简报。"
+                    if re.search(r"[\u4e00-\u9fff]", user_message or "")
+                    else "Please specify whether you want a score, relationship graph, contact info, recommendation, action plan, or evidence brief."
+                )
+            else:
+                prompt = (
+                    "当前查询还缺少足够信息，请补充机构名称。"
+                    if re.search(r"[\u4e00-\u9fff]", user_message or "")
+                    else "The current query still needs more information. Please provide the organization name."
+                )
+        lines = [
+            prompt,
+            f"status={route_status}",
+            "数据来源：本地 intelligence database。"
+            if re.search(r"[\u4e00-\u9fff]", user_message or "")
+            else "Data source: local intelligence database.",
+            "llm_used=false",
+        ]
+        return "\n".join(lines).strip()
+
+    def _build_safe_orchestration_reply(self, *, decision: dict, user_message: str) -> dict:
+        return {
+            "answer": self._clean_output(self._format_orchestration_safe_text(decision=decision, user_message=user_message)),
+            "evidence": [],
+        }
+
+    def _build_simple_lookup_response(self, *, decision: dict, lookup_result: dict) -> dict:
+        response = {
+            "answer": self._clean_output(str(lookup_result.get("answer") or "")),
+            "evidence": self._merge_evidence(lookup_result.get("evidence") or []),
+        }
+        selected_module = str(decision.get("selected_module") or "").strip()
+        payload_key = self.ORCHESTRATION_MODULE_TO_RESPONSE_KEY.get(selected_module)
+        if payload_key:
+            response[payload_key] = lookup_result.get(payload_key) or {}
+        return response
+
+    def _build_stream_lookup_done(self, *, decision: dict, lookup_result: dict, conversation_id: str) -> dict:
+        response_text = str(lookup_result.get("answer") or "")
+        done_chunk = {
+            "type": "done",
+            "full_content": response_text,
+            "evidence": self._merge_evidence(lookup_result.get("evidence") or []),
+            "direct_answer": True,
+            "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+        }
+        selected_module = str(decision.get("selected_module") or "").strip()
+        payload_key = self.ORCHESTRATION_MODULE_TO_RESPONSE_KEY.get(selected_module)
+        if payload_key:
+            done_chunk[payload_key] = lookup_result.get(payload_key) or {}
+        return done_chunk
 
     def _build_messages(
         self,
@@ -5507,6 +5616,29 @@ class Brain:
                 }
                 span.set_output_obj(result)
                 return result
+            orchestration_decision = self._get_orchestration_decision(user_message, conversation_id)
+            if self._should_handle_orchestration_decision(orchestration_decision):
+                if str(orchestration_decision.get("route_status") or "") == "ready":
+                    orchestrated_lookup_result = self._run_orchestrated_lookup(
+                        decision=orchestration_decision,
+                        user_message=user_message,
+                        conversation_id=conversation_id,
+                        route="simple",
+                    )
+                    if orchestrated_lookup_result is not None:
+                        result = self._build_simple_lookup_response(
+                            decision=orchestration_decision,
+                            lookup_result=orchestrated_lookup_result,
+                        )
+                        span.set_output_obj(result)
+                        return result
+                else:
+                    result = self._build_safe_orchestration_reply(
+                        decision=orchestration_decision,
+                        user_message=user_message,
+                    )
+                    span.set_output_obj(result)
+                    return result
             evidence_brief_lookup_result = self._resolve_evidence_brief_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
@@ -6021,6 +6153,59 @@ class Brain:
                     parser_result_data_found=True,
                 )
                 return
+            orchestration_decision = self._get_orchestration_decision(user_message, conversation_id)
+            if self._should_handle_orchestration_decision(orchestration_decision):
+                if str(orchestration_decision.get("route_status") or "") == "ready":
+                    orchestrated_lookup_result = self._run_orchestrated_lookup(
+                        decision=orchestration_decision,
+                        user_message=user_message,
+                        conversation_id=conversation_id,
+                        route="stream",
+                    )
+                    if orchestrated_lookup_result is not None:
+                        direct_answer = True
+                        parser_result = orchestrated_lookup_result.get("parsed_result")
+                        response_text = str(orchestrated_lookup_result.get("answer") or "")
+                        if response_text:
+                            yield {"type": "token", "content": response_text}
+                        done_chunk = self._build_stream_lookup_done(
+                            decision=orchestration_decision,
+                            lookup_result=orchestrated_lookup_result,
+                            conversation_id=conversation_id,
+                        )
+                        yield done_chunk
+                        span.set_output_obj(
+                            {
+                                "done": True,
+                                "selected_module": orchestration_decision.get("selected_module"),
+                                "organization_name": orchestrated_lookup_result.get("organization_name"),
+                            }
+                        )
+                        return
+                else:
+                    direct_answer = True
+                    safe_reply = self._build_safe_orchestration_reply(
+                        decision=orchestration_decision,
+                        user_message=user_message,
+                    )
+                    response_text = str(safe_reply.get("answer") or "")
+                    if response_text:
+                        yield {"type": "token", "content": response_text}
+                    yield {
+                        "type": "done",
+                        "full_content": response_text,
+                        "evidence": [],
+                        "direct_answer": True,
+                        "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
+                    }
+                    span.set_output_obj(
+                        {
+                            "done": True,
+                            "route_status": orchestration_decision.get("route_status"),
+                            "selected_module": orchestration_decision.get("selected_module"),
+                        }
+                    )
+                    return
             evidence_brief_lookup_result = self._resolve_evidence_brief_lookup_if_applicable(
                 user_message=user_message,
                 conversation_id=conversation_id,
