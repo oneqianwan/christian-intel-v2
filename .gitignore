@@ -10,6 +10,10 @@ backend/.tmp_*.py
 backend/*.db
 backend/*.db.*
 backend/_db_backups/
+backend/data/_db_backups/
+backend/data/chat_phase54a_ownership_test_*.db
+phase5_3c_final_uat.db
+*.tmp.db
 backend/_write_test.tmp
 backend/agent/.agent_last_run
 backend/services/.last_api_run
