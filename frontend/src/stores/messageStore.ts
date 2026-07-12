@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ContactPayload } from '../types/contactIntelligence'
 import type { PartnershipActionPlanPayload } from '../types/partnershipActionPlan'
+import type { PartnershipEvidenceBriefPayload } from '../types/partnershipEvidenceBrief'
 import type { PartnershipRecommendationPayload } from '../types/partnershipRecommendation'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 
@@ -18,6 +19,7 @@ export interface Message {
   contact_lookup?: ContactPayload
   partnership_recommendations?: PartnershipRecommendationPayload
   partnership_action_plan?: PartnershipActionPlanPayload
+  partnership_evidence_brief?: PartnershipEvidenceBriefPayload
 }
 
 interface MessageStore {
@@ -48,7 +50,8 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         JSON.stringify(existing.relationship_graph) === JSON.stringify(msg.relationship_graph) &&
         JSON.stringify(existing.contact_lookup) === JSON.stringify(msg.contact_lookup) &&
         JSON.stringify(existing.partnership_recommendations) === JSON.stringify(msg.partnership_recommendations) &&
-        JSON.stringify(existing.partnership_action_plan) === JSON.stringify(msg.partnership_action_plan)
+        JSON.stringify(existing.partnership_action_plan) === JSON.stringify(msg.partnership_action_plan) &&
+        JSON.stringify(existing.partnership_evidence_brief) === JSON.stringify(msg.partnership_evidence_brief)
 
       if (unchanged) {
         return s

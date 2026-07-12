@@ -11,12 +11,14 @@ import {
 import { isWatchAlertUiEnabled } from '../features/watchAlerts/identity'
 import { ActionPlanCard } from '../components/ActionPlanCard'
 import { ContactCard } from '../components/ContactCard'
+import { EvidenceBriefCard } from '../components/EvidenceBriefCard'
 import { IntelGraph } from '../components/IntelGraph'
 import { RecommendationCard } from '../components/RecommendationCard'
 import { WatchButton } from '../components/WatchButton'
 import { buildApiUrl } from '../services/api'
 import type { ContactPayload } from '../types/contactIntelligence'
 import type { PartnershipActionPlanPayload } from '../types/partnershipActionPlan'
+import type { PartnershipEvidenceBriefPayload } from '../types/partnershipEvidenceBrief'
 import type { PartnershipRecommendationPayload } from '../types/partnershipRecommendation'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 
@@ -94,6 +96,7 @@ export function OrgDetailPage() {
   const [contactPayload, setContactPayload] = useState<ContactPayload | null>(null)
   const [recommendationPayload, setRecommendationPayload] = useState<PartnershipRecommendationPayload | null>(null)
   const [actionPlanPayload, setActionPlanPayload] = useState<PartnershipActionPlanPayload | null>(null)
+  const [evidenceBriefPayload, setEvidenceBriefPayload] = useState<PartnershipEvidenceBriefPayload | null>(null)
   const [timeline, setTimeline] = useState<IntelItem[]>([])
   const [loading, setLoading] = useState(true)
   const [relationsLoading, setRelationsLoading] = useState(false)
@@ -104,6 +107,8 @@ export function OrgDetailPage() {
   const [recommendationsError, setRecommendationsError] = useState<string | null>(null)
   const [actionPlanLoading, setActionPlanLoading] = useState(false)
   const [actionPlanError, setActionPlanError] = useState<string | null>(null)
+  const [evidenceBriefLoading, setEvidenceBriefLoading] = useState(false)
+  const [evidenceBriefError, setEvidenceBriefError] = useState<string | null>(null)
   const relationTypeMap: Record<string, string> = {
     invested_in: '投资',
     co_invested: '共同投资',
@@ -122,6 +127,7 @@ export function OrgDetailPage() {
     void fetchContacts()
     void fetchRecommendations()
     void fetchActionPlan()
+    void fetchEvidenceBrief()
   }, [orgId])
 
   const fetchOrg = async () => {
@@ -217,6 +223,23 @@ export function OrgDetailPage() {
       setActionPlanError('行动计划加载失败。')
     } finally {
       setActionPlanLoading(false)
+    }
+  }
+
+  const fetchEvidenceBrief = async () => {
+    setEvidenceBriefLoading(true)
+    setEvidenceBriefError(null)
+    try {
+      const res = await fetch(buildApiUrl(`/dashboard/org/${orgId}/evidence-brief`))
+      if (!res.ok) throw new Error('fetch evidence brief failed')
+      const data = await res.json()
+      setEvidenceBriefPayload(data || null)
+    } catch (e) {
+      console.error('Failed to fetch evidence brief:', e)
+      setEvidenceBriefPayload(null)
+      setEvidenceBriefError('证据简报加载失败。')
+    } finally {
+      setEvidenceBriefLoading(false)
     }
   }
 
@@ -474,6 +497,30 @@ export function OrgDetailPage() {
         </div>
 
         <div>
+          <div style={{ ...cardStyle, marginBottom: 24 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Partnership Evidence Brief</h3>
+            {evidenceBriefLoading ? (
+              <div style={{ color: '#64748b', fontSize: 13 }}>Loading partnership evidence brief...</div>
+            ) : evidenceBriefPayload ? (
+              <EvidenceBriefCard payload={evidenceBriefPayload} errorMessage={evidenceBriefError} />
+            ) : evidenceBriefError ? (
+              <div
+                style={{
+                  color: '#b91c1c',
+                  fontSize: 13,
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                }}
+              >
+                {evidenceBriefError}
+              </div>
+            ) : (
+              <div style={{ color: '#999', fontSize: 13 }}>No evidence brief payload available</div>
+            )}
+          </div>
+
           <div style={{ ...cardStyle, marginBottom: 24 }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 16 }}>Partnership Action Plan</h3>
             {actionPlanLoading ? (

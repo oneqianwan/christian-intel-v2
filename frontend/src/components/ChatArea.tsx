@@ -9,9 +9,11 @@ import { useMessageStore } from '../stores/messageStore'
 import { ChatApiError, buildApiUrl, sendChatStream, fetchMessages, createConversation } from '../services/api'
 import type { ContactPayload } from '../types/contactIntelligence'
 import type { PartnershipActionPlanPayload } from '../types/partnershipActionPlan'
+import type { PartnershipEvidenceBriefPayload } from '../types/partnershipEvidenceBrief'
 import type { PartnershipRecommendationPayload } from '../types/partnershipRecommendation'
 import type { RelationshipGraphPayload } from '../types/relationshipGraph'
 import { ActionPlanCard } from './ActionPlanCard'
+import { EvidenceBriefCard } from './EvidenceBriefCard'
 import GlobalIntelCard from './GlobalIntelCard'
 import AgentAlerts from './AgentAlerts'
 import { CollectionPanel } from './CollectionPanel'
@@ -58,7 +60,7 @@ type MatchPayload = {
   matches: InvestorMatch[]
 }
 
-type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload | ContactPayload | PartnershipRecommendationPayload | PartnershipActionPlanPayload
+type _KeepFrontendAnswerAuditTypes = MatchPayload | RelationshipGraphPayload | ContactPayload | PartnershipRecommendationPayload | PartnershipActionPlanPayload | PartnershipEvidenceBriefPayload
 
 const md5 = (input: string): string => {
   const text = unescape(encodeURIComponent(String(input || '')))
@@ -223,6 +225,23 @@ const hasPartnershipActionPlanPayload = (value: unknown): value is PartnershipAc
     candidate.summary !== null &&
     typeof candidate.evidence === 'object' &&
     candidate.evidence !== null
+}
+
+const hasPartnershipEvidenceBriefPayload = (value: unknown): value is PartnershipEvidenceBriefPayload => {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return Array.isArray(candidate.risk_register) &&
+    Array.isArray(candidate.recommended_next_actions) &&
+    Array.isArray(candidate.do_not_proceed_if) &&
+    Array.isArray(candidate.warnings) &&
+    typeof candidate.summary === 'object' &&
+    candidate.summary !== null &&
+    typeof candidate.decision_rationale === 'object' &&
+    candidate.decision_rationale !== null &&
+    typeof candidate.evidence_sections === 'object' &&
+    candidate.evidence_sections !== null &&
+    typeof candidate.audit === 'object' &&
+    candidate.audit !== null
 }
 
 const stripMetaBlocks = (content: string): string =>
@@ -883,6 +902,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
           contact_lookup: hasContactPayload(m.contact_lookup) ? m.contact_lookup : undefined,
           partnership_recommendations: hasPartnershipRecommendationPayload(m.partnership_recommendations) ? m.partnership_recommendations : undefined,
           partnership_action_plan: hasPartnershipActionPlanPayload(m.partnership_action_plan) ? m.partnership_action_plan : undefined,
+          partnership_evidence_brief: hasPartnershipEvidenceBriefPayload(m.partnership_evidence_brief) ? m.partnership_evidence_brief : undefined,
         }))
       }).catch(async (error) => {
         if (error instanceof ChatApiError && error.status === 401) {
@@ -922,6 +942,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
             contact_lookup: hasContactPayload(m.contact_lookup) ? m.contact_lookup : undefined,
             partnership_recommendations: hasPartnershipRecommendationPayload(m.partnership_recommendations) ? m.partnership_recommendations : undefined,
             partnership_action_plan: hasPartnershipActionPlanPayload(m.partnership_action_plan) ? m.partnership_action_plan : undefined,
+            partnership_evidence_brief: hasPartnershipEvidenceBriefPayload(m.partnership_evidence_brief) ? m.partnership_evidence_brief : undefined,
           })
         )
       } catch (e) {
@@ -1310,6 +1331,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 : hasPartnershipActionPlanPayload(delivery.partnership_action_plan)
                   ? delivery.partnership_action_plan
                   : undefined,
+              partnership_evidence_brief: hasPartnershipEvidenceBriefPayload(data.partnership_evidence_brief)
+                ? data.partnership_evidence_brief
+                : hasPartnershipEvidenceBriefPayload(delivery.partnership_evidence_brief)
+                  ? delivery.partnership_evidence_brief
+                  : undefined,
             })
             streamContentRef.current = ''
             setStreamingContent('')
@@ -1690,6 +1716,7 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
               const contactLookup = hasContactPayload(msg.contact_lookup) ? msg.contact_lookup : null
               const recommendationLookup = hasPartnershipRecommendationPayload(msg.partnership_recommendations) ? msg.partnership_recommendations : null
               const actionPlanLookup = hasPartnershipActionPlanPayload(msg.partnership_action_plan) ? msg.partnership_action_plan : null
+              const evidenceBriefLookup = hasPartnershipEvidenceBriefPayload(msg.partnership_evidence_brief) ? msg.partnership_evidence_brief : null
               return (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', maxWidth: '86%' }}>
               {msg.role === 'assistant' && renderAssistantAvatar(60, 56, '#eef4ff')}
@@ -1727,6 +1754,11 @@ function ChatArea({ showSettings, onToggleSettings }: ChatAreaProps) {
                 {msg.role === 'assistant' && actionPlanLookup && (
                   <div style={{ marginTop: '12px' }}>
                     <ActionPlanCard payload={actionPlanLookup} />
+                  </div>
+                )}
+                {msg.role === 'assistant' && evidenceBriefLookup && (
+                  <div style={{ marginTop: '12px' }}>
+                    <EvidenceBriefCard payload={evidenceBriefLookup} />
                   </div>
                 )}
                 {msg.role === 'assistant' && ['intelligence_brief', 'analysis_brief', 'contact_full'].includes(msg.delivery_type || '') && parseBriefItems(visibleContent).length > 0 && (
