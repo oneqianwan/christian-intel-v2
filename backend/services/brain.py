@@ -697,7 +697,7 @@ class Brain:
 
     def _get_orchestration_decision(self, user_message: str, conversation_id: str) -> dict:
         _ = conversation_id
-        from services.brain_orchestrator import BrainOrchestrator
+        from .brain_orchestrator import BrainOrchestrator
 
         orchestrator = BrainOrchestrator()
         return orchestrator.orchestrate(user_message)
@@ -728,6 +728,42 @@ class Brain:
             return None
         return resolver(user_message=user_message, conversation_id=conversation_id, route=route)
 
+    def _extract_orchestration_payload(self, *, decision: dict, lookup_result: Optional[dict]) -> dict:
+        lookup_result = lookup_result or {}
+        selected_module = str(decision.get("selected_module") or "").strip()
+        if selected_module == "score_lookup":
+            return dict(lookup_result.get("score_snapshot") or {})
+        payload_key = self.ORCHESTRATION_MODULE_TO_RESPONSE_KEY.get(selected_module)
+        if not payload_key:
+            return {}
+        return dict(lookup_result.get(payload_key) or {})
+
+    def _build_response_contract(
+        self,
+        *,
+        decision: dict,
+        user_message: str,
+        answer: str,
+        lookup_result: Optional[dict] = None,
+        payload: Optional[dict] = None,
+        legacy_payload: Optional[dict] = None,
+        safe_message: Optional[str] = None,
+    ) -> dict:
+        from .response_contract import ResponseContractBuilder
+
+        builder = ResponseContractBuilder()
+        contract_payload = dict(payload or self._extract_orchestration_payload(decision=decision, lookup_result=lookup_result))
+        legacy = dict(legacy_payload if legacy_payload is not None else contract_payload)
+        return builder.build(
+            query=user_message,
+            orchestration_result=decision,
+            payload=contract_payload,
+            legacy_payload=legacy,
+            answer=answer,
+            safe_message=safe_message,
+            data_source=(lookup_result or {}).get("data_source"),
+        )
+
     def _format_orchestration_safe_text(self, *, decision: dict, user_message: str) -> str:
         route_status = str(decision.get("route_status") or "blocked").strip() or "blocked"
         prompt = str(decision.get("clarification_prompt") or "").strip()
@@ -755,10 +791,25 @@ class Brain:
         return "\n".join(lines).strip()
 
     def _build_safe_orchestration_reply(self, *, decision: dict, user_message: str) -> dict:
-        return {
-            "answer": self._clean_output(self._format_orchestration_safe_text(decision=decision, user_message=user_message)),
+        answer = self._clean_output(self._format_orchestration_safe_text(decision=decision, user_message=user_message))
+        response = {
+            "answer": answer,
             "evidence": [],
         }
+        response["response_contract"] = self._build_response_contract(
+            decision=decision,
+            user_message=user_message,
+            answer=answer,
+            payload={
+                "candidate_intents": list(decision.get("candidate_intents") or []),
+                "candidate_organizations": list(decision.get("candidate_organizations") or []),
+                "missing_parameters": list(decision.get("missing_parameters") or []),
+                "warnings": list(decision.get("warnings") or []),
+            },
+            legacy_payload={},
+            safe_message=answer,
+        )
+        return response
 
     def _build_simple_lookup_response(self, *, decision: dict, lookup_result: dict) -> dict:
         response = {
@@ -769,6 +820,12 @@ class Brain:
         payload_key = self.ORCHESTRATION_MODULE_TO_RESPONSE_KEY.get(selected_module)
         if payload_key:
             response[payload_key] = lookup_result.get(payload_key) or {}
+        response["response_contract"] = self._build_response_contract(
+            decision=decision,
+            user_message=str(decision.get("query") or ""),
+            answer=response["answer"],
+            lookup_result=lookup_result,
+        )
         return response
 
     def _build_stream_lookup_done(self, *, decision: dict, lookup_result: dict, conversation_id: str) -> dict:
@@ -784,6 +841,12 @@ class Brain:
         payload_key = self.ORCHESTRATION_MODULE_TO_RESPONSE_KEY.get(selected_module)
         if payload_key:
             done_chunk[payload_key] = lookup_result.get(payload_key) or {}
+        done_chunk["response_contract"] = self._build_response_contract(
+            decision=decision,
+            user_message=str(decision.get("query") or ""),
+            answer=response_text,
+            lookup_result=lookup_result,
+        )
         return done_chunk
 
     def _build_messages(
@@ -2710,6 +2773,23 @@ class Brain:
         org = self._find_organization_for_score_lookup(organization_name)
         db_lookup_ms = round((time.perf_counter() - db_started_at) * 1000.0, 3)
         if org is None:
+            score_snapshot = {
+                "organization": {
+                    "name": organization_name,
+                    "id": None,
+                },
+                "scores": {
+                    "people_score": None,
+                    "digital_score": None,
+                    "intel_score": None,
+                    "composite_score": None,
+                },
+                "requested_scores": list(requested_scores or []),
+                "available_scores": [],
+                "warnings": ["organization_not_found"],
+                "found": False,
+                "source": "database",
+            }
             mission_info = self._create_score_lookup_collection_mission(
                 organization_name=organization_name,
                 requested_scores=requested_scores,
@@ -2750,6 +2830,7 @@ class Brain:
                 "organization_name": organization_name,
                 "data_source": "database",
                 "llm_used": False,
+                "score_snapshot": score_snapshot,
                 "trace": trace_payload,
                 "mission_id": mission_info.get("mission_id"),
                 "mission_created": mission_info.get("mission_created"),
@@ -2760,6 +2841,18 @@ class Brain:
         available_fields = [field for field in requested_scores if score_payload.get(field) is not None]
         if not available_fields:
             resolved_organization_name = getattr(org, "name", organization_name)
+            score_snapshot = {
+                "organization": {
+                    "name": resolved_organization_name,
+                    "id": getattr(org, "id", None),
+                },
+                "scores": dict(score_payload or {}),
+                "requested_scores": list(requested_scores or []),
+                "available_scores": [],
+                "warnings": ["score_data_not_found"],
+                "found": False,
+                "source": "database",
+            }
             mission_info = self._create_score_lookup_collection_mission(
                 organization_name=resolved_organization_name,
                 requested_scores=requested_scores,
@@ -2800,6 +2893,7 @@ class Brain:
                 "organization_name": resolved_organization_name,
                 "data_source": "database",
                 "llm_used": False,
+                "score_snapshot": score_snapshot,
                 "trace": trace_payload,
                 "mission_id": mission_info.get("mission_id"),
                 "mission_created": mission_info.get("mission_created"),
@@ -2807,6 +2901,18 @@ class Brain:
             }
 
         resolved_organization_name = getattr(org, "name", organization_name)
+        score_snapshot = {
+            "organization": {
+                "name": resolved_organization_name,
+                "id": getattr(org, "id", None),
+            },
+            "scores": dict(score_payload or {}),
+            "requested_scores": list(requested_scores or []),
+            "available_scores": list(available_fields or []),
+            "warnings": [],
+            "found": True,
+            "source": "database",
+        }
         trace_payload = self._store_score_lookup_trace(
             {
                 "request_id": trace_request_id,
@@ -2842,6 +2948,7 @@ class Brain:
             "organization_name": resolved_organization_name,
             "data_source": "database",
             "llm_used": False,
+            "score_snapshot": score_snapshot,
             "trace": trace_payload,
             "mission_id": None,
             "mission_created": False,
@@ -6195,6 +6302,7 @@ class Brain:
                         "type": "done",
                         "full_content": response_text,
                         "evidence": [],
+                        "response_contract": safe_reply.get("response_contract") or {},
                         "direct_answer": True,
                         "welcome_reply_uuid": lookup_welcome_reply_uuid(conversation_id, response_text),
                     }
