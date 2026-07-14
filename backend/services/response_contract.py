@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
+
+from .observability import ResponseObservabilityBuilder
 
 
 class ResponseContractBuilder:
@@ -58,6 +60,7 @@ class ResponseContractBuilder:
         answer: str = "",
         safe_message: Optional[str] = None,
         data_source: Optional[str] = None,
+        execution_trace: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         payload = dict(payload or {})
         legacy_payload = dict(legacy_payload or {})
@@ -88,10 +91,12 @@ class ResponseContractBuilder:
         if safe_message is None and route_status != "ready":
             safe_message = str(decision.get("clarification_prompt") or answer or "").strip() or None
 
+        response_id = self._new_id("resp")
+        trace_id = self._new_id("trace")
         contract = {
             "response_contract_version": self.RESPONSE_CONTRACT_VERSION,
-            "response_id": self._new_id("resp"),
-            "trace_id": self._new_id("trace"),
+            "response_id": response_id,
+            "trace_id": trace_id,
             "query": str(query or ""),
             "normalized_query": str(decision.get("normalized_query") or query or ""),
             "route_status": route_status,
@@ -135,6 +140,11 @@ class ResponseContractBuilder:
             "trace": trace,
             "errors": [],
         }
+        contract["observability"] = ResponseObservabilityBuilder().build(
+            contract=contract,
+            orchestration_result=decision,
+            execution_trace=execution_trace,
+        )
         return contract
 
     def _resolve_payload_type(self, *, route_status: str, decision: dict[str, Any]) -> str:

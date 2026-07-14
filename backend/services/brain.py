@@ -762,6 +762,7 @@ class Brain:
             answer=answer,
             safe_message=safe_message,
             data_source=(lookup_result or {}).get("data_source"),
+            execution_trace=(lookup_result or {}).get("trace"),
         )
 
     def _format_orchestration_safe_text(self, *, decision: dict, user_message: str) -> str:
