@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
+from dependencies.auth import require_authenticated_user
 from models.schemas import (
     OrganizationContactPayload,
     OrganizationRelationsResponse,
@@ -23,7 +24,7 @@ from services.partnership_evidence_brief import build_partnership_evidence_brief
 from services.partnership_recommender import build_partnership_recommendations
 from services.relation_mapper import RelationMapper, build_organization_graph
 
-router = APIRouter(prefix="/api/dashboard/org", tags=["org-detail"])
+router = APIRouter(prefix="/api/dashboard/org", tags=["org-detail"], dependencies=[Depends(require_authenticated_user)])
 
 
 @router.get("/{org_id}")

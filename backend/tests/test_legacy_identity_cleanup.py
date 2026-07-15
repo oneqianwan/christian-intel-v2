@@ -4,15 +4,22 @@ import uuid
 
 import pytest
 
-from test_auth_api import runtime
+from test_auth_api import _reset_auth_settings, runtime
+
+
+_RUNTIME_CONFIG = None
+_RUNTIME_MAIN = None
 
 
 @pytest.fixture(autouse=True)
 def reset_db(runtime):
+    global _RUNTIME_CONFIG, _RUNTIME_MAIN
     database = runtime["database"]
     auth_models = runtime["auth_models"]
     client = runtime["client"]
     auth_service = runtime["auth_service"]
+    _RUNTIME_CONFIG = runtime["config"]
+    _RUNTIME_MAIN = runtime["main"]
 
     db = database.SessionLocal()
     try:
@@ -35,6 +42,7 @@ def reset_db(runtime):
         if lock is not None and attempts is not None:
             with lock:
                 attempts.clear()
+    _reset_auth_settings(runtime)
 
 
 def _error_code(response) -> str | None:
@@ -46,9 +54,37 @@ def _error_code(response) -> str | None:
 
 
 def _set_auth_enabled(enabled: bool) -> None:
-    import config as config_module
+    value = bool(enabled)
+    if _RUNTIME_CONFIG is not None:
+        _RUNTIME_CONFIG.settings.AUTH_V1_ENABLED = value
+    import sys
 
-    config_module.settings.AUTH_V1_ENABLED = bool(enabled)
+    config_module = sys.modules.get("config")
+    if config_module is not None:
+        config_module.settings.AUTH_V1_ENABLED = value
+    auth_dependencies = sys.modules.get("dependencies.auth")
+    if auth_dependencies is not None:
+        auth_dependencies.config.settings.AUTH_V1_ENABLED = value
+    if _RUNTIME_MAIN is not None:
+        visited: set[int] = set()
+
+        def _sync_dependant(dependant) -> None:
+            for dependency in getattr(dependant, "dependencies", []):
+                _sync_dependant(dependency)
+            call = getattr(dependant, "call", None)
+            if call is None or id(call) in visited:
+                return
+            visited.add(id(call))
+            globals_dict = getattr(call, "__globals__", {})
+            config_module = globals_dict.get("config")
+            settings = getattr(config_module, "settings", None)
+            if settings is not None and hasattr(settings, "AUTH_V1_ENABLED"):
+                settings.AUTH_V1_ENABLED = value
+
+        for route in getattr(_RUNTIME_MAIN.app, "routes", []):
+            dependant = getattr(route, "dependant", None)
+            if dependant is not None:
+                _sync_dependant(dependant)
 
 
 def _create_user(runtime, *, email: str, password: str, role: str = "viewer", status: str = "active"):
@@ -152,9 +188,8 @@ def test_02_feedback_auth_mode_unauthenticated_returns_401(runtime):
     assert _error_code(response) == "AUTH_REQUIRED"
 
 
-def test_03_feedback_auth_disabled_preserves_legacy_behavior(runtime):
+def test_03_feedback_auth_disabled_fails_closed(runtime):
     client = runtime["client"]
-    database = runtime["database"]
     _set_auth_enabled(False)
 
     response = client.post(
@@ -163,32 +198,18 @@ def test_03_feedback_auth_disabled_preserves_legacy_behavior(runtime):
         json={"feedback_type": "match_not_useful", "content": "legacy"},
     )
 
-    assert response.status_code == 200
-
-    db = database.SessionLocal()
-    try:
-        record = db.query(database.UserFeedback).one()
-        assert record.user_id is None
-        assert record.session_id == "legacy-123"
-    finally:
-        db.close()
+    assert response.status_code == 503
+    assert _error_code(response) == "AUTH_DISABLED"
 
 
-def test_04_feedback_auth_disabled_defaults_to_session_1(runtime):
+def test_04_feedback_auth_disabled_without_header_fails_closed(runtime):
     client = runtime["client"]
-    database = runtime["database"]
     _set_auth_enabled(False)
 
     response = client.post("/api/feedback", json={"feedback_type": "match_useful"})
 
-    assert response.status_code == 200
-
-    db = database.SessionLocal()
-    try:
-        record = db.query(database.UserFeedback).one()
-        assert record.session_id == "session-1"
-    finally:
-        db.close()
+    assert response.status_code == 503
+    assert _error_code(response) == "AUTH_DISABLED"
 
 
 def test_05_bookmarks_auth_mode_uses_current_user_not_default(runtime):
@@ -265,27 +286,15 @@ def test_07_bookmarks_auth_mode_unauthenticated_returns_401(runtime):
     assert _error_code(list_response) == "AUTH_REQUIRED"
 
 
-def test_08_bookmarks_auth_disabled_preserves_legacy_default_behavior(runtime):
+def test_08_bookmarks_auth_disabled_fails_closed(runtime):
     client = runtime["client"]
-    database = runtime["database"]
     _set_auth_enabled(False)
     _seed_item(runtime, item_id="item-legacy")
 
     create_response = client.post("/api/bookmarks", params={"item_id": "item-legacy", "note": "legacy"})
     list_response = client.get("/api/bookmarks")
 
-    assert create_response.status_code == 200
-    assert list_response.status_code == 200
-    assert len(list_response.json()) == 1
-    bookmark_id = list_response.json()[0]["bookmark_id"]
-
-    db = database.SessionLocal()
-    try:
-        bookmark = db.query(database.Bookmark).one()
-        assert bookmark.user_id == "default"
-    finally:
-        db.close()
-
-    delete_response = client.delete(f"/api/bookmarks/{bookmark_id}")
-    assert delete_response.status_code == 200
-    assert delete_response.json()["status"] == "deleted"
+    assert create_response.status_code == 503
+    assert _error_code(create_response) == "AUTH_DISABLED"
+    assert list_response.status_code == 503
+    assert _error_code(list_response) == "AUTH_DISABLED"

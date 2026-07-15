@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from dependencies.auth import get_current_user_if_auth_enabled, require_admin
+from dependencies.auth import require_admin, require_authenticated_user
 from models.auth import User
 from models.database import UserFeedback, get_db
 
@@ -24,14 +24,13 @@ class FeedbackIn(BaseModel):
 def submit_feedback(
     feedback: FeedbackIn,
     db: Session = Depends(get_db),
-    x_session_id: str | None = Header(default=None, alias="x-session-id"),
-    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    current_user: User = Depends(require_authenticated_user),
 ):
     """提交用户反馈"""
-    session_id = f"user:{current_user.id}" if current_user is not None else (x_session_id or "session-1")
+    session_id = f"user:{current_user.id}"
     record = UserFeedback(
         session_id=session_id,
-        user_id=str(current_user.id) if current_user is not None else None,
+        user_id=str(current_user.id),
         feedback_type=feedback.feedback_type,
         content=feedback.content or "",
         related_entity=feedback.related_entity,

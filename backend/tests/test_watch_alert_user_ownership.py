@@ -59,6 +59,7 @@ def _set_flags(
     v1: bool = True,
     notifications: bool = True,
     scheduler: bool = True,
+    legacy_allowed: bool = False,
 ) -> None:
     config = runtime["config"]
     config.settings.WATCH_ALERT_V1_ENABLED = v1
@@ -67,6 +68,7 @@ def _set_flags(
     config.settings.WATCH_ALERT_USER_OWNERSHIP_ENABLED = ownership
     config.settings.AUTH_V1_ENABLED = auth
     config.settings.AUTH_COOKIE_REQUIRED = False
+    config.settings.ALLOW_LEGACY_SESSION_ID = legacy_allowed
 
 
 @pytest.fixture(scope="module")
@@ -111,7 +113,7 @@ def runtime():
 
 @pytest.fixture(autouse=True)
 def reset_state(runtime):
-    _set_flags(runtime, ownership=False, auth=True, v1=True, notifications=True, scheduler=True)
+    _set_flags(runtime, ownership=True, auth=True, v1=True, notifications=True, scheduler=True, legacy_allowed=False)
     runtime["client"].cookies.clear()
     rate_limiter = getattr(runtime["auth_service"], "_default_rate_limiter", None)
     if rate_limiter is not None and hasattr(rate_limiter, "_attempts"):
@@ -281,11 +283,13 @@ def _seed_legacy_watch_chain(runtime, *, legacy_session_id: str, entity_id: str)
         session.close()
 
 
-def test_01_feature_flag_default_false(runtime):
-    assert runtime["config"].settings.feature_flag("WATCH_ALERT_USER_OWNERSHIP_ENABLED") is False
+def test_01_feature_flag_default_safe(runtime):
+    assert runtime["config"].settings.feature_flag("WATCH_ALERT_USER_OWNERSHIP_ENABLED") is True
+    assert runtime["config"].settings.ALLOW_LEGACY_SESSION_ID is False
 
 
 def test_02_flag_false_keeps_x_session_id_legacy_mode(runtime):
+    _set_flags(runtime, ownership=False, auth=True, v1=True, notifications=True, scheduler=True, legacy_allowed=True)
     _create_org(runtime, "org-legacy", name="Org Legacy")
 
     response = _create_watch_with_legacy_header(

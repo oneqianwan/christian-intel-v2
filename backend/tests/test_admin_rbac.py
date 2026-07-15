@@ -7,7 +7,10 @@ from fastapi import Body, Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from test_auth_api import runtime
+from test_auth_api import _reset_auth_settings, runtime
+
+
+_RUNTIME_CONFIG = None
 
 
 class RoleProbeRequest(BaseModel):
@@ -16,10 +19,12 @@ class RoleProbeRequest(BaseModel):
 
 @pytest.fixture(autouse=True)
 def reset_db(runtime):
+    global _RUNTIME_CONFIG
     database = runtime["database"]
     auth_models = runtime["auth_models"]
     client = runtime["client"]
     auth_service = runtime["auth_service"]
+    _RUNTIME_CONFIG = runtime["config"]
 
     db = database.SessionLocal()
     try:
@@ -37,6 +42,7 @@ def reset_db(runtime):
         if lock is not None and attempts is not None:
             with lock:
                 attempts.clear()
+    _reset_auth_settings(runtime)
 
 
 def _error_code(response) -> str | None:
@@ -48,9 +54,17 @@ def _error_code(response) -> str | None:
 
 
 def _set_auth_enabled(enabled: bool) -> None:
-    import config as config_module
+    value = bool(enabled)
+    if _RUNTIME_CONFIG is not None:
+        _RUNTIME_CONFIG.settings.AUTH_V1_ENABLED = value
+    import sys
 
-    config_module.settings.AUTH_V1_ENABLED = bool(enabled)
+    config_module = sys.modules.get("config")
+    if config_module is not None:
+        config_module.settings.AUTH_V1_ENABLED = value
+    auth_dependencies = sys.modules.get("dependencies.auth")
+    if auth_dependencies is not None:
+        auth_dependencies.config.settings.AUTH_V1_ENABLED = value
 
 
 def _create_user(runtime, *, email: str, password: str, role: str = "viewer", status: str = "active"):

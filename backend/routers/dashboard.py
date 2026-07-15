@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from dependencies.auth import require_admin
+from dependencies.auth import require_admin, require_authenticated_user
 from models.auth import User
 from models.database import (
     FieldChangeHistory,
@@ -24,7 +24,7 @@ from models.database import (
 from services.history_recorder import record_change
 from services.quality_scorer import ProfileQualityScorer, get_t1_quality_summary
 
-router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"], dependencies=[Depends(require_authenticated_user)])
 
 
 class ManualUpdateRequest(BaseModel):

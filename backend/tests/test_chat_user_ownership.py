@@ -16,10 +16,12 @@ def _set_flags(chat_runtime, *, ownership: bool, auth_enabled: bool = True) -> N
     chat_runtime["config"].settings.CHAT_USER_OWNERSHIP_ENABLED = ownership
     chat_runtime["config"].settings.AUTH_V1_ENABLED = auth_enabled
     chat_runtime["config"].settings.AUTH_COOKIE_REQUIRED = False
+    chat_runtime["config"].settings.ALLOW_PUBLIC_CORE_APIS = (not ownership) and (not auth_enabled)
 
 
-def test_01_feature_flag_default_false(chat_runtime):
-    assert chat_runtime["config"].settings.CHAT_USER_OWNERSHIP_ENABLED is False
+def test_01_feature_flag_default_safe(chat_runtime):
+    assert chat_runtime["config"].settings.CHAT_USER_OWNERSHIP_ENABLED is True
+    assert chat_runtime["config"].settings.ALLOW_PUBLIC_CORE_APIS is False
 
 
 def test_02_flag_false_legacy_chat_remains_unauthenticated(chat_runtime, monkeypatch):

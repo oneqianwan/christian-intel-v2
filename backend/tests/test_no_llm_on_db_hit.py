@@ -11,6 +11,7 @@ def _set_flags(chat_runtime, *, ownership: bool, auth_enabled: bool = True) -> N
     chat_runtime["config"].settings.CHAT_USER_OWNERSHIP_ENABLED = ownership
     chat_runtime["config"].settings.AUTH_V1_ENABLED = auth_enabled
     chat_runtime["config"].settings.AUTH_COOKIE_REQUIRED = False
+    chat_runtime["config"].settings.ALLOW_PUBLIC_CORE_APIS = (not ownership) and (not auth_enabled)
 
 
 def _seed_victory_philippines(chat_runtime, *, org_id: str) -> None:

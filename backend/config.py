@@ -42,10 +42,15 @@ FEATURE_FLAG_DEFAULTS = {
     "WATCH_ALERT_V1_ENABLED": False,
     "WATCH_ALERT_SCHEDULER_ENABLED": False,
     "WATCH_ALERT_NOTIFICATIONS_ENABLED": False,
-    "WATCH_ALERT_USER_OWNERSHIP_ENABLED": False,
-    "CHAT_USER_OWNERSHIP_ENABLED": False,
-    "AUTH_V1_ENABLED": False,
-    "AUTH_COOKIE_REQUIRED": False,
+    "WATCH_ALERT_USER_OWNERSHIP_ENABLED": True,
+    "CHAT_USER_OWNERSHIP_ENABLED": True,
+    "AUTH_V1_ENABLED": True,
+    "AUTH_COOKIE_REQUIRED": True,
+    "BOOKMARKS_USER_OWNERSHIP_ENABLED": True,
+    "FEEDBACK_USER_OWNERSHIP_ENABLED": True,
+    "ALLOW_ANONYMOUS_FEEDBACK": False,
+    "ALLOW_LEGACY_SESSION_ID": False,
+    "ALLOW_PUBLIC_CORE_APIS": False,
 }
 
 
@@ -86,6 +91,11 @@ class FeatureFlags(BaseModel):
     CHAT_USER_OWNERSHIP_ENABLED: bool = FEATURE_FLAG_DEFAULTS["CHAT_USER_OWNERSHIP_ENABLED"]
     AUTH_V1_ENABLED: bool = FEATURE_FLAG_DEFAULTS["AUTH_V1_ENABLED"]
     AUTH_COOKIE_REQUIRED: bool = FEATURE_FLAG_DEFAULTS["AUTH_COOKIE_REQUIRED"]
+    BOOKMARKS_USER_OWNERSHIP_ENABLED: bool = FEATURE_FLAG_DEFAULTS["BOOKMARKS_USER_OWNERSHIP_ENABLED"]
+    FEEDBACK_USER_OWNERSHIP_ENABLED: bool = FEATURE_FLAG_DEFAULTS["FEEDBACK_USER_OWNERSHIP_ENABLED"]
+    ALLOW_ANONYMOUS_FEEDBACK: bool = FEATURE_FLAG_DEFAULTS["ALLOW_ANONYMOUS_FEEDBACK"]
+    ALLOW_LEGACY_SESSION_ID: bool = FEATURE_FLAG_DEFAULTS["ALLOW_LEGACY_SESSION_ID"]
+    ALLOW_PUBLIC_CORE_APIS: bool = FEATURE_FLAG_DEFAULTS["ALLOW_PUBLIC_CORE_APIS"]
 
     def to_dict(self) -> dict[str, bool]:
         return {name: bool(value) for name, value in self.model_dump().items()}
@@ -103,6 +113,8 @@ class ProviderConfig(BaseModel):
 
 class Settings(BaseSettings):
     DATABASE_URL: str = f"sqlite:///{(BACKEND_DIR / 'cio_intelligence.db').as_posix()}"
+    APP_ENV: str = "development"
+    DEPLOYMENT_ENV: str = ""
     LLM_PROVIDER: str = "deepseek"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
@@ -143,6 +155,11 @@ class Settings(BaseSettings):
     CHAT_USER_OWNERSHIP_ENABLED: bool = FEATURE_FLAG_DEFAULTS["CHAT_USER_OWNERSHIP_ENABLED"]
     AUTH_V1_ENABLED: bool = FEATURE_FLAG_DEFAULTS["AUTH_V1_ENABLED"]
     AUTH_COOKIE_REQUIRED: bool = FEATURE_FLAG_DEFAULTS["AUTH_COOKIE_REQUIRED"]
+    BOOKMARKS_USER_OWNERSHIP_ENABLED: bool = FEATURE_FLAG_DEFAULTS["BOOKMARKS_USER_OWNERSHIP_ENABLED"]
+    FEEDBACK_USER_OWNERSHIP_ENABLED: bool = FEATURE_FLAG_DEFAULTS["FEEDBACK_USER_OWNERSHIP_ENABLED"]
+    ALLOW_ANONYMOUS_FEEDBACK: bool = FEATURE_FLAG_DEFAULTS["ALLOW_ANONYMOUS_FEEDBACK"]
+    ALLOW_LEGACY_SESSION_ID: bool = FEATURE_FLAG_DEFAULTS["ALLOW_LEGACY_SESSION_ID"]
+    ALLOW_PUBLIC_CORE_APIS: bool = FEATURE_FLAG_DEFAULTS["ALLOW_PUBLIC_CORE_APIS"]
     AUTH_COOKIE_NAME: str = "cio_session"
     AUTH_SESSION_TTL_SECONDS: int = 86400
     AUTH_COOKIE_SECURE: bool = False
@@ -168,6 +185,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def normalize_database_url(self):
+        self.APP_ENV = str(self.APP_ENV or "development").strip().lower() or "development"
+        self.DEPLOYMENT_ENV = str(self.DEPLOYMENT_ENV or "").strip().lower()
+
         if self.DATABASE_URL.startswith("sqlite:///"):
             raw_path = self.DATABASE_URL[len("sqlite:///") :]
             db_path = Path(raw_path)
@@ -216,6 +236,21 @@ class Settings(BaseSettings):
         if int(self.AUTH_PASSWORD_MIN_LENGTH) > int(self.AUTH_PASSWORD_MAX_LENGTH):
             raise ValueError("AUTH_PASSWORD_MIN_LENGTH must be <= AUTH_PASSWORD_MAX_LENGTH")
         return self
+
+    def is_development_like(self) -> bool:
+        normalized_app_env = str(self.APP_ENV or "").strip().lower()
+        normalized_deployment_env = str(self.DEPLOYMENT_ENV or "").strip().lower()
+        allowed = {"development", "dev", "local", "test", "testing"}
+        return normalized_app_env in allowed or normalized_deployment_env in allowed
+
+    def public_core_apis_enabled(self) -> bool:
+        return bool(self.ALLOW_PUBLIC_CORE_APIS) and self.is_development_like()
+
+    def legacy_session_id_enabled(self) -> bool:
+        return bool(self.ALLOW_LEGACY_SESSION_ID) and self.is_development_like()
+
+    def anonymous_feedback_enabled(self) -> bool:
+        return bool(self.ALLOW_ANONYMOUS_FEEDBACK) and self.is_development_like()
 
     @property
     def FEATURE_FLAGS(self) -> FeatureFlags:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from dependencies.auth import (
     normalize_role_value,
     require_admin,
+    require_auth_enabled,
     require_super_admin,
 )
 from models.auth import User
@@ -24,7 +25,7 @@ from services.auth_service import revoke_all_user_sessions
 from services import score_draft_service
 
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_auth_enabled)])
 
 USER_STATUS_VALUES: tuple[str, ...] = ("active", "disabled", "pending")
 APPROVAL_REJECTION_REASONS: frozenset[str] = frozenset(

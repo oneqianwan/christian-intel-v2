@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.orm import Session
 
+from dependencies.auth import require_authenticated_user
 from models.database import get_db, Source
 from services.pdf_exporter import generate_pdf_content, html_to_pdf
 from services.scoring import get_scored_items
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_authenticated_user)])
 
 
 def _build_html(query: str, country: str, db: Session) -> str:

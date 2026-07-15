@@ -54,6 +54,7 @@ def _set_flags(
     config.settings.CHAT_USER_OWNERSHIP_ENABLED = chat_ownership
     config.settings.AUTH_V1_ENABLED = auth_enabled
     config.settings.AUTH_COOKIE_REQUIRED = False
+    config.settings.ALLOW_PUBLIC_CORE_APIS = (not chat_ownership) and (not auth_enabled)
 
 
 @pytest.fixture(scope="module")
@@ -93,7 +94,7 @@ def chat_runtime():
 
 @pytest.fixture(autouse=True)
 def reset_chat_runtime(chat_runtime):
-    _set_flags(chat_runtime, chat_ownership=False, auth_enabled=True)
+    _set_flags(chat_runtime, chat_ownership=True, auth_enabled=True)
     chat_runtime["client"].cookies.clear()
 
     limiter = getattr(chat_runtime["auth_service"], "_default_rate_limiter", None)

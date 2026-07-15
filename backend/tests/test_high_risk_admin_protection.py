@@ -4,15 +4,22 @@ import uuid
 
 import pytest
 
-from test_auth_api import runtime
+from test_auth_api import _reset_auth_settings, runtime
+
+
+_RUNTIME_CONFIG = None
+_RUNTIME_MAIN = None
 
 
 @pytest.fixture(autouse=True)
 def reset_db(runtime):
+    global _RUNTIME_CONFIG, _RUNTIME_MAIN
     database = runtime["database"]
     auth_models = runtime["auth_models"]
     client = runtime["client"]
     auth_service = runtime["auth_service"]
+    _RUNTIME_CONFIG = runtime["config"]
+    _RUNTIME_MAIN = runtime["main"]
 
     db = database.SessionLocal()
     try:
@@ -37,6 +44,7 @@ def reset_db(runtime):
         if lock is not None and attempts is not None:
             with lock:
                 attempts.clear()
+    _reset_auth_settings(runtime)
 
 
 def _error_code(response) -> str | None:
@@ -48,9 +56,37 @@ def _error_code(response) -> str | None:
 
 
 def _set_auth_enabled(enabled: bool) -> None:
-    import config as config_module
+    value = bool(enabled)
+    if _RUNTIME_CONFIG is not None:
+        _RUNTIME_CONFIG.settings.AUTH_V1_ENABLED = value
+    import sys
 
-    config_module.settings.AUTH_V1_ENABLED = bool(enabled)
+    config_module = sys.modules.get("config")
+    if config_module is not None:
+        config_module.settings.AUTH_V1_ENABLED = value
+    auth_dependencies = sys.modules.get("dependencies.auth")
+    if auth_dependencies is not None:
+        auth_dependencies.config.settings.AUTH_V1_ENABLED = value
+    if _RUNTIME_MAIN is not None:
+        visited: set[int] = set()
+
+        def _sync_dependant(dependant) -> None:
+            for dependency in getattr(dependant, "dependencies", []):
+                _sync_dependant(dependency)
+            call = getattr(dependant, "call", None)
+            if call is None or id(call) in visited:
+                return
+            visited.add(id(call))
+            globals_dict = getattr(call, "__globals__", {})
+            config_module = globals_dict.get("config")
+            settings = getattr(config_module, "settings", None)
+            if settings is not None and hasattr(settings, "AUTH_V1_ENABLED"):
+                settings.AUTH_V1_ENABLED = value
+
+        for route in getattr(_RUNTIME_MAIN.app, "routes", []):
+            dependant = getattr(route, "dependant", None)
+            if dependant is not None:
+                _sync_dependant(dependant)
 
 
 def _create_user(runtime, *, email: str, password: str, role: str, status: str = "active"):
@@ -240,14 +276,14 @@ def test_09_dashboard_write_admin_and_super_admin_return_200(runtime, role):
     assert response.json()["success"] is True
 
 
-def test_10_dashboard_read_endpoint_keeps_current_behavior(runtime):
+def test_10_dashboard_read_endpoint_requires_auth(runtime):
     client = runtime["client"]
     _set_auth_enabled(True)
 
     response = client.get("/api/dashboard/coverage")
 
-    assert response.status_code == 200
-    assert "metrics" in response.json()
+    assert response.status_code == 401
+    assert _error_code(response) == "AUTH_REQUIRED"
 
 
 def test_11_feedback_stats_require_admin(runtime):

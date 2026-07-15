@@ -22,12 +22,16 @@ def watch_alert_user_ownership_enabled() -> bool:
     return bool(settings.feature_flag("WATCH_ALERT_USER_OWNERSHIP_ENABLED"))
 
 
+def _legacy_session_bypass_enabled() -> bool:
+    return bool(settings.legacy_session_id_enabled()) and not watch_alert_user_ownership_enabled()
+
+
 def get_watch_alert_current_user_id(
     request: Request,
     db: Session = Depends(get_db),
     x_session_id: Annotated[str | None, Header(alias="x-session-id")] = None,
 ) -> str:
-    if watch_alert_user_ownership_enabled():
+    if not _legacy_session_bypass_enabled():
         user = resolve_user_for_request(request=request, db=db, touch_last_seen=True)
         return str(user.id)
 

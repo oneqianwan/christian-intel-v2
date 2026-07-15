@@ -16,7 +16,9 @@ def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
 
 
 def is_chat_user_ownership_enabled() -> bool:
-    return bool(config.settings.CHAT_USER_OWNERSHIP_ENABLED)
+    if bool(config.settings.public_core_apis_enabled()) and not bool(config.settings.CHAT_USER_OWNERSHIP_ENABLED):
+        return False
+    return True
 
 
 def get_owner_user_id(current_user) -> str | None:

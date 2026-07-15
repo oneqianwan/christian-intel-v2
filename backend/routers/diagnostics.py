@@ -1,9 +1,10 @@
 import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from dependencies.auth import require_authenticated_user
 from models.database import get_db, RequestTrace, Message, Mission, JobRun
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_authenticated_user)])
 
 
 @router.get("/diagnostics/request/{request_id}")

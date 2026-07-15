@@ -3,16 +3,14 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from dependencies.auth import get_current_user_if_auth_enabled
+from dependencies.auth import require_authenticated_user
 from models.auth import User
 from models.database import Bookmark, IntelligenceItem, get_db
 
 router = APIRouter()
 
 
-def _resolve_bookmark_user_id(current_user: User | None) -> str:
-    if current_user is None:
-        return "default"
+def _resolve_bookmark_user_id(current_user: User) -> str:
     return str(current_user.id)
 
 
@@ -20,7 +18,7 @@ def _resolve_bookmark_user_id(current_user: User | None) -> str:
 def create_bookmark(
     item_id: str,
     note: str = "",
-    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     """收藏情报条目。"""
@@ -52,7 +50,7 @@ def create_bookmark(
 
 @router.get("/bookmarks")
 def list_bookmarks(
-    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     """列出收藏的情报。"""
@@ -82,7 +80,7 @@ def list_bookmarks(
 @router.delete("/bookmarks/{bookmark_id}")
 def delete_bookmark(
     bookmark_id: str,
-    current_user: User | None = Depends(get_current_user_if_auth_enabled),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     """取消收藏。"""
