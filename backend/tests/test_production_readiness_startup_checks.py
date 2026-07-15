@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -87,6 +88,7 @@ def test_startup_imports_are_available_and_llm_key_is_not_required(startup_runti
     assert report["environment"]["database_config_ok"] is True
     assert report["environment"]["required_env_present"] is True
     assert report["environment"]["dangerous_debug_mode"] is False
+    assert report["environment"]["account_token_storage_ok"] is True
     assert report["core_brain"]["intent_router_ok"] is True
     assert report["core_brain"]["organization_resolver_ok"] is True
     assert report["core_brain"]["brain_orchestrator_ok"] is True
@@ -102,3 +104,17 @@ def test_startup_report_omits_secret_values(startup_runtime, monkeypatch):
 
     assert "do-not-print-this-secret" not in serialized
     assert report["status"] in {"ready", "degraded", "blocked"}
+
+
+def test_startup_report_detects_missing_account_tokens_table(startup_runtime):
+    database = startup_runtime["database"]
+    checker = startup_runtime["readiness_module"].ProductionReadinessChecker()
+
+    with database.engine.begin() as conn:
+        conn.execute(text("DROP TABLE account_tokens"))
+
+    report = checker.build_report()
+
+    assert report["environment"]["account_token_storage_ok"] is False
+    assert "account_token_storage_missing" in report["errors"]
+    assert report["status"] == "blocked"

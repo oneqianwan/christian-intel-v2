@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from sqlalchemy import inspect
+
 from .audit_trail import AuditTrailRedactor
 from .observability import ResponseObservabilityBuilder
 from .response_contract import ResponseContractBuilder
@@ -71,6 +73,8 @@ class ProductionReadinessChecker:
             errors.append("backend_import_failed")
         if not environment["database_config_ok"]:
             errors.append("database_config_invalid")
+        if not environment["account_token_storage_ok"]:
+            errors.append("account_token_storage_missing")
 
         if not safety["redaction_enabled"]:
             errors.append("redaction_disabled")
@@ -148,12 +152,14 @@ class ProductionReadinessChecker:
         required_env_present = bool(database_url)
         database_config_ok = bool(database_url and "://" in database_url)
         dangerous_debug_mode = self._detect_dangerous_debug_mode()
+        account_token_storage_ok = self._check_account_token_storage(imports=imports)
         return {
             "python_ok": python_ok,
             "backend_import_ok": backend_import_ok,
             "database_config_ok": database_config_ok,
             "required_env_present": required_env_present,
             "dangerous_debug_mode": dangerous_debug_mode,
+            "account_token_storage_ok": account_token_storage_ok,
         }
 
     def _build_core_brain(self, *, imports: dict[str, Any], contracts: list[dict[str, Any]]) -> dict[str, bool]:
@@ -285,6 +291,35 @@ class ProductionReadinessChecker:
             str(os.getenv("ENV", "")).strip().lower(),
         }
         return any(value in {"1", "true", "debug", "development"} for value in debug_values)
+
+    def _check_account_token_storage(self, *, imports: dict[str, Any]) -> bool:
+        database_module = imports["imports"].get("config")
+        if database_module is None:
+            return False
+
+        try:
+            import models.database as runtime_database
+
+            inspector = inspect(runtime_database.engine)
+            tables = set(inspector.get_table_names())
+            if "account_tokens" not in tables:
+                return False
+            columns = {column["name"] for column in inspector.get_columns("account_tokens")}
+            required_columns = {
+                "id",
+                "public_id",
+                "user_id",
+                "token_hash",
+                "purpose",
+                "status",
+                "expires_at",
+                "used_at",
+                "created_at",
+                "created_by_user_id",
+            }
+            return required_columns.issubset(columns)
+        except Exception:
+            return False
 
 
 def build_production_readiness_report(*, contracts: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:

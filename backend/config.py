@@ -177,6 +177,8 @@ class Settings(BaseSettings):
     AUTH_PASSWORD_SALT_LEN: int = 16
     AUTH_PASSWORD_MIN_LENGTH: int = 12
     AUTH_PASSWORD_MAX_LENGTH: int = 128
+    AUTH_SETUP_TOKEN_TTL_SECONDS: int = 86400
+    AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 3600
     WATCH_ALERT_SCHEDULER_INTERVAL_SECONDS: int = 300
     WATCH_ALERT_MAX_RETRIES: int = 3
     WATCH_ALERT_RETRY_BASE_SECONDS: int = 300
@@ -235,6 +237,10 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_PASSWORD_MAX_LENGTH must be > 0")
         if int(self.AUTH_PASSWORD_MIN_LENGTH) > int(self.AUTH_PASSWORD_MAX_LENGTH):
             raise ValueError("AUTH_PASSWORD_MIN_LENGTH must be <= AUTH_PASSWORD_MAX_LENGTH")
+        if int(self.AUTH_SETUP_TOKEN_TTL_SECONDS or 0) <= 0:
+            raise ValueError("AUTH_SETUP_TOKEN_TTL_SECONDS must be > 0")
+        if int(self.AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS or 0) <= 0:
+            raise ValueError("AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS must be > 0")
         return self
 
     def is_development_like(self) -> bool:

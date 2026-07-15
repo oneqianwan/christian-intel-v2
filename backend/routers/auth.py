@@ -18,8 +18,20 @@ from models.schemas import (
     LoginResponse,
     LogoutAllResponse,
     LogoutResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetConfirmResponse,
+    PasswordResetRequestPayload,
+    PasswordResetRequestResponse,
+    SetupPasswordRequest,
+    SetupPasswordResponse,
 )
 from schemas.watch_alert import ApiErrorResponse
+from services.account_lifecycle import (
+    AccountLifecycleError,
+    confirm_password_reset,
+    request_password_reset,
+    setup_password_with_token,
+)
 from services.auth_service import (
     AuthError,
     authenticate_user,
@@ -67,6 +79,13 @@ def _delete_cookie(response: Response) -> None:
 def _client_fingerprint(request: Request) -> str:
     host = getattr(getattr(request, "client", None), "host", None) or "unknown"
     return hashlib.sha256(str(host).encode("utf-8")).hexdigest()
+
+
+def _raise_lifecycle_error(exc: AccountLifecycleError) -> None:
+    raise HTTPException(
+        status_code=int(exc.status_code),
+        detail=ApiErrorResponse(error_code=exc.error_code, message=exc.message).model_dump(),
+    )
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -191,6 +210,78 @@ def change_password(
 
     _delete_cookie(response)
     return ChangePasswordResponse(success=True, reauthentication_required=True)
+
+
+@router.post("/setup-password", response_model=SetupPasswordResponse)
+def setup_password(
+    payload: SetupPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    if payload.new_password != payload.confirm_password:
+        _raise_api_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "PASSWORD_CONFIRMATION_MISMATCH",
+            "Password confirmation mismatch",
+        )
+
+    try:
+        setup_password_with_token(
+            db,
+            raw_token=payload.token,
+            new_password=payload.new_password,
+        )
+    except AccountLifecycleError as exc:
+        _raise_lifecycle_error(exc)
+
+    return SetupPasswordResponse(success=True, login_allowed=True)
+
+
+@router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
+def password_reset_request(
+    payload: PasswordResetRequestPayload,
+    db: Session = Depends(get_db),
+):
+    token_record = None
+    raw_token = None
+    try:
+        token_record, raw_token = request_password_reset(db, email=payload.email)
+    except AccountLifecycleError as exc:
+        _raise_lifecycle_error(exc)
+
+    response = PasswordResetRequestResponse(
+        success=True,
+        message="If the account exists, reset instructions have been generated.",
+    )
+    if bool(config.settings.is_development_like()) and token_record is not None and raw_token is not None:
+        response.reset_token = raw_token
+        response.expires_at = token_record.expires_at
+    return response
+
+
+@router.post("/password-reset/confirm", response_model=PasswordResetConfirmResponse)
+def password_reset_confirm(
+    payload: PasswordResetConfirmRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    if payload.new_password != payload.confirm_password:
+        _raise_api_error(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "PASSWORD_CONFIRMATION_MISMATCH",
+            "Password confirmation mismatch",
+        )
+
+    try:
+        confirm_password_reset(
+            db,
+            raw_token=payload.token,
+            new_password=payload.new_password,
+        )
+    except AccountLifecycleError as exc:
+        _raise_lifecycle_error(exc)
+
+    _delete_cookie(response)
+    return PasswordResetConfirmResponse(success=True, reauthentication_required=True)
 
 
 @router.post("/logout-all", response_model=LogoutAllResponse)

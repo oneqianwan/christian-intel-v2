@@ -1256,7 +1256,6 @@ class UserProfile(Base):
     )
 
 
-from models.auth import AuthSession, User  # noqa: E402,F401
 from models.watch_alert import Alert, AlertRule, Signal, WatchRun, WatchTarget  # noqa: E402,F401
 
 
@@ -1290,6 +1289,15 @@ def init_db():
     _INIT_DB_LAST_SQL = ""
     _startup_debug("ENTER init_db", file=__file__, function="init_db", line_no=778)
     try:
+        with _trace_init_db_step(
+            "import_auth_models",
+            file_name=__file__,
+            function_name="init_db",
+            line_no=778,
+        ):
+            import importlib
+
+            importlib.import_module("models.auth")
         with _trace_init_db_step(
             "_resolve_sqlite_db_path",
             file_name=__file__,

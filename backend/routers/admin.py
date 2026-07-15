@@ -12,7 +12,9 @@ from dependencies.auth import (
 from models.auth import User
 from models.database import Mission, get_db
 from models.schemas import (
+    AdminUserCreateRequest,
     AdminUserListResponse,
+    AdminUserProvisionResponse,
     AdminUserResponse,
     AdminUserRoleUpdateRequest,
     AdminUserSessionRevokeResponse,
@@ -21,6 +23,7 @@ from models.schemas import (
     ScoreDraftApprovalResponse,
 )
 from schemas.watch_alert import ApiErrorResponse
+from services.account_lifecycle import AccountLifecycleError, provision_user_with_setup_token
 from services.auth_service import revoke_all_user_sessions
 from services import score_draft_service
 
@@ -90,6 +93,10 @@ def _serialize_user(user: User) -> AdminUserResponse:
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+def _raise_lifecycle_error(exc: AccountLifecycleError) -> None:
+    _raise_api_error(int(exc.status_code), exc.error_code, exc.message)
 
 
 def _get_user_or_404(db: Session, *, public_id: str) -> User:
@@ -224,6 +231,31 @@ def list_users(
     )
 
 
+@router.post("/users", response_model=AdminUserProvisionResponse)
+def create_user(
+    payload: AdminUserCreateRequest,
+    current_user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        user, token, raw_token = provision_user_with_setup_token(
+            db,
+            actor=current_user,
+            email=payload.email,
+            display_name=payload.display_name,
+            role=payload.role,
+            status=payload.status,
+        )
+    except AccountLifecycleError as exc:
+        _raise_lifecycle_error(exc)
+
+    return AdminUserProvisionResponse(
+        user=_serialize_user(user),
+        setup_token=raw_token,
+        setup_expires_at=token.expires_at,
+    )
+
+
 @router.get("/users/{user_id}", response_model=AdminUserResponse)
 def get_user(
     user_id: str,
@@ -271,6 +303,8 @@ def update_user_status(
 
     user.status = normalized_new_status
     db.add(user)
+    if normalized_new_status != "active":
+        revoke_all_user_sessions(db, user_id=user.id)
     db.commit()
     db.refresh(user)
     return _serialize_user(user)

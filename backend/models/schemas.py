@@ -65,6 +65,39 @@ class LogoutAllResponse(BaseModel):
     revoked_count: int
 
 
+class SetupPasswordRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=128)
+    confirm_password: str = Field(min_length=1, max_length=128)
+
+
+class SetupPasswordResponse(BaseModel):
+    success: bool = True
+    login_allowed: bool = True
+
+
+class PasswordResetRequestPayload(BaseModel):
+    email: str = Field(min_length=1, max_length=320)
+
+
+class PasswordResetRequestResponse(BaseModel):
+    success: bool = True
+    message: str
+    reset_token: Optional[str] = None
+    expires_at: Optional[datetime] = None
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=1, max_length=128)
+    confirm_password: str = Field(min_length=1, max_length=128)
+
+
+class PasswordResetConfirmResponse(BaseModel):
+    success: bool = True
+    reauthentication_required: bool = True
+
+
 AdminUserRole = Literal["super_admin", "admin", "analyst", "viewer"]
 AdminUserStatus = Literal["active", "disabled", "pending"]
 
@@ -99,6 +132,19 @@ class AdminUserStatusUpdateRequest(BaseModel):
 class AdminUserSessionRevokeResponse(BaseModel):
     success: bool = True
     revoked_count: int
+
+
+class AdminUserCreateRequest(BaseModel):
+    email: str = Field(min_length=1, max_length=320)
+    display_name: str = Field(min_length=1, max_length=120)
+    role: AdminUserRole
+    status: Literal["active", "pending"] = "pending"
+
+
+class AdminUserProvisionResponse(BaseModel):
+    user: AdminUserResponse
+    setup_token: Optional[str] = None
+    setup_expires_at: Optional[datetime] = None
 
 
 ScoreDraftApprovalFailureReason = Literal[

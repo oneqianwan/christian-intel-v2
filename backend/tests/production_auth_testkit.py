@@ -22,6 +22,7 @@ MODULE_PREFIXES_TO_PURGE = (
     "routers",
     "dependencies",
     "services.auth_service",
+    "services.account_lifecycle",
     "services.chat_ownership",
 )
 
@@ -56,6 +57,7 @@ def reset_runtime_state(runtime) -> None:
             database.Page,
             database.Source,
             database.OrganizationProfile,
+            auth_models.AccountToken,
             auth_models.AuthSession,
             auth_models.User,
         ):

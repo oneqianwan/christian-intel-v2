@@ -121,6 +121,7 @@ def test_production_readiness_report_contract_is_complete(readiness_runtime):
         "database_config_ok",
         "required_env_present",
         "dangerous_debug_mode",
+        "account_token_storage_ok",
     }
     assert set(report["core_brain"].keys()) == {
         "intent_router_ok",
@@ -170,5 +171,6 @@ def test_production_readiness_report_does_not_print_secrets(readiness_runtime):
 
     assert "super-secret-production-key-should-not-appear" not in serialized
     assert report["environment"]["backend_import_ok"] is True
+    assert report["environment"]["account_token_storage_ok"] is True
     assert report["safety"]["no_llm_for_structured_lookup"] is True
     assert report["safety"]["no_network_for_structured_lookup"] is True

@@ -35,6 +35,7 @@ class User(Base):
     deleted_at = Column(DateTime, nullable=True)
 
     auth_sessions = relationship("AuthSession", back_populates="user")
+    account_tokens = relationship("AccountToken", back_populates="user", foreign_keys="AccountToken.user_id")
 
 
 class AuthSession(Base):
@@ -59,3 +60,36 @@ class AuthSession(Base):
 
     user = relationship("User", back_populates="auth_sessions")
 
+
+class AccountToken(Base):
+    __tablename__ = "account_tokens"
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('setup_password', 'password_reset')",
+            name="ck_account_tokens_purpose",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'used', 'revoked', 'expired')",
+            name="ck_account_tokens_status",
+        ),
+        UniqueConstraint("public_id", name="ux_account_tokens_public_id"),
+        UniqueConstraint("token_hash", name="ux_account_tokens_token_hash"),
+        Index("ix_account_tokens_user_id", "user_id"),
+        Index("ix_account_tokens_purpose", "purpose"),
+        Index("ix_account_tokens_expires_at", "expires_at"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    public_id = Column(String, nullable=False, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_by_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    token_hash = Column(String(64), nullable=False)
+    purpose = Column(String(32), nullable=False)
+    status = Column(String(20), nullable=False, default="active")
+
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="account_tokens", foreign_keys=[user_id])
