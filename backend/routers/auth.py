@@ -88,6 +88,18 @@ def _raise_lifecycle_error(exc: AccountLifecycleError) -> None:
     )
 
 
+def _serialize_auth_user(user: User) -> AuthUserResponse:
+    tenant = getattr(user, "default_tenant", None)
+    return AuthUserResponse(
+        public_id=str(user.public_id),
+        email=str(user.email),
+        display_name=str(user.display_name),
+        role=str(user.role),
+        status=str(user.status),
+        default_tenant_id=str(getattr(tenant, "public_id", "") or "") or None,
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
@@ -121,15 +133,7 @@ def login(
     _, raw_token = create_auth_session(db, user=user)
     response.set_cookie(key=str(config.settings.AUTH_COOKIE_NAME), value=raw_token, **_cookie_kwargs())
 
-    return LoginResponse(
-        user=AuthUserResponse(
-            public_id=str(user.public_id),
-            email=str(user.email),
-            display_name=str(user.display_name),
-            role=str(user.role),
-            status=str(user.status),
-        )
-    )
+    return LoginResponse(user=_serialize_auth_user(user))
 
 
 @router.post("/logout", response_model=LogoutResponse)
@@ -162,15 +166,7 @@ def logout(
 
 @router.get("/me", response_model=LoginResponse)
 def me(user: User = Depends(require_authenticated_user)):
-    return LoginResponse(
-        user=AuthUserResponse(
-            public_id=str(user.public_id),
-            email=str(user.email),
-            display_name=str(user.display_name),
-            role=str(user.role),
-            status=str(user.status),
-        )
-    )
+    return LoginResponse(user=_serialize_auth_user(user))
 
 
 @router.post("/change-password", response_model=ChangePasswordResponse)

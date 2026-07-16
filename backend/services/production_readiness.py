@@ -85,8 +85,10 @@ class ProductionReadinessChecker:
         if not safety["no_fabrication"]:
             errors.append("fabrication_guard_missing")
 
-        commercial_readiness = self._build_commercial_readiness()
+        commercial_readiness = self._build_commercial_readiness(settings=settings, environment=environment)
+        tenant_readiness = self._build_tenant_readiness(imports=imports)
         risk_notes.extend(commercial_readiness["reason_public_saas_not_ready"])
+        risk_notes.extend(tenant_readiness["reason_tenant_isolation_not_ready"])
 
         critical_groups = [
             all(environment.values()) or (
@@ -121,6 +123,7 @@ class ProductionReadinessChecker:
             "errors": errors,
             "risk_notes": risk_notes,
             "commercial_readiness": commercial_readiness,
+            "tenant_readiness": tenant_readiness,
         }
 
     def _collect_imports(self) -> dict[str, Any]:
@@ -238,9 +241,27 @@ class ProductionReadinessChecker:
             ) else self.CONTRACT_STATUS_FAIL,
         }
 
-    def _build_commercial_readiness(self) -> dict[str, Any]:
-        reasons = [
-            "production_authentication_not_fully_validated",
+    def _is_controlled_beta_auth_ready(self, *, settings: Any, environment: dict[str, bool]) -> bool:
+        if settings is None:
+            return False
+        auth_v1_enabled = bool(getattr(settings, "AUTH_V1_ENABLED", False))
+        cookie_required = bool(getattr(settings, "AUTH_COOKIE_REQUIRED", False))
+        allow_public_flag = bool(getattr(settings, "ALLOW_PUBLIC_CORE_APIS", False))
+        allow_public_method = False
+        public_enabled = getattr(settings, "public_core_apis_enabled", None)
+        if callable(public_enabled):
+            try:
+                allow_public_method = bool(public_enabled())
+            except Exception:
+                allow_public_method = False
+        allow_public = bool(allow_public_flag or allow_public_method)
+        auth_storage_ok = bool(environment.get("account_token_storage_ok"))
+        return bool(auth_v1_enabled and cookie_required and (not allow_public) and auth_storage_ok)
+
+    def _build_commercial_readiness(self, *, settings: Any, environment: dict[str, bool]) -> dict[str, Any]:
+        controlled_beta_auth_ready = self._is_controlled_beta_auth_ready(settings=settings, environment=environment)
+        reasons: list[str] = [
+            *(["production_authentication_not_fully_validated"] if not controlled_beta_auth_ready else []),
             "multi_tenant_isolation_not_fully_validated",
             "billing_not_implemented",
             "rate_limit_not_fully_validated",
@@ -253,6 +274,31 @@ class ProductionReadinessChecker:
             "internal_beta_ready": True,
             "public_saas_ready": False,
             "reason_public_saas_not_ready": reasons,
+        }
+
+    def _build_tenant_readiness(self, *, imports: dict[str, Any]) -> dict[str, Any]:
+        tenant_schema = self._check_tenant_schema(imports=imports)
+        tenant_core_models_ready = bool(
+            tenant_schema["tenants_table_ok"]
+            and tenant_schema["tenant_memberships_table_ok"]
+            and tenant_schema["users_default_tenant_ok"]
+            and tenant_schema["default_tenant_present"]
+        )
+        tenant_membership_ready = bool(tenant_schema["tenant_memberships_table_ok"])
+        tenant_user_default_tenant_ready = bool(
+            tenant_schema["users_default_tenant_ok"] and tenant_schema["default_tenant_present"]
+        )
+        return {
+            "tenant_core_models_ready": tenant_core_models_ready,
+            "tenant_membership_ready": tenant_membership_ready,
+            "tenant_user_default_tenant_ready": tenant_user_default_tenant_ready,
+            "tenant_isolation_readiness": "blocked",
+            "controlled_beta_tenant_ready": False,
+            "reason_tenant_isolation_not_ready": [
+                "private_data_not_yet_tenant_scoped",
+                "cross_tenant_private_data_tests_not_completed",
+            ],
+            "schema": tenant_schema,
         }
 
     def _is_response_contract_ok(self, contract: dict[str, Any]) -> bool:
@@ -320,6 +366,66 @@ class ProductionReadinessChecker:
             return required_columns.issubset(columns)
         except Exception:
             return False
+
+    def _check_tenant_schema(self, *, imports: dict[str, Any]) -> dict[str, bool]:
+        database_module = imports["imports"].get("config")
+        if database_module is None:
+            return {
+                "tenants_table_ok": False,
+                "tenant_memberships_table_ok": False,
+                "users_default_tenant_ok": False,
+                "default_tenant_present": False,
+                "default_membership_present": False,
+            }
+
+        try:
+            import models.database as runtime_database
+
+            inspector = inspect(runtime_database.engine)
+            tables = set(inspector.get_table_names())
+            users_columns = (
+                {column["name"] for column in inspector.get_columns("users")}
+                if "users" in tables
+                else set()
+            )
+            tenants_ok = "tenants" in tables
+            memberships_ok = "tenant_memberships" in tables
+            default_tenant_present = False
+            default_membership_present = False
+            if tenants_ok:
+                with runtime_database.engine.begin() as conn:
+                    default_tenant_present = bool(
+                        conn.execute(
+                            importlib.import_module("sqlalchemy").text(
+                                "SELECT 1 FROM tenants WHERE slug = :slug AND deleted_at IS NULL LIMIT 1"
+                            ),
+                            {"slug": "default"},
+                        ).scalar()
+                    )
+            if memberships_ok:
+                with runtime_database.engine.begin() as conn:
+                    default_membership_present = bool(
+                        conn.execute(
+                            importlib.import_module("sqlalchemy").text(
+                                "SELECT 1 FROM tenant_memberships WHERE deleted_at IS NULL LIMIT 1"
+                            )
+                        ).scalar()
+                    )
+            return {
+                "tenants_table_ok": tenants_ok,
+                "tenant_memberships_table_ok": memberships_ok,
+                "users_default_tenant_ok": "default_tenant_id" in users_columns,
+                "default_tenant_present": default_tenant_present,
+                "default_membership_present": default_membership_present,
+            }
+        except Exception:
+            return {
+                "tenants_table_ok": False,
+                "tenant_memberships_table_ok": False,
+                "users_default_tenant_ok": False,
+                "default_tenant_present": False,
+                "default_membership_present": False,
+            }
 
 
 def build_production_readiness_report(*, contracts: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:

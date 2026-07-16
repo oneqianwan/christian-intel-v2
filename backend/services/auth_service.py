@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 import config
 from models.auth import AuthSession, User
+from services import tenant_service
 
 
 @dataclass(frozen=True)
@@ -183,6 +184,11 @@ def authenticate_user(
             _default_rate_limiter.record_failure(key=limiter_key)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
+    try:
+        tenant_service.assert_user_default_tenant_active(db, user=user)
+    except tenant_service.TenantError as exc:
+        raise AuthError(int(exc.status_code), exc.error_code, exc.message)
+
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)
 
@@ -261,6 +267,13 @@ def revoke_all_user_sessions(db: Session, *, user_id: str) -> int:
         )
     )
     return int(rowcount or 0)
+
+
+def assert_user_default_tenant_active(db: Session, *, user: User):
+    try:
+        return tenant_service.assert_user_default_tenant_active(db, user=user)
+    except tenant_service.TenantError as exc:
+        raise AuthError(int(exc.status_code), exc.error_code, exc.message)
 
 
 def change_user_password(

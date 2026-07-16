@@ -16,6 +16,7 @@ from services.auth_service import (
     revoke_all_user_sessions,
     validate_new_password,
 )
+from services import tenant_service
 
 
 ACCOUNT_TOKEN_PURPOSE_SETUP_PASSWORD = "setup_password"
@@ -129,6 +130,7 @@ def provision_user_with_setup_token(
     display_name: str,
     role: str,
     status: str,
+    tenant_public_id: str | None = None,
 ) -> tuple[User, AccountToken, str]:
     normalized_email = _validate_email(email)
     normalized_role = _normalize_role(role)
@@ -150,6 +152,15 @@ def provision_user_with_setup_token(
     if existing is not None:
         raise AccountLifecycleError(409, "EMAIL_ALREADY_EXISTS", "Email already exists")
 
+    try:
+        tenant = tenant_service.resolve_tenant_for_user_creation(
+            db,
+            actor=actor,
+            tenant_public_id=tenant_public_id,
+        )
+    except tenant_service.TenantError as exc:
+        raise AccountLifecycleError(int(exc.status_code), exc.error_code, exc.message)
+
     # Store an argon2 hash even before first password setup so no plaintext or fake sentinel is persisted.
     bootstrap_secret = secrets.token_urlsafe(24)
     user = User(
@@ -161,10 +172,24 @@ def provision_user_with_setup_token(
         display_name=str(display_name).strip(),
         role=normalized_role,
         status=normalized_status,
+        default_tenant_id=str(tenant.id),
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.add(user)
+        db.flush()
+        tenant_service.get_or_create_membership(
+            db,
+            tenant=tenant,
+            user=user,
+            role=tenant_service.map_user_role_to_membership_role(normalized_role),
+            status="active" if normalized_status == "active" else "pending",
+            created_by_user_id=str(actor.id),
+        )
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        raise
 
     token, raw_token = _create_one_time_token(
         db,

@@ -82,12 +82,14 @@ def _score_draft_approval_failure(reason: str) -> ScoreDraftApprovalResponse:
 
 
 def _serialize_user(user: User) -> AdminUserResponse:
+    tenant = getattr(user, "default_tenant", None)
     return AdminUserResponse(
         public_id=str(user.public_id),
         email=str(user.email),
         display_name=str(user.display_name),
         role=str(user.role),
         status=str(user.status),
+        default_tenant_id=str(getattr(tenant, "public_id", "") or "") or None,
         email_verified_at=user.email_verified_at,
         last_login_at=user.last_login_at,
         created_at=user.created_at,
@@ -245,6 +247,7 @@ def create_user(
             display_name=payload.display_name,
             role=payload.role,
             status=payload.status,
+            tenant_public_id=payload.tenant_id,
         )
     except AccountLifecycleError as exc:
         _raise_lifecycle_error(exc)

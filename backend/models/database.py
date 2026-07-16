@@ -1298,6 +1298,7 @@ def init_db():
             import importlib
 
             importlib.import_module("models.auth")
+            importlib.import_module("services.tenant_service")
         with _trace_init_db_step(
             "_resolve_sqlite_db_path",
             file_name=__file__,
@@ -1339,6 +1340,20 @@ def init_db():
             sql_getter=lambda: _INIT_DB_LAST_SQL,
         ):
             _ensure_schema_compatibility()
+        with _trace_init_db_step(
+            "tenant_service.ensure_default_tenant_foundation",
+            file_name=__file__,
+            function_name="init_db",
+            line_no=793,
+            sql_getter=lambda: _INIT_DB_LAST_SQL,
+        ):
+            from services import tenant_service
+
+            db = SessionLocal()
+            try:
+                tenant_service.ensure_default_tenant_foundation(db)
+            finally:
+                db.close()
     finally:
         _INIT_DB_ACTIVE = False
         _startup_debug("EXIT init_db", file=__file__, function="init_db", line_no=792)
@@ -1608,6 +1623,60 @@ def _ensure_schema_compatibility():
                 "user_feedbacks",
                 [
                     ("ix_user_feedbacks_user_id", ("user_id",)),
+                ],
+            )
+
+        if "users" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "users",
+                [
+                    ("default_tenant_id", "VARCHAR NULL"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "users",
+                [
+                    ("ix_users_default_tenant_id", ("default_tenant_id",)),
+                ],
+            )
+
+        if "tenants" in table_names:
+            _ensure_indexes(
+                conn,
+                inspector,
+                "tenants",
+                [
+                    ("ix_tenants_slug", ("slug",)),
+                ],
+            )
+
+        if "tenant_memberships" in table_names:
+            _ensure_indexes(
+                conn,
+                inspector,
+                "tenant_memberships",
+                [
+                    ("ix_tenant_memberships_tenant_id", ("tenant_id",)),
+                    ("ix_tenant_memberships_user_id", ("user_id",)),
+                    ("ix_tenant_memberships_created_by_user_id", ("created_by_user_id",)),
+                ],
+            )
+            _ensure_partial_indexes(
+                conn,
+                inspector,
+                "tenant_memberships",
+                [
+                    (
+                        "ux_tenant_memberships_tenant_user_active",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ux_tenant_memberships_tenant_user_active "
+                        "ON tenant_memberships (tenant_id, user_id) "
+                        "WHERE deleted_at IS NULL AND status = 'active'",
+                        True,
+                    ),
                 ],
             )
 

@@ -179,6 +179,8 @@ class Settings(BaseSettings):
     AUTH_PASSWORD_MAX_LENGTH: int = 128
     AUTH_SETUP_TOKEN_TTL_SECONDS: int = 86400
     AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 3600
+    TENANT_DEFAULT_SLUG: str = "default"
+    TENANT_DEFAULT_NAME: str = "Platform Default"
     WATCH_ALERT_SCHEDULER_INTERVAL_SECONDS: int = 300
     WATCH_ALERT_MAX_RETRIES: int = 3
     WATCH_ALERT_RETRY_BASE_SECONDS: int = 300
@@ -241,6 +243,10 @@ class Settings(BaseSettings):
             raise ValueError("AUTH_SETUP_TOKEN_TTL_SECONDS must be > 0")
         if int(self.AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS or 0) <= 0:
             raise ValueError("AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS must be > 0")
+        if not str(self.TENANT_DEFAULT_SLUG or "").strip():
+            raise ValueError("TENANT_DEFAULT_SLUG must not be empty")
+        if not str(self.TENANT_DEFAULT_NAME or "").strip():
+            raise ValueError("TENANT_DEFAULT_NAME must not be empty")
         return self
 
     def is_development_like(self) -> bool:

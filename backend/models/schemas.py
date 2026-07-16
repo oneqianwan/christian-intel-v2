@@ -39,6 +39,7 @@ class AuthUserResponse(BaseModel):
     display_name: str
     role: str
     status: str
+    default_tenant_id: Optional[str] = None
 
 
 class LoginResponse(BaseModel):
@@ -108,6 +109,7 @@ class AdminUserResponse(BaseModel):
     display_name: str
     role: str
     status: str
+    default_tenant_id: Optional[str] = None
     email_verified_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     created_at: datetime
@@ -139,6 +141,7 @@ class AdminUserCreateRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     role: AdminUserRole
     status: Literal["active", "pending"] = "pending"
+    tenant_id: Optional[str] = Field(default=None, min_length=1, max_length=120)
 
 
 class AdminUserProvisionResponse(BaseModel):

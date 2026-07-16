@@ -11,7 +11,7 @@ import config
 from models.auth import AuthSession, User
 from models.database import get_db
 from schemas.watch_alert import ApiErrorResponse
-from services.auth_service import hash_session_token, touch_session_last_seen
+from services.auth_service import assert_user_default_tenant_active, hash_session_token, touch_session_last_seen
 
 ROLE_HIERARCHY: tuple[str, ...] = ("viewer", "analyst", "admin", "super_admin")
 ROLE_RANK = {role: index for index, role in enumerate(ROLE_HIERARCHY)}
@@ -102,6 +102,14 @@ def _resolve_auth_context(*, request: Request, db: Session, touch_last_seen: boo
         _raise_api_error(status.HTTP_403_FORBIDDEN, "ACCOUNT_DISABLED", "Account disabled")
     if status_value == "pending":
         _raise_api_error(status.HTTP_403_FORBIDDEN, "ACCOUNT_PENDING", "Account pending")
+
+    try:
+        assert_user_default_tenant_active(db, user=user)
+    except Exception as exc:
+        status_code = int(getattr(exc, "status_code", status.HTTP_403_FORBIDDEN))
+        error_code = str(getattr(exc, "error_code", "TENANT_DISABLED"))
+        message = str(getattr(exc, "message", "Tenant is disabled"))
+        _raise_api_error(status_code, error_code, message)
 
     if touch_last_seen:
         touch_session_last_seen(db, session=session)
