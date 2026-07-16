@@ -278,6 +278,8 @@ class ProductionReadinessChecker:
 
     def _build_tenant_readiness(self, *, imports: dict[str, Any]) -> dict[str, Any]:
         tenant_schema = self._check_tenant_schema(imports=imports)
+        tenant_context_ready = self._check_tenant_context_ready()
+        tenant_scope_helper_ready = self._check_tenant_scope_helper_ready()
         tenant_core_models_ready = bool(
             tenant_schema["tenants_table_ok"]
             and tenant_schema["tenant_memberships_table_ok"]
@@ -290,8 +292,11 @@ class ProductionReadinessChecker:
         )
         return {
             "tenant_core_models_ready": tenant_core_models_ready,
+            "tenant_context_ready": bool(tenant_context_ready),
             "tenant_membership_ready": tenant_membership_ready,
+            "tenant_scope_helper_ready": bool(tenant_scope_helper_ready),
             "tenant_user_default_tenant_ready": tenant_user_default_tenant_ready,
+            "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
             "tenant_isolation_readiness": "blocked",
             "controlled_beta_tenant_ready": False,
             "reason_tenant_isolation_not_ready": [
@@ -426,6 +431,36 @@ class ProductionReadinessChecker:
                 "default_tenant_present": False,
                 "default_membership_present": False,
             }
+
+    def _check_tenant_context_ready(self) -> bool:
+        try:
+            module = importlib.import_module("dependencies.tenant_context")
+            required = (
+                "TenantRequestContext",
+                "get_current_tenant_context",
+                "get_current_tenant",
+                "get_current_membership",
+                "require_tenant_member",
+                "require_tenant_admin",
+                "require_tenant_role",
+            )
+            return all(hasattr(module, name) for name in required)
+        except Exception:
+            return False
+
+    def _check_tenant_scope_helper_ready(self) -> bool:
+        try:
+            module = importlib.import_module("services.tenant_scope")
+            required = (
+                "filter_by_tenant",
+                "assert_same_tenant",
+                "ensure_tenant_id_for_create",
+                "require_record_tenant",
+                "build_tenant_scope_metadata",
+            )
+            return all(hasattr(module, name) for name in required)
+        except Exception:
+            return False
 
 
 def build_production_readiness_report(*, contracts: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:

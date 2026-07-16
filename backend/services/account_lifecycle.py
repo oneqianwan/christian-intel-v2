@@ -141,8 +141,6 @@ def provision_user_with_setup_token(
         raise AccountLifecycleError(422, "INVALID_ROLE", "Invalid role")
     if normalized_status is None:
         raise AccountLifecycleError(422, "INVALID_STATUS", "Invalid status")
-    if actor_role not in {"admin", "super_admin"}:
-        raise AccountLifecycleError(403, "ROLE_FORBIDDEN", "Insufficient permissions")
     if normalized_role == "super_admin" and actor_role != "super_admin":
         raise AccountLifecycleError(403, "ROLE_FORBIDDEN", "Insufficient permissions")
     if not str(display_name or "").strip():

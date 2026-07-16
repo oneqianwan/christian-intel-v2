@@ -40,6 +40,11 @@ class AuthUserResponse(BaseModel):
     role: str
     status: str
     default_tenant_id: Optional[str] = None
+    global_role: Optional[str] = None
+    tenant_role: Optional[str] = None
+    default_tenant: Optional[Dict[str, Any]] = None
+    active_tenant: Optional[Dict[str, Any]] = None
+    memberships: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class LoginResponse(BaseModel):

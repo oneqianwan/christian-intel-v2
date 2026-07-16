@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
+from dependencies import tenant_context
 from dependencies.auth import (
     normalize_role_value,
     require_admin,
     require_auth_enabled,
+    require_authenticated_user,
     require_super_admin,
 )
-from models.auth import User
+from models.auth import TenantMembership, User
 from models.database import Mission, get_db
 from models.schemas import (
     AdminUserCreateRequest,
@@ -25,7 +27,7 @@ from models.schemas import (
 from schemas.watch_alert import ApiErrorResponse
 from services.account_lifecycle import AccountLifecycleError, provision_user_with_setup_token
 from services.auth_service import revoke_all_user_sessions
-from services import score_draft_service
+from services import score_draft_service, tenant_service
 
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_auth_enabled)])
@@ -193,14 +195,49 @@ def _assert_session_revoke_allowed(*, actor: User, target: User) -> None:
         _raise_api_error(status.HTTP_403_FORBIDDEN, "ROLE_FORBIDDEN", "Insufficient permissions")
 
 
+def _is_platform_admin(user: User) -> bool:
+    return normalize_role_value(getattr(user, "role", None)) in {"admin", "super_admin"}
+
+
+def _resolve_tenant_admin_context(*, request: Request, current_user: User, db: Session):
+    context = tenant_context.resolve_tenant_request_context(
+        request=request,
+        user=current_user,
+        db=db,
+        fail_closed=False,
+    )
+    if context is None:
+        return None
+    if str(context.tenant_role or "").strip().lower() != "tenant_admin":
+        return None
+    return context
+
+
+def _tenant_member_users_query(db: Session, *, tenant_id: str):
+    return (
+        db.query(User)
+        .join(
+            TenantMembership,
+            TenantMembership.user_id == User.id,
+        )
+        .filter(
+            User.deleted_at.is_(None),
+            TenantMembership.tenant_id == str(tenant_id),
+            TenantMembership.deleted_at.is_(None),
+            TenantMembership.status == "active",
+        )
+    )
+
+
 @router.get("/users", response_model=AdminUserListResponse)
 def list_users(
+    request: Request,
     role: str | None = Query(default=None),
     status_value: str | None = Query(default=None, alias="status"),
     email: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     normalized_role = None
@@ -215,7 +252,19 @@ def list_users(
         if normalized_status is None:
             _raise_api_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "INVALID_STATUS", "Invalid status")
 
-    query = db.query(User).filter(User.deleted_at.is_(None))
+    tenant_admin_context = None if _is_platform_admin(current_user) else _resolve_tenant_admin_context(
+        request=request,
+        current_user=current_user,
+        db=db,
+    )
+    if not _is_platform_admin(current_user) and tenant_admin_context is None:
+        _raise_api_error(status.HTTP_403_FORBIDDEN, "ROLE_FORBIDDEN", "Insufficient permissions")
+
+    query = (
+        db.query(User).filter(User.deleted_at.is_(None))
+        if _is_platform_admin(current_user)
+        else _tenant_member_users_query(db, tenant_id=str(tenant_admin_context.tenant.id))
+    )
     if normalized_role is not None:
         query = query.filter(User.role == normalized_role)
     if normalized_status is not None:
@@ -236,7 +285,7 @@ def list_users(
 @router.post("/users", response_model=AdminUserProvisionResponse)
 def create_user(
     payload: AdminUserCreateRequest,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     try:
@@ -261,11 +310,23 @@ def create_user(
 
 @router.get("/users/{user_id}", response_model=AdminUserResponse)
 def get_user(
+    request: Request,
     user_id: str,
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_authenticated_user),
     db: Session = Depends(get_db),
 ):
     user = _get_user_or_404(db, public_id=user_id)
+    if not _is_platform_admin(current_user):
+        tenant_admin_context = _resolve_tenant_admin_context(request=request, current_user=current_user, db=db)
+        if tenant_admin_context is None:
+            _raise_api_error(status.HTTP_403_FORBIDDEN, "ROLE_FORBIDDEN", "Insufficient permissions")
+        membership = tenant_service.get_active_membership(
+            db,
+            user_id=str(user.id),
+            tenant_id=str(tenant_admin_context.tenant.id),
+        )
+        if membership is None:
+            _raise_api_error(status.HTTP_403_FORBIDDEN, "TENANT_SCOPE_FORBIDDEN", "Cross-tenant access forbidden")
     return _serialize_user(user)
 
 

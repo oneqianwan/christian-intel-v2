@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 import config
+from dependencies import tenant_context
 from dependencies.auth import require_authenticated_user, require_authenticated_user_no_touch
 from models.auth import User
 from models.database import get_db
@@ -32,6 +33,7 @@ from services.account_lifecycle import (
     request_password_reset,
     setup_password_with_token,
 )
+from services import tenant_service
 from services.auth_service import (
     AuthError,
     authenticate_user,
@@ -100,6 +102,60 @@ def _serialize_auth_user(user: User) -> AuthUserResponse:
     )
 
 
+def _serialize_tenant_summary(tenant) -> dict | None:
+    if tenant is None:
+        return None
+    return {
+        "public_id": str(getattr(tenant, "public_id", "") or ""),
+        "name": str(getattr(tenant, "name", "") or ""),
+        "slug": str(getattr(tenant, "slug", "") or ""),
+        "status": str(getattr(tenant, "status", "") or ""),
+    }
+
+
+def _serialize_membership_summary(membership) -> dict | None:
+    if membership is None:
+        return None
+    tenant = getattr(membership, "tenant", None)
+    return {
+        "tenant": _serialize_tenant_summary(tenant),
+        "role": str(getattr(membership, "role", "") or ""),
+        "status": str(getattr(membership, "status", "") or ""),
+        "public_id": str(getattr(membership, "public_id", "") or ""),
+    }
+
+
+def _build_auth_user_response(*, request: Request, db: Session, user: User) -> AuthUserResponse:
+    db.refresh(user)
+    default_tenant = getattr(user, "default_tenant", None)
+    active_context = tenant_context.resolve_tenant_request_context(
+        request=request,
+        user=user,
+        db=db,
+        fail_closed=False,
+    )
+    memberships = tenant_service.list_user_memberships(db, user=user)
+    current_membership = active_context.membership if active_context is not None else None
+    tenant_role = tenant_service.resolve_tenant_role(user=user, membership=current_membership)
+    return AuthUserResponse(
+        public_id=str(user.public_id),
+        email=str(user.email),
+        display_name=str(user.display_name),
+        role=str(user.role),
+        status=str(user.status),
+        default_tenant_id=str(getattr(default_tenant, "public_id", "") or "") or None,
+        global_role=str(user.role),
+        tenant_role=tenant_role,
+        default_tenant=_serialize_tenant_summary(default_tenant),
+        active_tenant=_serialize_tenant_summary(active_context.tenant if active_context is not None else None),
+        memberships=[
+            item
+            for item in (_serialize_membership_summary(membership) for membership in memberships)
+            if item is not None
+        ],
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
@@ -133,7 +189,7 @@ def login(
     _, raw_token = create_auth_session(db, user=user)
     response.set_cookie(key=str(config.settings.AUTH_COOKIE_NAME), value=raw_token, **_cookie_kwargs())
 
-    return LoginResponse(user=_serialize_auth_user(user))
+    return LoginResponse(user=_build_auth_user_response(request=request, db=db, user=user))
 
 
 @router.post("/logout", response_model=LogoutResponse)
@@ -165,8 +221,12 @@ def logout(
 
 
 @router.get("/me", response_model=LoginResponse)
-def me(user: User = Depends(require_authenticated_user)):
-    return LoginResponse(user=_serialize_auth_user(user))
+def me(
+    request: Request,
+    user: User = Depends(require_authenticated_user),
+    db: Session = Depends(get_db),
+):
+    return LoginResponse(user=_build_auth_user_response(request=request, db=db, user=user))
 
 
 @router.post("/change-password", response_model=ChangePasswordResponse)

@@ -78,6 +78,37 @@ def map_user_role_to_membership_role(user_role: str | None) -> str:
     return "viewer"
 
 
+def normalize_user_role(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"super_admin", "admin", "analyst", "viewer"}:
+        return normalized
+    return None
+
+
+def is_platform_super_admin(user: User | None) -> bool:
+    return normalize_user_role(getattr(user, "role", None)) == "super_admin"
+
+
+def is_legacy_global_admin(user: User | None) -> bool:
+    return normalize_user_role(getattr(user, "role", None)) == "admin"
+
+
+def is_tenant_active(tenant: Tenant | None) -> bool:
+    if tenant is None:
+        return False
+    if getattr(tenant, "deleted_at", None) is not None:
+        return False
+    return str(getattr(tenant, "status", "") or "").strip().lower() == "active"
+
+
+def is_membership_active(membership: TenantMembership | None) -> bool:
+    if membership is None:
+        return False
+    if getattr(membership, "deleted_at", None) is not None:
+        return False
+    return str(getattr(membership, "status", "") or "").strip().lower() == "active"
+
+
 def get_tenant_by_public_id(db, *, tenant_public_id: str) -> Tenant | None:
     return (
         db.query(Tenant)
@@ -97,6 +128,44 @@ def get_tenant_by_slug(db, *, slug: str) -> Tenant | None:
             Tenant.slug == normalized_slug,
             Tenant.deleted_at.is_(None),
         )
+        .first()
+    )
+
+
+def get_tenant_by_id(db, *, tenant_id: str) -> Tenant | None:
+    return (
+        db.query(Tenant)
+        .filter(
+            Tenant.id == str(tenant_id),
+            Tenant.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+
+def get_active_membership(db, *, user_id: str, tenant_id: str) -> TenantMembership | None:
+    return (
+        db.query(TenantMembership)
+        .filter(
+            TenantMembership.user_id == str(user_id),
+            TenantMembership.tenant_id == str(tenant_id),
+            TenantMembership.deleted_at.is_(None),
+            TenantMembership.status == "active",
+        )
+        .order_by(TenantMembership.created_at.asc())
+        .first()
+    )
+
+
+def get_membership_for_user(db, *, user_id: str, tenant_id: str) -> TenantMembership | None:
+    return (
+        db.query(TenantMembership)
+        .filter(
+            TenantMembership.user_id == str(user_id),
+            TenantMembership.tenant_id == str(tenant_id),
+            TenantMembership.deleted_at.is_(None),
+        )
+        .order_by(TenantMembership.created_at.asc())
         .first()
     )
 
@@ -262,19 +331,25 @@ def resolve_tenant_for_user_creation(
 ) -> Tenant:
     default_tenant = ensure_default_tenant(db)
     if not str(tenant_public_id or "").strip():
-        return default_tenant
+        tenant = get_tenant_by_id(db, tenant_id=str(getattr(actor, "default_tenant_id", "") or "")) or default_tenant
+    else:
+        tenant = get_tenant_by_public_id(db, tenant_public_id=str(tenant_public_id).strip())
+        if tenant is None:
+            raise TenantError(404, "TENANT_NOT_FOUND", "Tenant not found")
 
-    tenant = get_tenant_by_public_id(db, tenant_public_id=str(tenant_public_id).strip())
-    if tenant is None:
-        raise TenantError(404, "TENANT_NOT_FOUND", "Tenant not found")
+    if not is_tenant_active(tenant):
+        raise TenantError(403, "TENANT_DISABLED", "Tenant is disabled")
 
-    actor_role = str(getattr(actor, "role", "") or "").strip().lower()
-    if actor_role == "super_admin":
+    if is_platform_super_admin(actor):
         return tenant
 
-    if str(getattr(actor, "default_tenant_id", "") or "") != str(tenant.id):
-        raise TenantError(403, "ROLE_FORBIDDEN", "Insufficient permissions")
-    return tenant
+    membership = get_active_membership(db, user_id=str(actor.id), tenant_id=str(tenant.id))
+    if membership is not None and str(getattr(membership, "role", "") or "").strip().lower() == "tenant_admin":
+        return tenant
+
+    if is_legacy_global_admin(actor) and str(getattr(actor, "default_tenant_id", "") or "") == str(tenant.id):
+        return tenant
+    raise TenantError(403, "ROLE_FORBIDDEN", "Insufficient permissions")
 
 
 def ensure_user_default_tenant_membership(
@@ -350,3 +425,97 @@ def assert_user_default_tenant_active(db, *, user: User) -> Tenant | None:
     if str(tenant.status or "").strip().lower() != "active":
         raise TenantError(403, "TENANT_DISABLED", "Tenant is disabled")
     return tenant
+
+
+def resolve_active_tenant(
+    db,
+    *,
+    user: User,
+    tenant_public_id: str | None = None,
+    tenant_slug: str | None = None,
+    fail_closed: bool = True,
+) -> Tenant | None:
+    try:
+        explicit_public_id = str(tenant_public_id or "").strip()
+        explicit_slug = str(tenant_slug or "").strip()
+        tenant: Tenant | None = None
+        if explicit_public_id:
+            tenant = get_tenant_by_public_id(db, tenant_public_id=explicit_public_id)
+            if tenant is None:
+                raise TenantError(404, "TENANT_NOT_FOUND", "Tenant not found")
+        elif explicit_slug:
+            tenant = get_tenant_by_slug(db, slug=explicit_slug)
+            if tenant is None:
+                raise TenantError(404, "TENANT_NOT_FOUND", "Tenant not found")
+        else:
+            tenant_id = str(getattr(user, "default_tenant_id", "") or "").strip()
+            if not tenant_id:
+                raise TenantError(403, "TENANT_REQUIRED", "Tenant required")
+            tenant = get_tenant_by_id(db, tenant_id=tenant_id)
+            if tenant is None:
+                raise TenantError(403, "TENANT_NOT_FOUND", "Tenant not found")
+
+        if not is_tenant_active(tenant):
+            raise TenantError(403, "TENANT_DISABLED", "Tenant is disabled")
+        if is_platform_super_admin(user):
+            return tenant
+
+        membership = get_membership_for_user(db, user_id=str(user.id), tenant_id=str(tenant.id))
+        if membership is not None and not is_membership_active(membership):
+            raise TenantError(403, "TENANT_MEMBERSHIP_INACTIVE", "Tenant membership inactive")
+        if membership is None:
+            raise TenantError(403, "TENANT_MEMBERSHIP_REQUIRED", "Active tenant membership required")
+        return tenant
+    except TenantError:
+        if fail_closed:
+            raise
+        return None
+
+
+def resolve_current_membership(
+    db,
+    *,
+    user: User,
+    tenant: Tenant,
+    fail_closed: bool = True,
+) -> TenantMembership | None:
+    try:
+        if tenant is None:
+            raise TenantError(403, "TENANT_REQUIRED", "Tenant required")
+        membership = get_membership_for_user(db, user_id=str(user.id), tenant_id=str(tenant.id))
+        if membership is None:
+            if is_platform_super_admin(user):
+                return None
+            raise TenantError(403, "TENANT_MEMBERSHIP_REQUIRED", "Active tenant membership required")
+        if not is_membership_active(membership):
+            raise TenantError(403, "TENANT_MEMBERSHIP_INACTIVE", "Tenant membership inactive")
+        return membership
+    except TenantError:
+        if fail_closed:
+            raise
+        return None
+
+
+def resolve_tenant_role(*, user: User, membership: TenantMembership | None) -> str | None:
+    if membership is not None and is_membership_active(membership):
+        return str(getattr(membership, "role", "") or "").strip().lower() or None
+    if is_platform_super_admin(user):
+        return None
+    return None
+
+
+def list_user_memberships(db, *, user: User) -> list[TenantMembership]:
+    memberships = (
+        db.query(TenantMembership)
+        .join(Tenant, Tenant.id == TenantMembership.tenant_id)
+        .filter(
+            TenantMembership.user_id == str(user.id),
+            TenantMembership.deleted_at.is_(None),
+            TenantMembership.status == "active",
+            Tenant.deleted_at.is_(None),
+            Tenant.status == "active",
+        )
+        .order_by(TenantMembership.created_at.asc())
+        .all()
+    )
+    return list(memberships or [])
