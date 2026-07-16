@@ -278,6 +278,7 @@ class ProductionReadinessChecker:
 
     def _build_tenant_readiness(self, *, imports: dict[str, Any]) -> dict[str, Any]:
         tenant_schema = self._check_tenant_schema(imports=imports)
+        private_tenant_schema = self._check_private_tenant_schema(imports=imports)
         tenant_context_ready = self._check_tenant_context_ready()
         tenant_scope_helper_ready = self._check_tenant_scope_helper_ready()
         tenant_core_models_ready = bool(
@@ -296,6 +297,17 @@ class ProductionReadinessChecker:
             "tenant_membership_ready": tenant_membership_ready,
             "tenant_scope_helper_ready": bool(tenant_scope_helper_ready),
             "tenant_user_default_tenant_ready": tenant_user_default_tenant_ready,
+            "private_tenant_schema_ready": private_tenant_schema["private_tenant_schema_ready"],
+            "private_tenant_migration_ready": private_tenant_schema["private_tenant_migration_ready"],
+            "conversation_tenant_id_ready": private_tenant_schema["conversation_tenant_id_ready"],
+            "message_tenant_id_ready": private_tenant_schema["message_tenant_id_ready"],
+            "bookmark_tenant_id_ready": private_tenant_schema["bookmark_tenant_id_ready"],
+            "feedback_tenant_id_ready": private_tenant_schema["feedback_tenant_id_ready"],
+            "watch_alert_tenant_id_ready": private_tenant_schema["watch_alert_tenant_id_ready"],
+            "diagnostics_tenant_id_ready": private_tenant_schema["diagnostics_tenant_id_ready"],
+            "user_profile_tenant_id_ready": private_tenant_schema["user_profile_tenant_id_ready"],
+            "task_tenant_id_ready": private_tenant_schema["task_tenant_id_ready"],
+            "public_tables_remain_global": private_tenant_schema["public_tables_remain_global"],
             "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
             "tenant_isolation_readiness": "blocked",
             "controlled_beta_tenant_ready": False,
@@ -304,6 +316,7 @@ class ProductionReadinessChecker:
                 "cross_tenant_private_data_tests_not_completed",
             ],
             "schema": tenant_schema,
+            "private_schema": private_tenant_schema["schema"],
         }
 
     def _is_response_contract_ok(self, contract: dict[str, Any]) -> bool:
@@ -461,6 +474,204 @@ class ProductionReadinessChecker:
             return all(hasattr(module, name) for name in required)
         except Exception:
             return False
+
+    def _check_private_tenant_schema(self, *, imports: dict[str, Any]) -> dict[str, Any]:
+        database_module = imports["imports"].get("config")
+        if database_module is None:
+            return {
+                "private_tenant_schema_ready": "no",
+                "private_tenant_migration_ready": "no",
+                "conversation_tenant_id_ready": "no",
+                "message_tenant_id_ready": "no",
+                "bookmark_tenant_id_ready": "no",
+                "feedback_tenant_id_ready": "no",
+                "watch_alert_tenant_id_ready": "no",
+                "diagnostics_tenant_id_ready": "no",
+                "user_profile_tenant_id_ready": "no",
+                "task_tenant_id_ready": "no",
+                "public_tables_remain_global": False,
+                "schema": {},
+            }
+
+        required_indexes = {
+            "conversations": {
+                "ix_conversations_tenant_id",
+                "ix_conversations_tenant_id_created_at",
+                "ix_conversations_tenant_owner_user_id",
+            },
+            "messages": {
+                "ix_messages_tenant_id",
+                "ix_messages_tenant_id_created_at",
+                "ix_messages_tenant_conversation_id",
+            },
+            "bookmarks": {
+                "ix_bookmarks_tenant_id",
+                "ix_bookmarks_tenant_id_created_at",
+                "ix_bookmarks_tenant_user_id",
+            },
+            "user_feedbacks": {
+                "ix_user_feedbacks_tenant_id",
+                "ix_user_feedbacks_tenant_id_created_at",
+                "ix_user_feedbacks_tenant_user_id",
+            },
+            "watch_targets": {
+                "ix_watch_targets_tenant_id",
+                "ix_watch_targets_tenant_created_at",
+                "ix_watch_targets_tenant_user_id",
+                "ix_watch_targets_tenant_owner_user_id",
+                "ix_watch_targets_tenant_entity_id",
+            },
+            "signals": {
+                "ix_signals_tenant_id",
+                "ix_signals_tenant_detected_at",
+                "ix_signals_tenant_owner_user_id",
+                "ix_signals_tenant_watch_target_id",
+                "ix_signals_tenant_entity_id",
+            },
+            "alert_rules": {
+                "ix_alert_rules_tenant_id",
+                "ix_alert_rules_tenant_created_at",
+                "ix_alert_rules_tenant_user_id",
+            },
+            "alerts": {
+                "ix_alerts_tenant_id",
+                "ix_alerts_tenant_created_at",
+                "ix_alerts_tenant_user_id",
+                "ix_alerts_tenant_owner_user_id",
+                "ix_alerts_tenant_watch_target_id",
+                "ix_alerts_tenant_signal_id",
+            },
+            "request_traces": {
+                "ix_request_traces_tenant_id",
+                "ix_request_traces_tenant_id_created_at",
+            },
+            "user_profiles": {
+                "ix_user_profiles_tenant_id",
+                "ix_user_profiles_tenant_id_created_at",
+                "ix_user_profiles_tenant_session_id",
+            },
+            "tasks": {
+                "ix_tasks_tenant_id",
+                "ix_tasks_tenant_id_created_at",
+                "ix_tasks_tenant_entity_id",
+            },
+        }
+        public_tables = {
+            "organization_profiles",
+            "knowledge_entities",
+            "sources",
+            "pages",
+            "intelligence_items",
+            "relation_edges",
+            "funding_rounds",
+            "investments",
+            "organization_types",
+            "theological_positions",
+        }
+
+        try:
+            import models.database as runtime_database
+
+            inspector = inspect(runtime_database.engine)
+            tables = set(inspector.get_table_names())
+
+            def _table_ready(table_name: str) -> bool:
+                if table_name not in tables:
+                    return False
+                columns = {column["name"] for column in inspector.get_columns(table_name)}
+                indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+                return "tenant_id" in columns and required_indexes.get(table_name, set()).issubset(indexes)
+
+            conversation_ready = _table_ready("conversations")
+            message_ready = _table_ready("messages")
+            bookmark_ready = _table_ready("bookmarks")
+            feedback_ready = _table_ready("user_feedbacks")
+            watch_target_ready = _table_ready("watch_targets")
+            signal_ready = _table_ready("signals")
+            alert_rule_ready = _table_ready("alert_rules")
+            alert_ready = _table_ready("alerts")
+            request_trace_ready = _table_ready("request_traces")
+            user_profile_ready = _table_ready("user_profiles")
+            task_ready = _table_ready("tasks")
+
+            public_tables_remain_global = True
+            public_table_violations: list[str] = []
+            for table_name in sorted(public_tables & tables):
+                columns = {column["name"] for column in inspector.get_columns(table_name)}
+                if "tenant_id" in columns:
+                    public_tables_remain_global = False
+                    public_table_violations.append(table_name)
+
+            migration_file_found = (Path(__file__).resolve().parents[1] / "scripts" / "migrate_tenant_private_v1.py").exists()
+            all_private_tables_ready = all(
+                (
+                    conversation_ready,
+                    message_ready,
+                    bookmark_ready,
+                    feedback_ready,
+                    watch_target_ready,
+                    signal_ready,
+                    alert_rule_ready,
+                    alert_ready,
+                    request_trace_ready,
+                    user_profile_ready,
+                    task_ready,
+                )
+            )
+            private_tenant_schema_ready = (
+                "yes" if all_private_tables_ready and public_tables_remain_global else "partial" if public_tables_remain_global else "no"
+            )
+            private_tenant_migration_ready = (
+                "partial"
+                if migration_file_found and private_tenant_schema_ready in {"yes", "partial"}
+                else "no"
+            )
+            watch_alert_ready = (
+                "yes" if all((watch_target_ready, signal_ready, alert_rule_ready, alert_ready)) else "partial" if any((watch_target_ready, signal_ready, alert_rule_ready, alert_ready)) else "no"
+            )
+            return {
+                "private_tenant_schema_ready": private_tenant_schema_ready,
+                "private_tenant_migration_ready": private_tenant_migration_ready,
+                "conversation_tenant_id_ready": "yes" if conversation_ready else "no",
+                "message_tenant_id_ready": "yes" if message_ready else "no",
+                "bookmark_tenant_id_ready": "yes" if bookmark_ready else "no",
+                "feedback_tenant_id_ready": "yes" if feedback_ready else "no",
+                "watch_alert_tenant_id_ready": watch_alert_ready,
+                "diagnostics_tenant_id_ready": "partial" if request_trace_ready else "no",
+                "user_profile_tenant_id_ready": "partial" if user_profile_ready else "no",
+                "task_tenant_id_ready": "partial" if task_ready else "no",
+                "public_tables_remain_global": public_tables_remain_global,
+                "schema": {
+                    "migration_file_found": migration_file_found,
+                    "public_table_violations": public_table_violations,
+                    "conversation_ready": conversation_ready,
+                    "message_ready": message_ready,
+                    "bookmark_ready": bookmark_ready,
+                    "feedback_ready": feedback_ready,
+                    "watch_target_ready": watch_target_ready,
+                    "signal_ready": signal_ready,
+                    "alert_rule_ready": alert_rule_ready,
+                    "alert_ready": alert_ready,
+                    "request_trace_ready": request_trace_ready,
+                    "user_profile_ready": user_profile_ready,
+                    "task_ready": task_ready,
+                },
+            }
+        except Exception:
+            return {
+                "private_tenant_schema_ready": "no",
+                "private_tenant_migration_ready": "no",
+                "conversation_tenant_id_ready": "no",
+                "message_tenant_id_ready": "no",
+                "bookmark_tenant_id_ready": "no",
+                "feedback_tenant_id_ready": "no",
+                "watch_alert_tenant_id_ready": "no",
+                "diagnostics_tenant_id_ready": "no",
+                "user_profile_tenant_id_ready": "no",
+                "task_tenant_id_ready": "no",
+                "public_tables_remain_global": False,
+                "schema": {},
+            }
 
 
 def build_production_readiness_report(*, contracts: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:

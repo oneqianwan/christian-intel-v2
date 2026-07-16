@@ -42,7 +42,14 @@ class VerifyResult:
 def _load_runtime(database_url: str):
     os.environ["DATABASE_URL"] = database_url
 
-    for module_name in ("config", "models.database", "models.auth", "services.tenant_service"):
+    for module_name in (
+        "config",
+        "models.database",
+        "models.auth",
+        "models.watch_alert",
+        "services.tenant_service",
+        "scripts.migrate_tenant_private_v1",
+    ):
         sys.modules.pop(module_name, None)
 
     config = importlib.import_module("config")
@@ -50,6 +57,10 @@ def _load_runtime(database_url: str):
     auth_models = importlib.import_module("models.auth")
     tenant_service = importlib.import_module("services.tenant_service")
     return config, database, auth_models, tenant_service
+
+
+def _load_private_migration_module():
+    return importlib.import_module("scripts.migrate_tenant_private_v1")
 
 
 def _apply_migration(database, auth_models, tenant_service) -> None:
@@ -69,6 +80,9 @@ def _apply_migration(database, auth_models, tenant_service) -> None:
         tenant_service.ensure_default_tenant_foundation(db)
     finally:
         db.close()
+    private_migration = _load_private_migration_module()
+    watch_models = importlib.import_module("models.watch_alert")
+    private_migration.apply_private_tenant_migration(database, auth_models, watch_models, tenant_service)
 
 
 def _verify_schema(database, auth_models) -> VerifyResult:
@@ -429,12 +443,28 @@ def _verify_schema(database, auth_models) -> VerifyResult:
     finally:
         conn.close()
 
+    private_migration = _load_private_migration_module()
+    private_result = private_migration.verify_private_tenant_schema(database)
+    if not private_result.ok:
+        return VerifyResult(
+            ok=False,
+            details={
+                "auth_verify": {
+                    "tables": sorted(required_tables),
+                    "default_tenant_slug": default_tenant_slug,
+                    "tenant_membership_count": default_tenant_membership_count,
+                },
+                "private_verify": private_result.details,
+            },
+        )
+
     return VerifyResult(
         ok=True,
         details={
             "tables": sorted(required_tables),
             "default_tenant_slug": default_tenant_slug,
             "tenant_membership_count": default_tenant_membership_count,
+            "private_verify": private_result.details,
         },
     )
 

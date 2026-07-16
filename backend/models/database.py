@@ -635,18 +635,23 @@ class Conversation(Base):
     __tablename__ = "conversations"
     id = Column(String, primary_key=True)
     title = Column(String, nullable=False, default="新会话")
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     owner_user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     is_pinned = Column(Boolean, default=False)
     pinned_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     __table_args__ = (
+        Index("ix_conversations_tenant_id", "tenant_id"),
+        Index("ix_conversations_tenant_id_created_at", "tenant_id", "created_at"),
+        Index("ix_conversations_tenant_owner_user_id", "tenant_id", "owner_user_id"),
         Index("ix_conversations_owner_user_id_updated_at", "owner_user_id", "updated_at"),
     )
 
 class Message(Base):
     __tablename__ = "messages"
     id = Column(String, primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     conversation_id = Column(String, nullable=False)
     role = Column(String, nullable=False)
     content = Column(Text)
@@ -656,6 +661,9 @@ class Message(Base):
     status = Column(String, default="completed")
     created_at = Column(DateTime, default=datetime.utcnow)
     __table_args__ = (
+        Index("ix_messages_tenant_id", "tenant_id"),
+        Index("ix_messages_tenant_id_created_at", "tenant_id", "created_at"),
+        Index("ix_messages_tenant_conversation_id", "tenant_id", "conversation_id"),
         Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),
     )
 
@@ -932,11 +940,17 @@ class ApiConfig(Base):
 class Bookmark(Base):
     __tablename__ = "bookmarks"
     id = Column(String, primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String, default="default")
     intelligence_item_id = Column(String, ForeignKey("intelligence_items.id"))
     note = Column(Text)
     tags = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        Index("ix_bookmarks_tenant_id", "tenant_id"),
+        Index("ix_bookmarks_tenant_id_created_at", "tenant_id", "created_at"),
+        Index("ix_bookmarks_tenant_user_id", "tenant_id", "user_id"),
+    )
 
 
 class Mission(Base):
@@ -978,10 +992,15 @@ class JobRun(Base):
 class RequestTrace(Base):
     __tablename__ = "request_traces"
     id = Column(String, primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     request_id = Column(String, nullable=False, index=True)
     event_type = Column(String, nullable=False)
     event_data = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        Index("ix_request_traces_tenant_id", "tenant_id"),
+        Index("ix_request_traces_tenant_id_created_at", "tenant_id", "created_at"),
+    )
 
 
 # ========== Christian Ontology 分类体系 ==========
@@ -1178,8 +1197,14 @@ class RelationEdge(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index("ix_tasks_tenant_id", "tenant_id"),
+        Index("ix_tasks_tenant_id_created_at", "tenant_id", "created_at"),
+        Index("ix_tasks_tenant_entity_id", "tenant_id", "entity_id"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     # 当前代码库没有 entities 表，这里兼容挂到现有 knowledge_entities。
     entity_id = Column(String, ForeignKey("knowledge_entities.id", ondelete="SET NULL"), nullable=True)
     mission_id = Column(String, ForeignKey("missions.id", ondelete="SET NULL"), nullable=True)
@@ -1209,11 +1234,15 @@ class UserFeedback(Base):
 
     __tablename__ = "user_feedbacks"
     __table_args__ = (
+        Index("ix_user_feedbacks_tenant_id", "tenant_id"),
+        Index("ix_user_feedbacks_tenant_id_created_at", "tenant_id", "created_at"),
+        Index("ix_user_feedbacks_tenant_user_id", "tenant_id", "user_id"),
         Index("ix_user_feedbacks_user_id", "user_id"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(100), nullable=False, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String(100), nullable=True)
     feedback_type = Column(String(50), nullable=False)
     content = Column(Text, nullable=True)
@@ -1229,6 +1258,7 @@ class UserProfile(Base):
 
     id = Column(String(50), primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String(100), nullable=False, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
 
     name = Column(String(100), nullable=True)
     org = Column(String(200), nullable=True)
@@ -1253,6 +1283,9 @@ class UserProfile(Base):
 
     __table_args__ = (
         UniqueConstraint("session_id", name="uix_session_profile"),
+        Index("ix_user_profiles_tenant_id", "tenant_id"),
+        Index("ix_user_profiles_tenant_id_created_at", "tenant_id", "created_at"),
+        Index("ix_user_profiles_tenant_session_id", "tenant_id", "session_id"),
     )
 
 
@@ -1509,6 +1542,7 @@ def _ensure_schema_compatibility():
                 inspector,
                 "watch_targets",
                 [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
                     ("owner_user_id", "VARCHAR REFERENCES users(id)"),
                 ],
             )
@@ -1517,6 +1551,11 @@ def _ensure_schema_compatibility():
                 inspector,
                 "watch_targets",
                 [
+                    ("ix_watch_targets_tenant_id", ("tenant_id",)),
+                    ("ix_watch_targets_tenant_created_at", ("tenant_id", "created_at")),
+                    ("ix_watch_targets_tenant_user_id", ("tenant_id", "user_id")),
+                    ("ix_watch_targets_tenant_owner_user_id", ("tenant_id", "owner_user_id")),
+                    ("ix_watch_targets_tenant_entity_id", ("tenant_id", "entity_id")),
                     ("ix_watch_targets_owner_user_id", ("owner_user_id",)),
                 ],
             )
@@ -1541,6 +1580,7 @@ def _ensure_schema_compatibility():
                 inspector,
                 "signals",
                 [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
                     ("owner_user_id", "VARCHAR REFERENCES users(id)"),
                 ],
             )
@@ -1549,7 +1589,32 @@ def _ensure_schema_compatibility():
                 inspector,
                 "signals",
                 [
+                    ("ix_signals_tenant_id", ("tenant_id",)),
+                    ("ix_signals_tenant_detected_at", ("tenant_id", "detected_at")),
+                    ("ix_signals_tenant_owner_user_id", ("tenant_id", "owner_user_id")),
+                    ("ix_signals_tenant_watch_target_id", ("tenant_id", "watch_target_id")),
+                    ("ix_signals_tenant_entity_id", ("tenant_id", "entity_id")),
                     ("ix_signals_owner_user_id_detected_at", ("owner_user_id", "detected_at")),
+                ],
+            )
+
+        if "alert_rules" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "alert_rules",
+                [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "alert_rules",
+                [
+                    ("ix_alert_rules_tenant_id", ("tenant_id",)),
+                    ("ix_alert_rules_tenant_created_at", ("tenant_id", "created_at")),
+                    ("ix_alert_rules_tenant_user_id", ("tenant_id", "user_id")),
                 ],
             )
 
@@ -1559,6 +1624,7 @@ def _ensure_schema_compatibility():
                 inspector,
                 "alerts",
                 [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
                     ("owner_user_id", "VARCHAR REFERENCES users(id)"),
                 ],
             )
@@ -1567,6 +1633,12 @@ def _ensure_schema_compatibility():
                 inspector,
                 "alerts",
                 [
+                    ("ix_alerts_tenant_id", ("tenant_id",)),
+                    ("ix_alerts_tenant_created_at", ("tenant_id", "created_at")),
+                    ("ix_alerts_tenant_user_id", ("tenant_id", "user_id")),
+                    ("ix_alerts_tenant_owner_user_id", ("tenant_id", "owner_user_id")),
+                    ("ix_alerts_tenant_watch_target_id", ("tenant_id", "watch_target_id")),
+                    ("ix_alerts_tenant_signal_id", ("tenant_id", "signal_id")),
                     ("ix_alerts_owner_user_id_status_created_at", ("owner_user_id", "status", "created_at")),
                 ],
             )
@@ -1614,6 +1686,7 @@ def _ensure_schema_compatibility():
                 inspector,
                 "user_feedbacks",
                 [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
                     ("user_id", "VARCHAR(100) NULL"),
                 ],
             )
@@ -1622,6 +1695,9 @@ def _ensure_schema_compatibility():
                 inspector,
                 "user_feedbacks",
                 [
+                    ("ix_user_feedbacks_tenant_id", ("tenant_id",)),
+                    ("ix_user_feedbacks_tenant_id_created_at", ("tenant_id", "created_at")),
+                    ("ix_user_feedbacks_tenant_user_id", ("tenant_id", "user_id")),
                     ("ix_user_feedbacks_user_id", ("user_id",)),
                 ],
             )
@@ -1686,6 +1762,7 @@ def _ensure_schema_compatibility():
                 inspector,
                 "conversations",
                 [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
                     ("owner_user_id", "VARCHAR REFERENCES users(id)"),
                     ("is_pinned", "BOOLEAN DEFAULT FALSE NOT NULL"),
                     ("pinned_at", "TIMESTAMP NULL"),
@@ -1696,24 +1773,114 @@ def _ensure_schema_compatibility():
                 inspector,
                 "conversations",
                 [
+                    ("ix_conversations_tenant_id", ("tenant_id",)),
+                    ("ix_conversations_tenant_id_created_at", ("tenant_id", "created_at")),
+                    ("ix_conversations_tenant_owner_user_id", ("tenant_id", "owner_user_id")),
                     ("ix_conversations_owner_user_id_updated_at", ("owner_user_id", "updated_at")),
                 ],
             )
 
         if "messages" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "messages",
+                [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
+                ],
+            )
             _ensure_indexes(
                 conn,
                 inspector,
                 "messages",
                 [
+                    ("ix_messages_tenant_id", ("tenant_id",)),
+                    ("ix_messages_tenant_id_created_at", ("tenant_id", "created_at")),
+                    ("ix_messages_tenant_conversation_id", ("tenant_id", "conversation_id")),
                     ("ix_messages_conversation_id_created_at", ("conversation_id", "created_at")),
                 ],
             )
 
         if "tasks" in table_names:
-            task_columns = {column["name"] for column in inspector.get_columns("tasks")}
+            task_columns = _ensure_missing_columns(
+                conn,
+                inspector,
+                "tasks",
+                [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
+                ],
+            )
             if "mission_id" not in task_columns:
                 conn.execute(text("ALTER TABLE tasks ADD COLUMN mission_id VARCHAR NULL"))
+            _ensure_indexes(
+                conn,
+                inspector,
+                "tasks",
+                [
+                    ("ix_tasks_tenant_id", ("tenant_id",)),
+                    ("ix_tasks_tenant_id_created_at", ("tenant_id", "created_at")),
+                    ("ix_tasks_tenant_entity_id", ("tenant_id", "entity_id")),
+                ],
+            )
+
+        if "bookmarks" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "bookmarks",
+                [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "bookmarks",
+                [
+                    ("ix_bookmarks_tenant_id", ("tenant_id",)),
+                    ("ix_bookmarks_tenant_id_created_at", ("tenant_id", "created_at")),
+                    ("ix_bookmarks_tenant_user_id", ("tenant_id", "user_id")),
+                ],
+            )
+
+        if "request_traces" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "request_traces",
+                [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "request_traces",
+                [
+                    ("ix_request_traces_tenant_id", ("tenant_id",)),
+                    ("ix_request_traces_tenant_id_created_at", ("tenant_id", "created_at")),
+                ],
+            )
+
+        if "user_profiles" in table_names:
+            _ensure_missing_columns(
+                conn,
+                inspector,
+                "user_profiles",
+                [
+                    ("tenant_id", "VARCHAR NULL REFERENCES tenants(id)"),
+                ],
+            )
+            _ensure_indexes(
+                conn,
+                inspector,
+                "user_profiles",
+                [
+                    ("ix_user_profiles_tenant_id", ("tenant_id",)),
+                    ("ix_user_profiles_tenant_id_created_at", ("tenant_id", "created_at")),
+                    ("ix_user_profiles_tenant_session_id", ("tenant_id", "session_id")),
+                ],
+            )
 
         if "organization_profiles" in table_names:
             _ensure_missing_columns(

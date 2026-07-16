@@ -18,6 +18,11 @@ class WatchTarget(Base):
             "frequency IN ('daily', 'weekly', 'manual')",
             name="ck_watch_targets_frequency",
         ),
+        Index("ix_watch_targets_tenant_id", "tenant_id"),
+        Index("ix_watch_targets_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_watch_targets_tenant_user_id", "tenant_id", "user_id"),
+        Index("ix_watch_targets_tenant_owner_user_id", "tenant_id", "owner_user_id"),
+        Index("ix_watch_targets_tenant_entity_id", "tenant_id", "entity_id"),
         Index("ix_watch_targets_entity_id", "entity_id"),
         Index("ix_watch_targets_status_next_check_at", "status", "next_check_at"),
         Index("ix_watch_targets_user_id", "user_id"),
@@ -25,6 +30,7 @@ class WatchTarget(Base):
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String, nullable=False)
     owner_user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     entity_id = Column(String, nullable=False)
@@ -104,6 +110,11 @@ class Signal(Base):
             "severity IN ('low', 'medium', 'high', 'critical')",
             name="ck_signals_severity",
         ),
+        Index("ix_signals_tenant_id", "tenant_id"),
+        Index("ix_signals_tenant_detected_at", "tenant_id", "detected_at"),
+        Index("ix_signals_tenant_owner_user_id", "tenant_id", "owner_user_id"),
+        Index("ix_signals_tenant_watch_target_id", "tenant_id", "watch_target_id"),
+        Index("ix_signals_tenant_entity_id", "tenant_id", "entity_id"),
         Index("ix_signals_watch_target_id", "watch_target_id"),
         Index("ix_signals_entity_id_detected_at", "entity_id", "detected_at"),
         Index("ix_signals_signal_type_severity", "signal_type", "severity"),
@@ -111,6 +122,7 @@ class Signal(Base):
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     watch_target_id = Column(String, ForeignKey("watch_targets.id"), nullable=False)
     owner_user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     entity_id = Column(String, nullable=False)
@@ -145,11 +157,15 @@ class AlertRule(Base):
             "minimum_severity IN ('low', 'medium', 'high', 'critical')",
             name="ck_alert_rules_minimum_severity",
         ),
+        Index("ix_alert_rules_tenant_id", "tenant_id"),
+        Index("ix_alert_rules_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_alert_rules_tenant_user_id", "tenant_id", "user_id"),
         Index("ix_alert_rules_is_enabled", "is_enabled"),
         Index("ix_alert_rules_signal_type", "signal_type"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String, nullable=True)
     signal_type = Column(String, nullable=False)
     minimum_severity = Column(String, nullable=False, default="low")
@@ -187,6 +203,12 @@ class Alert(Base):
             name="ck_alerts_severity",
         ),
         UniqueConstraint("signal_id", "user_id", name="uix_alerts_signal_id_user_id"),
+        Index("ix_alerts_tenant_id", "tenant_id"),
+        Index("ix_alerts_tenant_created_at", "tenant_id", "created_at"),
+        Index("ix_alerts_tenant_user_id", "tenant_id", "user_id"),
+        Index("ix_alerts_tenant_owner_user_id", "tenant_id", "owner_user_id"),
+        Index("ix_alerts_tenant_watch_target_id", "tenant_id", "watch_target_id"),
+        Index("ix_alerts_tenant_signal_id", "tenant_id", "signal_id"),
         Index("ix_alerts_user_id_status_created_at", "user_id", "status", "created_at"),
         Index("ix_alerts_owner_user_id_status_created_at", "owner_user_id", "status", "created_at"),
         Index("ix_alerts_watch_target_id", "watch_target_id"),
@@ -195,6 +217,7 @@ class Alert(Base):
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String, nullable=False)
     owner_user_id = Column(String, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     watch_target_id = Column(String, ForeignKey("watch_targets.id"), nullable=False)
