@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from config import settings
-from dependencies.watch_alert_auth import get_watch_alert_current_user_id as get_current_user_id
+from dependencies.tenant_context import TenantRequestContext, require_tenant_member
 from models.database import get_db
 from schemas.watch_alert import (
     AlertListResponse,
@@ -20,6 +20,7 @@ from services.alert_service import (
     AlertNotFoundError,
     AlertServiceError,
     dismiss_alert,
+    get_owned_alert,
     get_unread_count,
     list_alerts,
     mark_alert_read,
@@ -50,7 +51,7 @@ def _translate_service_error(exc: AlertServiceError) -> None:
 @router.get("", response_model=AlertListResponse)
 def list_alerts_route(
     _: None = Depends(require_alert_notifications_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
     status_filter: AlertStatus | None = Query(default=None, alias="status"),
     severity: AlertSeverity | None = Query(default=None),
@@ -60,7 +61,9 @@ def list_alerts_route(
 ):
     items, total = list_alerts(
         db,
-        user_id,
+        str(context.user.id),
+        current_user=context.user,
+        current_tenant=str(context.tenant.id),
         status=status_filter,
         severity=severity,
         watch_target_id=watch_target_id,
@@ -78,21 +81,34 @@ def list_alerts_route(
 @router.get("/unread-count", response_model=AlertUnreadCountResponse)
 def get_unread_count_route(
     _: None = Depends(require_alert_notifications_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
-    return AlertUnreadCountResponse(unread_count=get_unread_count(db, user_id))
+    return AlertUnreadCountResponse(
+        unread_count=get_unread_count(
+            db,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
+    )
 
 
 @router.patch("/{alert_id}/read", response_model=AlertResponse)
 def mark_alert_read_route(
     alert_id: str,
     _: None = Depends(require_alert_notifications_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
-        alert = mark_alert_read(db, alert_id, user_id)
+        alert = mark_alert_read(
+            db,
+            alert_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
     except (AlertNotFoundError, AlertDismissedError) as exc:
         _translate_service_error(exc)
     return AlertResponse.model_validate(alert)
@@ -102,20 +118,73 @@ def mark_alert_read_route(
 def dismiss_alert_route(
     alert_id: str,
     _: None = Depends(require_alert_notifications_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
-        alert = dismiss_alert(db, alert_id, user_id)
+        alert = dismiss_alert(
+            db,
+            alert_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
     except AlertNotFoundError as exc:
         _translate_service_error(exc)
     return AlertResponse.model_validate(alert)
 
 
+@router.delete("/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_alert_route(
+    alert_id: str,
+    _: None = Depends(require_alert_notifications_enabled),
+    context: TenantRequestContext = Depends(require_tenant_member),
+    db: Session = Depends(get_db),
+):
+    try:
+        dismiss_alert(
+            db,
+            alert_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
+    except AlertNotFoundError as exc:
+        _translate_service_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/read-all", response_model=AlertReadAllResponse)
 def mark_all_read_route(
     _: None = Depends(require_alert_notifications_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
-    return AlertReadAllResponse(updated_count=mark_all_read(db, user_id))
+    return AlertReadAllResponse(
+        updated_count=mark_all_read(
+            db,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
+    )
+
+
+@router.get("/{alert_id}", response_model=AlertResponse)
+def get_alert_route(
+    alert_id: str,
+    _: None = Depends(require_alert_notifications_enabled),
+    context: TenantRequestContext = Depends(require_tenant_member),
+    db: Session = Depends(get_db),
+):
+    try:
+        alert = get_owned_alert(
+            db,
+            alert_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
+    except AlertNotFoundError as exc:
+        _translate_service_error(exc)
+    return AlertResponse.model_validate(alert)

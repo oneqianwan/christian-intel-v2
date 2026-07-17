@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import ConfigDict
 from sqlalchemy.orm import Session
 
 from config import settings
-from dependencies.watch_alert_auth import get_watch_alert_current_user_id as get_current_user_id
+from dependencies.tenant_context import TenantRequestContext, require_tenant_member
 from models.database import get_db
 from schemas.watch_alert import (
     ApiErrorResponse,
@@ -26,6 +27,7 @@ from services.watch_target_service import (
     WatchTargetNotFoundError,
     WatchTargetServiceError,
     create_watch_target,
+    get_owned_watch_target,
     list_watch_targets,
     soft_delete_watch_target,
     update_watch_target,
@@ -41,6 +43,10 @@ from services.watch_runner import (
 router = APIRouter(prefix="/watch-targets", tags=["watch_targets"])
 
 
+class WatchTargetCreateIn(WatchTargetCreate):
+    model_config = ConfigDict(extra="ignore")
+
+
 def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
     raise HTTPException(status_code=status_code, detail=ApiErrorResponse(error_code=error_code, message=message).model_dump())
 
@@ -52,6 +58,8 @@ def require_watch_alert_enabled() -> None:
             "WATCH_ALERT_V1_DISABLED",
             "Watch / Alert V1 is disabled",
         )
+
+
 def _translate_service_error(exc: WatchTargetServiceError) -> None:
     _raise_api_error(exc.status_code, exc.error_code, exc.message)
 
@@ -62,13 +70,19 @@ def _translate_service_error(exc: WatchTargetServiceError) -> None:
     status_code=status.HTTP_201_CREATED,
 )
 def create_watch_target_route(
-    payload: WatchTargetCreate,
+    payload: WatchTargetCreateIn,
     _: None = Depends(require_watch_alert_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
-        watch_target = create_watch_target(db, user_id, payload)
+        watch_target = create_watch_target(
+            db,
+            str(context.user.id),
+            WatchTargetCreate.model_validate(payload.model_dump()),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
     except (WatchTargetExistsError, WatchTargetEntityNotFoundError) as exc:
         _translate_service_error(exc)
     return watch_target
@@ -77,7 +91,7 @@ def create_watch_target_route(
 @router.get("", response_model=WatchTargetListResponse)
 def list_watch_targets_route(
     _: None = Depends(require_watch_alert_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
     status_filter: WatchTargetStatus | None = Query(default=None, alias="status"),
     entity_type: WatchEntityType | None = Query(default=None),
@@ -86,7 +100,9 @@ def list_watch_targets_route(
 ):
     items, total = list_watch_targets(
         db,
-        user_id,
+        str(context.user.id),
+        current_user=context.user,
+        current_tenant=str(context.tenant.id),
         status=status_filter,
         entity_type=entity_type,
         page=page,
@@ -100,16 +116,42 @@ def list_watch_targets_route(
     )
 
 
+@router.get("/{watch_target_id}", response_model=WatchTargetResponse)
+def get_watch_target_route(
+    watch_target_id: str,
+    _: None = Depends(require_watch_alert_enabled),
+    context: TenantRequestContext = Depends(require_tenant_member),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_owned_watch_target(
+            db,
+            watch_target_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
+    except WatchTargetNotFoundError as exc:
+        _translate_service_error(exc)
+
+
 @router.patch("/{watch_target_id}", response_model=WatchTargetResponse)
 def update_watch_target_route(
     watch_target_id: str,
     payload: WatchTargetUpdate,
     _: None = Depends(require_watch_alert_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
-        watch_target = update_watch_target(db, watch_target_id, user_id, payload)
+        watch_target = update_watch_target(
+            db,
+            watch_target_id,
+            str(context.user.id),
+            payload,
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
     except WatchTargetNotFoundError as exc:
         _translate_service_error(exc)
     return watch_target
@@ -119,11 +161,17 @@ def update_watch_target_route(
 def delete_watch_target_route(
     watch_target_id: str,
     _: None = Depends(require_watch_alert_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
-        soft_delete_watch_target(db, watch_target_id, user_id)
+        soft_delete_watch_target(
+            db,
+            watch_target_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
     except WatchTargetNotFoundError as exc:
         _translate_service_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -133,11 +181,17 @@ def delete_watch_target_route(
 def run_watch_target_route(
     watch_target_id: str,
     _: None = Depends(require_watch_alert_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
-        watch_run = run_watch_target(db, watch_target_id, user_id)
+        watch_run = run_watch_target(
+            db,
+            watch_target_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
+        )
     except (
         WatchTargetNotFoundError,
         WatchTargetDisabledError,
@@ -161,7 +215,7 @@ def run_watch_target_route(
 def list_watch_target_signals_route(
     watch_target_id: str,
     _: None = Depends(require_watch_alert_enabled),
-    user_id: str = Depends(get_current_user_id),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
     signal_type: SignalType | None = Query(default=None),
     severity: SignalSeverity | None = Query(default=None),
@@ -172,7 +226,9 @@ def list_watch_target_signals_route(
         items, total = list_watch_target_signals(
             db,
             watch_target_id,
-            user_id,
+            str(context.user.id),
+            current_user=context.user,
+            current_tenant=str(context.tenant.id),
             signal_type=signal_type,
             severity=severity,
             page=page,

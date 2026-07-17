@@ -5,13 +5,13 @@ import uuid
 
 from datetime import datetime, timedelta
 
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from models.watch_alert import WatchRun, WatchTarget
-from services.alert_engine import process_signals
-from services.alert_rule_service import notifications_enabled
-from services.signal_service import create_signal_records_for_changes, list_signals_for_watch_target
+from models.watch_alert import Alert, AlertRule, Signal, WatchRun, WatchTarget
+from services.alert_rule_service import DEFAULT_ALERT_RULES, notifications_enabled, severity_meets_minimum
+from services.signal_service import create_signal_records_for_changes
+from services import tenant_scope, tenant_service
 from services.watch_change_detector import detect_watch_changes
 from services.watch_scheduler import (
     WATCH_RUN_DUPLICATE,
@@ -143,9 +143,118 @@ def _load_auto_watch_target(db: Session, watch_target_id: str) -> WatchTarget:
     )
     if not watch_target:
         raise WatchTargetNotFoundError()
+    if not str(getattr(watch_target, "tenant_id", "") or "").strip():
+        raise WatchTargetNotFoundError()
     if ownership_enabled() and not str(watch_target.owner_user_id or "").strip():
         raise WatchTargetNotFoundError()
     return watch_target
+
+
+def _watch_target_tenant_id(watch_target: WatchTarget) -> str:
+    tenant_id = str(getattr(watch_target, "tenant_id", "") or "").strip()
+    if not tenant_id:
+        raise WatchTargetNotFoundError()
+    return tenant_id
+
+
+def _watch_target_actor_user_id(watch_target: WatchTarget) -> str:
+    if ownership_enabled():
+        actor_user_id = str(getattr(watch_target, "owner_user_id", "") or "").strip()
+        if not actor_user_id:
+            raise WatchTargetNotFoundError()
+        return actor_user_id
+    actor_user_id = str(getattr(watch_target, "user_id", "") or "").strip()
+    if not actor_user_id:
+        raise WatchTargetNotFoundError()
+    return actor_user_id
+
+
+def _ensure_tenant_alert_rules(db: Session, watch_target: WatchTarget) -> dict[str, AlertRule]:
+    current_tenant_id = _watch_target_tenant_id(watch_target)
+    actor_user_id = _watch_target_actor_user_id(watch_target)
+    existing_rules = {
+        str(rule.signal_type): rule
+        for rule in db.query(AlertRule)
+        .filter(
+            AlertRule.user_id == actor_user_id,
+            AlertRule.signal_type.in_(tuple(DEFAULT_ALERT_RULES.keys())),
+        )
+        .all()
+    }
+
+    for signal_type, minimum_severity in DEFAULT_ALERT_RULES.items():
+        rule = existing_rules.get(signal_type)
+        if rule is None:
+            candidate = AlertRule(
+                id=str(uuid.uuid4()),
+                tenant_id=current_tenant_id,
+                user_id=actor_user_id,
+                signal_type=signal_type,
+                minimum_severity=minimum_severity,
+                is_enabled=True,
+                configuration_json={},
+            )
+            try:
+                with db.begin_nested():
+                    db.add(candidate)
+                    db.flush()
+                    existing_rules[signal_type] = candidate
+            except IntegrityError:
+                existing = (
+                    db.query(AlertRule)
+                    .filter(
+                        AlertRule.user_id == actor_user_id,
+                        AlertRule.signal_type == signal_type,
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    existing_rules[signal_type] = existing
+            continue
+
+        if not str(getattr(rule, "tenant_id", "") or "").strip():
+            rule.tenant_id = current_tenant_id
+
+    return existing_rules
+
+
+def _create_alerts_for_signals(db: Session, watch_target: WatchTarget, created_signals: list[Signal]) -> int:
+    if not created_signals or not notifications_enabled():
+        return 0
+
+    current_tenant_id = _watch_target_tenant_id(watch_target)
+    actor_user_id = _watch_target_actor_user_id(watch_target)
+    tenant_rules = _ensure_tenant_alert_rules(db, watch_target)
+    created_count = 0
+
+    for signal in created_signals:
+        signal.tenant_id = current_tenant_id
+        rule = tenant_rules.get(str(signal.signal_type))
+        if rule is None or not bool(getattr(rule, "is_enabled", False)):
+            continue
+        if not severity_meets_minimum(str(signal.severity), str(rule.minimum_severity)):
+            continue
+        alert = Alert(
+            id=str(uuid.uuid4()),
+            tenant_id=current_tenant_id,
+            user_id=actor_user_id,
+            owner_user_id=actor_user_id if ownership_enabled() else None,
+            watch_target_id=signal.watch_target_id,
+            signal_id=signal.id,
+            title=signal.title,
+            summary=signal.summary,
+            severity=signal.severity,
+            source_url=signal.source_url,
+            status="unread",
+        )
+        try:
+            with db.begin_nested():
+                db.add(alert)
+                db.flush()
+                created_count += 1
+        except IntegrityError:
+            continue
+    return created_count
 
 
 def _create_running_watch_run(db: Session, watch_target: WatchTarget, *, metadata_json: dict) -> WatchRun:
@@ -217,11 +326,14 @@ def _collect_execution_result(db: Session, watch_target: WatchTarget) -> tuple[d
     previous_snapshot = _build_previous_snapshot(previous_run)
     changes = detect_watch_changes(previous_snapshot, current_snapshot)
     created_signals = [] if previous_snapshot is None else create_signal_records_for_changes(db, watch_target, current_snapshot, changes)
+    current_tenant_id = _watch_target_tenant_id(watch_target)
+    for signal in created_signals:
+        signal.tenant_id = current_tenant_id
+
     alerts_created = 0
     if created_signals and notifications_enabled():
         try:
-            alert_result = process_signals(db, [signal.id for signal in created_signals])
-            alerts_created = alert_result.created_count
+            alerts_created = _create_alerts_for_signals(db, watch_target, created_signals)
         except Exception as exc:
             print(
                 json.dumps(
@@ -526,8 +638,21 @@ def _mark_failed_without_target(
     return watch_run
 
 
-def _run_manual_watch_target(db: Session, watch_target_id: str, user_id: str) -> WatchRun:
-    watch_target = get_owned_watch_target(db, watch_target_id, user_id)
+def _run_manual_watch_target(
+    db: Session,
+    watch_target_id: str,
+    user_id: str,
+    *,
+    current_user=None,
+    current_tenant=None,
+) -> WatchRun:
+    watch_target = get_owned_watch_target(
+        db,
+        watch_target_id,
+        user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     if watch_target.status == "disabled":
         raise WatchTargetDisabledError()
     if _running_watch_run_exists(db, watch_target.id):
@@ -682,6 +807,8 @@ def run_watch_target(
     watch_target_id: str,
     user_id: str | None = None,
     *,
+    current_user=None,
+    current_tenant=None,
     trigger: str = "manual",
     watch_run_id: str | None = None,
     scheduled_at: datetime | None = None,
@@ -692,7 +819,13 @@ def run_watch_target(
     if trigger == "manual":
         if not user_id:
             raise WatchTargetNotFoundError()
-        return _run_manual_watch_target(db, watch_target_id, user_id)
+        return _run_manual_watch_target(
+            db,
+            watch_target_id,
+            user_id,
+            current_user=current_user,
+            current_tenant=current_tenant,
+        )
     if trigger == "automatic":
         return _run_automatic_watch_target(
             db,
@@ -711,18 +844,44 @@ def list_watch_target_signals(
     watch_target_id: str,
     user_id: str,
     *,
+    current_user=None,
+    current_tenant=None,
     signal_type: str | None,
     severity: str | None,
     page: int,
     page_size: int,
 ):
-    watch_target = get_owned_watch_target(db, watch_target_id, user_id)
-    return list_signals_for_watch_target(
+    watch_target = get_owned_watch_target(
         db,
-        watch_target.id,
-        owner_user_id=user_id,
-        signal_type=signal_type,
-        severity=severity,
-        page=page,
-        page_size=page_size,
+        watch_target_id,
+        user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
     )
+    current_tenant_id = _watch_target_tenant_id(watch_target)
+    query = db.query(Signal).filter(Signal.watch_target_id == watch_target.id)
+    query = tenant_scope.filter_by_tenant(query, Signal, current_tenant_id)
+
+    is_super_admin = (
+        bool(current_user)
+        if isinstance(current_user, bool)
+        else tenant_service.is_platform_super_admin(current_user)
+    )
+    if not is_super_admin:
+        normalized_owner_user_id = str(user_id or "").strip()
+        if ownership_enabled():
+            query = query.filter(Signal.owner_user_id == normalized_owner_user_id)
+
+    if signal_type:
+        query = query.filter(Signal.signal_type == signal_type)
+    if severity:
+        query = query.filter(Signal.severity == severity)
+
+    total = query.count()
+    items = (
+        query.order_by(Signal.detected_at.desc(), Signal.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return items, total

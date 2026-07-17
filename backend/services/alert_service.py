@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from models.watch_alert import Alert
+from services import tenant_scope, tenant_service
 from services.watch_alert_ownership import ownership_enabled
 
 
@@ -35,15 +36,49 @@ def utcnow() -> datetime:
     return datetime.utcnow()
 
 
-def get_owned_alert(db: Session, alert_id: str, user_id: str) -> Alert:
-    filters = [Alert.id == alert_id]
+def _is_super_admin(current_user) -> bool:
+    if isinstance(current_user, bool):
+        return bool(current_user)
+    return tenant_service.is_platform_super_admin(current_user)
+
+
+def apply_alert_access_scope(
+    query,
+    *,
+    user_id: str,
+    current_user=None,
+    current_tenant=None,
+):
+    if current_tenant is not None:
+        current_tenant_id = tenant_scope.ensure_tenant_id_for_create({}, current_tenant).get("tenant_id")
+        query = tenant_scope.filter_by_tenant(query, Alert, current_tenant_id)
+
+    if _is_super_admin(current_user) and current_tenant is not None:
+        return query
+
     if ownership_enabled():
-        filters.append(Alert.owner_user_id == user_id)
-    else:
-        filters.append(Alert.user_id == user_id)
-    alert = db.query(Alert).filter(*filters).first()
+        return query.filter(Alert.owner_user_id == user_id)
+    return query.filter(Alert.user_id == user_id)
+
+
+def get_owned_alert(
+    db: Session,
+    alert_id: str,
+    user_id: str,
+    *,
+    current_user=None,
+    current_tenant=None,
+) -> Alert:
+    alert = apply_alert_access_scope(
+        db.query(Alert),
+        user_id=user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    ).filter(Alert.id == alert_id).first()
     if not alert:
         raise AlertNotFoundError()
+    if current_tenant is not None:
+        tenant_scope.require_record_tenant(alert, current_tenant)
     return alert
 
 
@@ -51,17 +86,20 @@ def list_alerts(
     db: Session,
     user_id: str,
     *,
+    current_user=None,
+    current_tenant=None,
     status: str | None,
     severity: str | None,
     watch_target_id: str | None,
     page: int,
     page_size: int,
 ) -> tuple[list[Alert], int]:
-    query = db.query(Alert)
-    if ownership_enabled():
-        query = query.filter(Alert.owner_user_id == user_id)
-    else:
-        query = query.filter(Alert.user_id == user_id)
+    query = apply_alert_access_scope(
+        db.query(Alert),
+        user_id=user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     if status:
         query = query.filter(Alert.status == status)
     if severity:
@@ -79,17 +117,24 @@ def list_alerts(
     return items, total
 
 
-def get_unread_count(db: Session, user_id: str) -> int:
-    query = db.query(Alert).filter(Alert.status == "unread")
-    if ownership_enabled():
-        query = query.filter(Alert.owner_user_id == user_id)
-    else:
-        query = query.filter(Alert.user_id == user_id)
+def get_unread_count(db: Session, user_id: str, *, current_user=None, current_tenant=None) -> int:
+    query = apply_alert_access_scope(
+        db.query(Alert).filter(Alert.status == "unread"),
+        user_id=user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     return query.count()
 
 
-def mark_alert_read(db: Session, alert_id: str, user_id: str) -> Alert:
-    alert = get_owned_alert(db, alert_id, user_id)
+def mark_alert_read(db: Session, alert_id: str, user_id: str, *, current_user=None, current_tenant=None) -> Alert:
+    alert = get_owned_alert(
+        db,
+        alert_id,
+        user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     if alert.status == "dismissed":
         raise AlertDismissedError()
     if alert.status == "read":
@@ -106,8 +151,14 @@ def mark_alert_read(db: Session, alert_id: str, user_id: str) -> Alert:
     return alert
 
 
-def dismiss_alert(db: Session, alert_id: str, user_id: str) -> Alert:
-    alert = get_owned_alert(db, alert_id, user_id)
+def dismiss_alert(db: Session, alert_id: str, user_id: str, *, current_user=None, current_tenant=None) -> Alert:
+    alert = get_owned_alert(
+        db,
+        alert_id,
+        user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     if alert.status == "dismissed":
         return alert
 
@@ -122,14 +173,15 @@ def dismiss_alert(db: Session, alert_id: str, user_id: str) -> Alert:
     return alert
 
 
-def mark_all_read(db: Session, user_id: str) -> int:
+def mark_all_read(db: Session, user_id: str, *, current_user=None, current_tenant=None) -> int:
     current_time = utcnow()
     try:
-        query = db.query(Alert).filter(Alert.status == "unread")
-        if ownership_enabled():
-            query = query.filter(Alert.owner_user_id == user_id)
-        else:
-            query = query.filter(Alert.user_id == user_id)
+        query = apply_alert_access_scope(
+            db.query(Alert).filter(Alert.status == "unread"),
+            user_id=user_id,
+            current_user=current_user,
+            current_tenant=current_tenant,
+        )
         updated_count = query.update(
             {
                 Alert.status: "read",

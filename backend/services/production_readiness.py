@@ -298,6 +298,11 @@ class ProductionReadinessChecker:
         bookmark_router_tenant_scoped = bool(private_router_binding["bookmark_router_tenant_scoped_ready"])
         feedback_router_tenant_scoped = bool(private_router_binding["feedback_router_tenant_scoped_ready"])
         feedback_stats_tenant_scoped = bool(private_router_binding["feedback_stats_tenant_scoped_ready"])
+        watch_target_router_tenant_scoped = bool(private_router_binding["watch_target_router_tenant_scoped_ready"])
+        alert_router_tenant_scoped = bool(private_router_binding["alert_router_tenant_scoped_ready"])
+        signal_tenant_scoped = bool(private_router_binding["signal_tenant_scoped_ready"])
+        alert_rule_tenant_scoped = bool(private_router_binding["alert_rule_tenant_scoped_ready"])
+        watch_alert_tenant_write_ready = bool(private_router_binding["watch_alert_tenant_write_ready"])
         chat_message_tenant_write_ready = bool(private_router_binding["chat_message_tenant_write_ready"])
         conversation_cross_tenant_isolation_ready = bool(
             conversation_router_tenant_scoped and private_tenant_schema["conversation_tenant_id_ready"] == "yes"
@@ -313,6 +318,14 @@ class ProductionReadinessChecker:
             and feedback_stats_tenant_scoped
             and private_tenant_schema["feedback_tenant_id_ready"] == "yes"
         )
+        watch_alert_cross_tenant_isolation_ready = bool(
+            watch_target_router_tenant_scoped
+            and alert_router_tenant_scoped
+            and signal_tenant_scoped
+            and alert_rule_tenant_scoped
+            and watch_alert_tenant_write_ready
+            and private_tenant_schema["watch_alert_tenant_id_ready"] == "yes"
+        )
         private_router_tenant_binding_ready = (
             "partial"
             if (
@@ -321,6 +334,7 @@ class ProductionReadinessChecker:
                 and chat_message_tenant_write_ready
                 and bookmark_cross_tenant_isolation_ready
                 and feedback_cross_tenant_isolation_ready
+                and watch_alert_cross_tenant_isolation_ready
             )
             else "partial"
             if conversation_cross_tenant_isolation_ready and message_cross_tenant_isolation_ready and chat_message_tenant_write_ready
@@ -353,11 +367,17 @@ class ProductionReadinessChecker:
             "bookmark_router_tenant_scoped_ready": bookmark_router_tenant_scoped,
             "feedback_router_tenant_scoped_ready": feedback_router_tenant_scoped,
             "feedback_stats_tenant_scoped_ready": feedback_stats_tenant_scoped,
+            "watch_target_router_tenant_scoped_ready": watch_target_router_tenant_scoped,
+            "alert_router_tenant_scoped_ready": alert_router_tenant_scoped,
+            "signal_tenant_scoped_ready": signal_tenant_scoped,
+            "alert_rule_tenant_scoped_ready": alert_rule_tenant_scoped,
             "conversation_cross_tenant_isolation_ready": conversation_cross_tenant_isolation_ready,
             "message_cross_tenant_isolation_ready": message_cross_tenant_isolation_ready,
             "bookmark_cross_tenant_isolation_ready": bookmark_cross_tenant_isolation_ready,
             "feedback_cross_tenant_isolation_ready": feedback_cross_tenant_isolation_ready,
             "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
+            "watch_alert_cross_tenant_isolation_ready": watch_alert_cross_tenant_isolation_ready,
+            "watch_alert_tenant_write_ready": watch_alert_tenant_write_ready,
             "private_router_tenant_binding_ready": private_router_tenant_binding_ready,
             "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
             "tenant_isolation_readiness": tenant_isolation_readiness,
@@ -728,7 +748,12 @@ class ProductionReadinessChecker:
             chat_module = importlib.import_module("routers.chat")
             bookmarks_module = importlib.import_module("routers.bookmarks")
             feedback_module = importlib.import_module("routers.feedback")
+            watch_targets_module = importlib.import_module("routers.watch_targets")
+            alerts_module = importlib.import_module("routers.alerts")
             chat_ownership_module = importlib.import_module("services.chat_ownership")
+            watch_target_service_module = importlib.import_module("services.watch_target_service")
+            watch_runner_module = importlib.import_module("services.watch_runner")
+            alert_service_module = importlib.import_module("services.alert_service")
             tenant_context_module = importlib.import_module("dependencies.tenant_context")
             tenant_scope_module = importlib.import_module("services.tenant_scope")
 
@@ -736,7 +761,12 @@ class ProductionReadinessChecker:
             chat_source = Path(chat_module.__file__).read_text(encoding="utf-8")
             bookmarks_source = Path(bookmarks_module.__file__).read_text(encoding="utf-8")
             feedback_source = Path(feedback_module.__file__).read_text(encoding="utf-8")
+            watch_targets_source = Path(watch_targets_module.__file__).read_text(encoding="utf-8")
+            alerts_source = Path(alerts_module.__file__).read_text(encoding="utf-8")
             chat_ownership_source = Path(chat_ownership_module.__file__).read_text(encoding="utf-8")
+            watch_target_service_source = Path(watch_target_service_module.__file__).read_text(encoding="utf-8")
+            watch_runner_source = Path(watch_runner_module.__file__).read_text(encoding="utf-8")
+            alert_service_source = Path(alert_service_module.__file__).read_text(encoding="utf-8")
 
             chat_simple_signature = pyinspect.signature(chat_module.chat_simple)
             chat_stream_signature = pyinspect.signature(chat_module.chat_stream)
@@ -799,12 +829,51 @@ class ProductionReadinessChecker:
                 and 'stats["scope"] = "global"' in feedback_source
                 and 'stats["scope"] = "tenant"' in feedback_source
             )
+            watch_target_router_tenant_scoped = bool(
+                tenant_dependency_ready
+                and tenant_scope_ready
+                and "require_tenant_member" in watch_targets_source
+                and "current_tenant=str(context.tenant.id)" in watch_targets_source
+                and "get_owned_watch_target(" in watch_targets_source
+                and "apply_watch_target_access_scope(" in watch_target_service_source
+            )
+            alert_router_tenant_scoped = bool(
+                tenant_dependency_ready
+                and tenant_scope_ready
+                and "require_tenant_member" in alerts_source
+                and "current_tenant=str(context.tenant.id)" in alerts_source
+                and "get_owned_alert(" in alerts_source
+                and "apply_alert_access_scope(" in alert_service_source
+            )
+            signal_tenant_scoped = bool(
+                tenant_scope_ready
+                and "tenant_scope.filter_by_tenant(query, Signal, current_tenant_id)" in watch_runner_source
+                and "signal.tenant_id = current_tenant_id" in watch_runner_source
+            )
+            alert_rule_tenant_scoped = bool(
+                tenant_scope_ready
+                and "_ensure_tenant_alert_rules(" in watch_runner_source
+                and "tenant_id=current_tenant_id" in watch_runner_source
+                and "AlertRule(" in watch_runner_source
+            )
+            watch_alert_tenant_write_ready = bool(
+                signal_tenant_scoped
+                and alert_rule_tenant_scoped
+                and "tenant_id=tenant_payload.get(\"tenant_id\")" not in watch_runner_source
+                and "tenant_id=current_tenant_id" in watch_runner_source
+                and "Alert(" in watch_runner_source
+            )
             return {
                 "conversation_router_tenant_scoped_ready": conversation_router_tenant_scoped,
                 "message_router_tenant_scoped_ready": message_router_tenant_scoped,
                 "bookmark_router_tenant_scoped_ready": bookmark_router_tenant_scoped,
                 "feedback_router_tenant_scoped_ready": feedback_router_tenant_scoped,
                 "feedback_stats_tenant_scoped_ready": feedback_stats_tenant_scoped,
+                "watch_target_router_tenant_scoped_ready": watch_target_router_tenant_scoped,
+                "alert_router_tenant_scoped_ready": alert_router_tenant_scoped,
+                "signal_tenant_scoped_ready": signal_tenant_scoped,
+                "alert_rule_tenant_scoped_ready": alert_rule_tenant_scoped,
+                "watch_alert_tenant_write_ready": watch_alert_tenant_write_ready,
                 "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
                 "tenant_context_dependency_used": tenant_dependency_ready,
                 "tenant_scope_helper_used": tenant_scope_ready,
@@ -816,6 +885,11 @@ class ProductionReadinessChecker:
                 "bookmark_router_tenant_scoped_ready": False,
                 "feedback_router_tenant_scoped_ready": False,
                 "feedback_stats_tenant_scoped_ready": False,
+                "watch_target_router_tenant_scoped_ready": False,
+                "alert_router_tenant_scoped_ready": False,
+                "signal_tenant_scoped_ready": False,
+                "alert_rule_tenant_scoped_ready": False,
+                "watch_alert_tenant_write_ready": False,
                 "chat_message_tenant_write_ready": False,
                 "tenant_context_dependency_used": False,
                 "tenant_scope_helper_used": False,

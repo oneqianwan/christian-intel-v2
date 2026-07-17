@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from models.database import KnowledgeEntity, OrganizationProfile, WatchTarget
 from schemas.watch_alert import WatchTargetCreate, WatchTargetUpdate
+from services import tenant_scope, tenant_service
 from services.watch_alert_ownership import ownership_enabled
 
 
@@ -117,23 +118,65 @@ def _entity_exists(db: Session, entity_id: str, entity_type: Literal["organizati
     )
 
 
-def get_owned_watch_target(db: Session, watch_target_id: str, user_id: str) -> WatchTarget:
+def _is_super_admin(current_user) -> bool:
+    if isinstance(current_user, bool):
+        return bool(current_user)
+    return tenant_service.is_platform_super_admin(current_user)
+
+
+def apply_watch_target_access_scope(
+    query,
+    *,
+    user_id: str,
+    current_user=None,
+    current_tenant=None,
+):
+    if current_tenant is not None:
+        current_tenant_id = tenant_scope.ensure_tenant_id_for_create({}, current_tenant).get("tenant_id")
+        query = tenant_scope.filter_by_tenant(query, WatchTarget, current_tenant_id)
+
+    if _is_super_admin(current_user) and current_tenant is not None:
+        return query
+
+    if ownership_enabled():
+        return query.filter(WatchTarget.owner_user_id == user_id)
+    return query.filter(WatchTarget.user_id == user_id)
+
+
+def get_owned_watch_target(
+    db: Session,
+    watch_target_id: str,
+    user_id: str,
+    *,
+    current_user=None,
+    current_tenant=None,
+) -> WatchTarget:
     filters = [
         WatchTarget.id == watch_target_id,
         WatchTarget.deleted_at.is_(None),
     ]
-    if ownership_enabled():
-        filters.append(WatchTarget.owner_user_id == user_id)
-    else:
-        filters.append(WatchTarget.user_id == user_id)
-
-    watch_target = db.query(WatchTarget).filter(*filters).first()
+    query = apply_watch_target_access_scope(
+        db.query(WatchTarget),
+        user_id=user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    ).filter(*filters)
+    watch_target = query.first()
     if not watch_target:
         raise WatchTargetNotFoundError()
+    if current_tenant is not None:
+        tenant_scope.require_record_tenant(watch_target, current_tenant)
     return watch_target
 
 
-def create_watch_target(db: Session, user_id: str, payload: WatchTargetCreate) -> WatchTarget:
+def create_watch_target(
+    db: Session,
+    user_id: str,
+    payload: WatchTargetCreate,
+    *,
+    current_user=None,
+    current_tenant=None,
+) -> WatchTarget:
     if not _entity_exists(db, payload.entity_id, payload.entity_type):
         raise WatchTargetEntityNotFoundError()
 
@@ -142,16 +185,22 @@ def create_watch_target(db: Session, user_id: str, payload: WatchTargetCreate) -
         WatchTarget.entity_type == payload.entity_type,
         WatchTarget.deleted_at.is_(None),
     ]
-    if ownership_enabled():
-        existing_filters.append(WatchTarget.owner_user_id == user_id)
-    else:
-        existing_filters.append(WatchTarget.user_id == user_id)
-
-    existing = db.query(WatchTarget).filter(*existing_filters).first()
+    existing = apply_watch_target_access_scope(
+        db.query(WatchTarget),
+        user_id=user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    ).filter(*existing_filters).first()
     if existing:
         raise WatchTargetExistsError()
 
+    tenant_payload = (
+        tenant_scope.ensure_tenant_id_for_create({}, current_tenant)
+        if current_tenant is not None
+        else {}
+    )
     watch_target = WatchTarget(
+        tenant_id=tenant_payload.get("tenant_id"),
         user_id=user_id,
         owner_user_id=user_id if ownership_enabled() else None,
         entity_id=payload.entity_id,
@@ -177,17 +226,19 @@ def list_watch_targets(
     db: Session,
     user_id: str,
     *,
+    current_user=None,
+    current_tenant=None,
     status: str | None,
     entity_type: str | None,
     page: int,
     page_size: int,
 ) -> tuple[list[WatchTarget], int]:
-    filters = [WatchTarget.deleted_at.is_(None)]
-    if ownership_enabled():
-        filters.append(WatchTarget.owner_user_id == user_id)
-    else:
-        filters.append(WatchTarget.user_id == user_id)
-    query = db.query(WatchTarget).filter(*filters)
+    query = apply_watch_target_access_scope(
+        db.query(WatchTarget),
+        user_id=user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    ).filter(WatchTarget.deleted_at.is_(None))
     if status:
         query = query.filter(WatchTarget.status == status)
     if entity_type:
@@ -203,8 +254,22 @@ def list_watch_targets(
     return items, total
 
 
-def update_watch_target(db: Session, watch_target_id: str, user_id: str, payload: WatchTargetUpdate) -> WatchTarget:
-    watch_target = get_owned_watch_target(db, watch_target_id, user_id)
+def update_watch_target(
+    db: Session,
+    watch_target_id: str,
+    user_id: str,
+    payload: WatchTargetUpdate,
+    *,
+    current_user=None,
+    current_tenant=None,
+) -> WatchTarget:
+    watch_target = get_owned_watch_target(
+        db,
+        watch_target_id,
+        user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     next_status = payload.status if payload.status is not None else watch_target.status
     next_frequency = payload.frequency if payload.frequency is not None else watch_target.frequency
 
@@ -228,8 +293,21 @@ def update_watch_target(db: Session, watch_target_id: str, user_id: str, payload
     return watch_target
 
 
-def soft_delete_watch_target(db: Session, watch_target_id: str, user_id: str) -> None:
-    watch_target = get_owned_watch_target(db, watch_target_id, user_id)
+def soft_delete_watch_target(
+    db: Session,
+    watch_target_id: str,
+    user_id: str,
+    *,
+    current_user=None,
+    current_tenant=None,
+) -> None:
+    watch_target = get_owned_watch_target(
+        db,
+        watch_target_id,
+        user_id,
+        current_user=current_user,
+        current_tenant=current_tenant,
+    )
     watch_target.deleted_at = utcnow()
     watch_target.status = "disabled"
     watch_target.next_check_at = None
