@@ -18,10 +18,22 @@ def _require_model_tenant_field(model) -> None:
         raise TenantScopeError(400, "TENANT_SCOPE_UNSUPPORTED_MODEL", "Model does not support tenant scope")
 
 
-def assert_same_tenant(record_tenant_id: str | None, current_tenant: Tenant) -> bool:
-    if current_tenant is None or not tenant_service.is_tenant_active(current_tenant):
+def _normalize_current_tenant_id(current_tenant: Tenant | str | None) -> str:
+    if current_tenant is None:
+        raise TenantScopeError(403, "TENANT_REQUIRED", "Tenant required")
+    if isinstance(current_tenant, str):
+        normalized = str(current_tenant).strip()
+        if not normalized:
+            raise TenantScopeError(403, "TENANT_REQUIRED", "Tenant required")
+        return normalized
+    if not tenant_service.is_tenant_active(current_tenant):
         raise TenantScopeError(403, "TENANT_DISABLED", "Tenant is disabled")
-    if str(record_tenant_id or "").strip() != str(current_tenant.id):
+    return str(current_tenant.id)
+
+
+def assert_same_tenant(record_tenant_id: str | None, current_tenant: Tenant | str | None) -> bool:
+    current_tenant_id = _normalize_current_tenant_id(current_tenant)
+    if str(record_tenant_id or "").strip() != current_tenant_id:
         raise TenantScopeError(403, "TENANT_SCOPE_FORBIDDEN", "Cross-tenant access forbidden")
     return True
 
@@ -31,18 +43,17 @@ def filter_by_tenant(query, model, tenant_id: str):
     return query.filter(getattr(model, "tenant_id") == str(tenant_id))
 
 
-def ensure_tenant_id_for_create(payload: dict, current_tenant: Tenant) -> dict:
-    if current_tenant is None or not tenant_service.is_tenant_active(current_tenant):
-        raise TenantScopeError(403, "TENANT_DISABLED", "Tenant is disabled")
+def ensure_tenant_id_for_create(payload: dict, current_tenant: Tenant | str | None) -> dict:
+    current_tenant_id = _normalize_current_tenant_id(current_tenant)
     data = dict(payload or {})
     tenant_id = str(data.get("tenant_id") or "").strip()
-    if tenant_id and tenant_id != str(current_tenant.id):
+    if tenant_id and tenant_id != current_tenant_id:
         raise TenantScopeError(403, "TENANT_SCOPE_FORBIDDEN", "Cross-tenant create forbidden")
-    data["tenant_id"] = str(current_tenant.id)
+    data["tenant_id"] = current_tenant_id
     return data
 
 
-def require_record_tenant(record, current_tenant: Tenant) -> bool:
+def require_record_tenant(record, current_tenant: Tenant | str | None) -> bool:
     if not hasattr(record, "tenant_id"):
         raise TenantScopeError(400, "TENANT_SCOPE_UNSUPPORTED_MODEL", "Model does not support tenant scope")
     return assert_same_tenant(getattr(record, "tenant_id", None), current_tenant)

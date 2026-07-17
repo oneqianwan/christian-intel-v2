@@ -1,13 +1,21 @@
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from dependencies.chat_auth import get_chat_current_user
 from models.auth import User
 from models.database import get_db, Conversation, Message, RequestTrace
 from models.schemas import ConversationCreate, ConversationResponse, MessageResponse
-from services.chat_ownership import apply_conversation_owner_scope, get_conversation_or_404, get_owner_user_id
+from services import tenant_service
+from services import tenant_scope
+from services.chat_ownership import (
+    apply_conversation_access_scope,
+    get_conversation_or_404,
+    get_owner_user_id,
+    list_messages_for_conversation,
+    resolve_chat_tenant_context,
+)
 from typing import List
 
 router = APIRouter()
@@ -23,6 +31,7 @@ class PinRequest(BaseModel):
 @router.post("/conversations", response_model=ConversationResponse)
 def create_conversation(
     req: ConversationCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
@@ -30,18 +39,36 @@ def create_conversation(
     title = req.title or "新会话"
     if len(title) > 50:
         title = title[:50]
-    conv = Conversation(id=str(uuid.uuid4()), title=title, owner_user_id=get_owner_user_id(current_user))
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    tenant_payload = (
+        tenant_scope.ensure_tenant_id_for_create({}, current_tenant_id)
+        if current_tenant_id is not None
+        else {}
+    )
+    conv = Conversation(
+        id=str(uuid.uuid4()),
+        title=title,
+        tenant_id=tenant_payload.get("tenant_id"),
+        owner_user_id=get_owner_user_id(current_user),
+    )
     db.add(conv); db.commit(); db.refresh(conv)
     return conv
 
 @router.get("/conversations", response_model=List[ConversationResponse])
 def list_conversations(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
-    query = apply_conversation_owner_scope(
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
+    query = apply_conversation_access_scope(
         db.query(Conversation),
         owner_user_id=get_owner_user_id(current_user),
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
     return query.order_by(
         Conversation.is_pinned.desc(),
@@ -53,13 +80,19 @@ def list_conversations(
 @router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
 def get_conversation(
     conversation_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
     return get_conversation_or_404(
         db,
         conversation_id,
         owner_user_id=get_owner_user_id(current_user),
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
 
 
@@ -67,14 +100,20 @@ def get_conversation(
 def update_conversation(
     conversation_id: str,
     req: ConversationUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
     """编辑会话标题"""
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
     conv = get_conversation_or_404(
         db,
         conversation_id,
         owner_user_id=get_owner_user_id(current_user),
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
 
     title = (req.title or "").strip() or "新会话"
@@ -89,14 +128,20 @@ def update_conversation(
 def pin_conversation(
     conversation_id: str,
     req: PinRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
     """置顶/取消置顶会话"""
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
     conv = get_conversation_or_404(
         db,
         conversation_id,
         owner_user_id=get_owner_user_id(current_user),
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
 
     conv.is_pinned = req.pinned
@@ -115,6 +160,7 @@ def pin_conversation(
 @router.delete("/conversations/{conversation_id}")
 def delete_conversation(
     conversation_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
@@ -123,13 +169,21 @@ def delete_conversation(
     级联删除：messages + request_traces
     保留不动：intelligence_items + user_preferences + bookmarks
     """
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
     conv = get_conversation_or_404(
         db,
         conversation_id,
         owner_user_id=get_owner_user_id(current_user),
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
 
-    message_count = db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+    message_query = db.query(Message).filter(Message.conversation_id == conversation_id)
+    if current_tenant_id is not None:
+        message_query = tenant_scope.filter_by_tenant(message_query, Message, current_tenant_id)
+    message_count = message_query.delete()
 
     # 当前 request_traces 通过 request_id 关联，没有稳定的 conversation 外键。
     # 仅清理 event_data 中显式记录了 conversation_id 的 trace，避免误删其他请求日志。
@@ -156,12 +210,18 @@ def delete_conversation(
 @router.get("/conversations/{id}/messages", response_model=List[MessageResponse])
 def get_messages(
     id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
-    get_conversation_or_404(
+    tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
+    _, messages = list_messages_for_conversation(
         db,
         id,
         owner_user_id=get_owner_user_id(current_user),
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
-    return db.query(Message).filter(Message.conversation_id == id).order_by(Message.created_at).all()
+    return messages

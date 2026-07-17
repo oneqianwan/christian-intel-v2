@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect as pyinspect
 import os
 import platform
 import sys
@@ -279,6 +280,7 @@ class ProductionReadinessChecker:
     def _build_tenant_readiness(self, *, imports: dict[str, Any]) -> dict[str, Any]:
         tenant_schema = self._check_tenant_schema(imports=imports)
         private_tenant_schema = self._check_private_tenant_schema(imports=imports)
+        private_router_binding = self._check_private_router_tenant_binding(imports=imports)
         tenant_context_ready = self._check_tenant_context_ready()
         tenant_scope_helper_ready = self._check_tenant_scope_helper_ready()
         tenant_core_models_ready = bool(
@@ -291,6 +293,25 @@ class ProductionReadinessChecker:
         tenant_user_default_tenant_ready = bool(
             tenant_schema["users_default_tenant_ok"] and tenant_schema["default_tenant_present"]
         )
+        conversation_router_tenant_scoped = bool(private_router_binding["conversation_router_tenant_scoped_ready"])
+        message_router_tenant_scoped = bool(private_router_binding["message_router_tenant_scoped_ready"])
+        chat_message_tenant_write_ready = bool(private_router_binding["chat_message_tenant_write_ready"])
+        conversation_cross_tenant_isolation_ready = bool(
+            conversation_router_tenant_scoped and private_tenant_schema["conversation_tenant_id_ready"] == "yes"
+        )
+        message_cross_tenant_isolation_ready = bool(
+            message_router_tenant_scoped and private_tenant_schema["message_tenant_id_ready"] == "yes"
+        )
+        private_router_tenant_binding_ready = (
+            "partial"
+            if conversation_cross_tenant_isolation_ready and message_cross_tenant_isolation_ready and chat_message_tenant_write_ready
+            else "no"
+        )
+        tenant_isolation_readiness = "blocked"
+        reason_tenant_isolation_not_ready = [
+            "remaining_private_routers_not_yet_tenant_scoped",
+            "cross_tenant_private_data_tests_not_completed",
+        ]
         return {
             "tenant_core_models_ready": tenant_core_models_ready,
             "tenant_context_ready": bool(tenant_context_ready),
@@ -308,15 +329,19 @@ class ProductionReadinessChecker:
             "user_profile_tenant_id_ready": private_tenant_schema["user_profile_tenant_id_ready"],
             "task_tenant_id_ready": private_tenant_schema["task_tenant_id_ready"],
             "public_tables_remain_global": private_tenant_schema["public_tables_remain_global"],
+            "conversation_router_tenant_scoped_ready": conversation_router_tenant_scoped,
+            "message_router_tenant_scoped_ready": message_router_tenant_scoped,
+            "conversation_cross_tenant_isolation_ready": conversation_cross_tenant_isolation_ready,
+            "message_cross_tenant_isolation_ready": message_cross_tenant_isolation_ready,
+            "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
+            "private_router_tenant_binding_ready": private_router_tenant_binding_ready,
             "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
-            "tenant_isolation_readiness": "blocked",
+            "tenant_isolation_readiness": tenant_isolation_readiness,
             "controlled_beta_tenant_ready": False,
-            "reason_tenant_isolation_not_ready": [
-                "private_data_not_yet_tenant_scoped",
-                "cross_tenant_private_data_tests_not_completed",
-            ],
+            "reason_tenant_isolation_not_ready": reason_tenant_isolation_not_ready,
             "schema": tenant_schema,
             "private_schema": private_tenant_schema["schema"],
+            "private_router_binding": private_router_binding,
         }
 
     def _is_response_contract_ok(self, contract: dict[str, Any]) -> bool:
@@ -671,6 +696,73 @@ class ProductionReadinessChecker:
                 "task_tenant_id_ready": "no",
                 "public_tables_remain_global": False,
                 "schema": {},
+            }
+
+    def _check_private_router_tenant_binding(self, *, imports: dict[str, Any]) -> dict[str, Any]:
+        try:
+            conversations_module = importlib.import_module("routers.conversations")
+            chat_module = importlib.import_module("routers.chat")
+            chat_ownership_module = importlib.import_module("services.chat_ownership")
+            tenant_context_module = importlib.import_module("dependencies.tenant_context")
+            tenant_scope_module = importlib.import_module("services.tenant_scope")
+
+            conversations_source = Path(conversations_module.__file__).read_text(encoding="utf-8")
+            chat_source = Path(chat_module.__file__).read_text(encoding="utf-8")
+            chat_ownership_source = Path(chat_ownership_module.__file__).read_text(encoding="utf-8")
+
+            chat_simple_signature = pyinspect.signature(chat_module.chat_simple)
+            chat_stream_signature = pyinspect.signature(chat_module.chat_stream)
+            request_signature_ready = "raw_request" in chat_simple_signature.parameters and "request" in chat_stream_signature.parameters
+
+            helper_ready = all(
+                hasattr(chat_ownership_module, name)
+                for name in (
+                    "resolve_chat_tenant_context",
+                    "apply_conversation_access_scope",
+                    "list_messages_for_conversation",
+                )
+            )
+            tenant_dependency_ready = hasattr(tenant_context_module, "resolve_tenant_request_context")
+            tenant_scope_ready = all(
+                hasattr(tenant_scope_module, name)
+                for name in ("filter_by_tenant", "ensure_tenant_id_for_create", "require_record_tenant")
+            )
+            conversation_router_tenant_scoped = bool(
+                helper_ready
+                and tenant_dependency_ready
+                and tenant_scope_ready
+                and "resolve_chat_tenant_context(" in conversations_source
+                and "apply_conversation_access_scope(" in conversations_source
+                and "current_tenant=current_tenant_id" in conversations_source
+            )
+            message_router_tenant_scoped = bool(
+                helper_ready
+                and tenant_scope_ready
+                and "list_messages_for_conversation(" in conversations_source
+                and "filter_by_tenant(query, Message" in chat_ownership_source
+            )
+            chat_message_tenant_write_ready = bool(
+                request_signature_ready
+                and helper_ready
+                and tenant_scope_ready
+                and "resolve_chat_tenant_context(" in chat_source
+                and 'tenant_id=message_tenant_payload.get("tenant_id")' in chat_source
+                and 'tenant_id=assistant_message_tenant_payload.get("tenant_id")' in chat_source
+            )
+            return {
+                "conversation_router_tenant_scoped_ready": conversation_router_tenant_scoped,
+                "message_router_tenant_scoped_ready": message_router_tenant_scoped,
+                "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
+                "tenant_context_dependency_used": tenant_dependency_ready,
+                "tenant_scope_helper_used": tenant_scope_ready,
+            }
+        except Exception:
+            return {
+                "conversation_router_tenant_scoped_ready": False,
+                "message_router_tenant_scoped_ready": False,
+                "chat_message_tenant_write_ready": False,
+                "tenant_context_dependency_used": False,
+                "tenant_scope_helper_used": False,
             }
 
 

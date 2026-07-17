@@ -24,7 +24,14 @@ from models.auth import User
 from models.database import Conversation, Message, RequestTrace, emit_db_runtime_debug, get_db
 from models.schemas import ChatRequest
 from services.brain import Brain, think
-from services.chat_ownership import get_conversation_or_404, get_owner_user_id, is_chat_user_ownership_enabled
+from services import tenant_scope, tenant_service
+from services.chat_ownership import (
+    get_conversation_or_404,
+    get_owner_user_id,
+    is_chat_user_ownership_enabled,
+    list_messages_for_conversation,
+    resolve_chat_tenant_context,
+)
 from services.trace_center import debug_answer_event, set_trace_print
 from services.welcome_trace import emit_welcome_trace, lookup_welcome_reply_uuid
 
@@ -141,6 +148,8 @@ def _ensure_conversation(
     title_seed: str,
     *,
     owner_user_id: str | None = None,
+    current_user: User | None = None,
+    current_tenant=None,
 ) -> Conversation:
     select_sql = "SELECT * FROM conversations WHERE id = :conversation_id LIMIT 1"
     try:
@@ -156,6 +165,8 @@ def _ensure_conversation(
                 db,
                 conversation_id,
                 owner_user_id=owner_user_id,
+                current_user=current_user,
+                current_tenant=current_tenant,
             )
     except Exception as exc:
         _db_persist_trace("SELECT conversation FAIL", db, sql=select_sql, exc=exc, conversation_id=conversation_id)
@@ -195,6 +206,11 @@ def _ensure_conversation(
         conversation = Conversation(
             id=conversation_id,
             title=(title_seed or "新会话")[:30],
+            tenant_id=(
+                tenant_scope.ensure_tenant_id_for_create({}, current_tenant).get("tenant_id")
+                if current_tenant is not None and is_chat_user_ownership_enabled()
+                else None
+            ),
             owner_user_id=owner_user_id,
         )
         _db_persist_trace(
@@ -242,20 +258,26 @@ def _load_history(
     limit: int = 20,
     *,
     owner_user_id: str | None = None,
+    current_user: User | None = None,
+    current_tenant=None,
 ) -> list[dict]:
     if is_chat_user_ownership_enabled():
-        get_conversation_or_404(
+        _, messages = list_messages_for_conversation(
             db,
             conversation_id,
             owner_user_id=owner_user_id,
+            current_user=current_user,
+            current_tenant=current_tenant,
         )
-    messages = (
-        db.query(Message)
-        .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.asc())
-        .limit(limit)
-        .all()
-    )
+        messages = messages[:limit]
+    else:
+        messages = (
+            db.query(Message)
+            .filter(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+            .limit(limit)
+            .all()
+        )
     return [{"role": msg.role, "content": msg.content or ""} for msg in messages]
 
 
@@ -369,6 +391,8 @@ def _prepare_chat_request(
     *,
     persist_db: bool = True,
     owner_user_id: str | None = None,
+    current_user: User | None = None,
+    current_tenant=None,
 ) -> dict:
     request_id = str(uuid.uuid4())
     conversation_id = request.conversation_id or str(uuid.uuid4())
@@ -395,6 +419,8 @@ def _prepare_chat_request(
                 conversation_id,
                 limit=20,
                 owner_user_id=owner_user_id,
+                current_user=current_user,
+                current_tenant=current_tenant,
             )
         print(
             "STREAM_DB_PERSIST_DISABLED "
@@ -413,11 +439,13 @@ def _prepare_chat_request(
         }
 
     try:
-        _ensure_conversation(
+        conversation = _ensure_conversation(
             db,
             conversation_id,
             request.message,
             owner_user_id=owner_user_id,
+            current_user=current_user,
+            current_tenant=current_tenant,
         )
     except HTTPException:
         raise
@@ -447,6 +475,8 @@ def _prepare_chat_request(
             conversation_id,
             limit=20,
             owner_user_id=owner_user_id,
+            current_user=current_user,
+            current_tenant=current_tenant,
         )
     except HTTPException:
         raise
@@ -471,9 +501,18 @@ def _prepare_chat_request(
 
     message_sql = "INSERT INTO messages (id, conversation_id, role, content, entities_mentioned) VALUES (:id, :conversation_id, :role, :content, :entities_mentioned)"
     try:
+        message_tenant_payload = (
+            tenant_scope.ensure_tenant_id_for_create(
+                {"tenant_id": getattr(conversation, "tenant_id", None)},
+                current_tenant,
+            )
+            if current_tenant is not None and is_chat_user_ownership_enabled()
+            else {}
+        )
         db.add(
             Message(
                 id=user_msg_id,
+                tenant_id=message_tenant_payload.get("tenant_id"),
                 conversation_id=conversation_id,
                 role="user",
                 content=request.message,
@@ -537,6 +576,8 @@ def _finalize_delivery(
     *,
     persist_db: bool = True,
     owner_user_id: str | None = None,
+    current_user: User | None = None,
+    current_tenant=None,
 ):
     assistant_msg_id = str(uuid.uuid4())
     status, delivery_type = _infer_delivery(reply)
@@ -575,15 +616,29 @@ def _finalize_delivery(
         )
     else:
         try:
-            if is_chat_user_ownership_enabled():
+            conversation = (
                 get_conversation_or_404(
                     db,
                     conversation_id,
                     owner_user_id=owner_user_id,
+                    current_user=current_user,
+                    current_tenant=current_tenant,
                 )
+                if is_chat_user_ownership_enabled()
+                else db.query(Conversation).filter(Conversation.id == conversation_id).first()
+            )
+            assistant_message_tenant_payload = (
+                tenant_scope.ensure_tenant_id_for_create(
+                    {"tenant_id": getattr(conversation, "tenant_id", None)},
+                    current_tenant,
+                )
+                if current_tenant is not None and is_chat_user_ownership_enabled()
+                else {}
+            )
             db.add(
                 Message(
                     id=assistant_msg_id,
+                    tenant_id=assistant_message_tenant_payload.get("tenant_id"),
                     conversation_id=conversation_id,
                     role="assistant",
                     content=final_reply,
@@ -591,15 +646,6 @@ def _finalize_delivery(
                     delivery_type=delivery_type,
                     status="completed" if status != "error" else "failed",
                 )
-            )
-            conversation = (
-                get_conversation_or_404(
-                    db,
-                    conversation_id,
-                    owner_user_id=owner_user_id,
-                )
-                if is_chat_user_ownership_enabled()
-                else db.query(Conversation).filter(Conversation.id == conversation_id).first()
             )
             conversation.updated_at = datetime.utcnow()
             db.commit()
@@ -664,9 +710,19 @@ async def chat_stream(
 ):
     try:
         owner_user_id = get_owner_user_id(current_user)
+        current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
+        tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
+        current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
         generator_id = f"chat-stream-{uuid.uuid4()}"
         persist_db = is_chat_user_ownership_enabled()
-        prepared = _prepare_chat_request(chat_request, db, persist_db=persist_db, owner_user_id=owner_user_id)
+        prepared = _prepare_chat_request(
+            chat_request,
+            db,
+            persist_db=persist_db,
+            owner_user_id=owner_user_id,
+            current_user=current_user_is_super_admin,
+            current_tenant=current_tenant_id,
+        )
         try:
             from main import BACKEND_INSTANCE_UUID, BACKEND_PORT
         except Exception:
@@ -682,6 +738,8 @@ async def chat_stream(
                 db,
                 prepared=prepared,
                 owner_user_id=owner_user_id,
+                current_user=current_user_is_super_admin,
+                current_tenant=current_tenant_id,
                 persist_db=persist_db,
                 generator_id=generator_id,
             ),
@@ -706,6 +764,8 @@ async def _stream_chat_response(
     *,
     prepared: dict,
     owner_user_id: str | None,
+    current_user: User | None,
+    current_tenant,
     persist_db: bool,
     generator_id: str,
 ):
@@ -809,6 +869,8 @@ async def _stream_chat_response(
                 sources=evidence,
                 persist_db=persist_db,
                 owner_user_id=owner_user_id,
+                current_user=current_user,
+                current_tenant=current_tenant,
             )
             finalized["assistant_msg_id"] = assistant_message_id
             welcome_reply_uuid = finalized["delivery"].get("welcome_reply_uuid")
@@ -858,14 +920,20 @@ async def _stream_chat_response(
 @router.post("/chat/simple")
 def chat_simple(
     request: ChatRequest,
+    raw_request: Request,
     db: Session = Depends(get_db),
     current_user: User | None = Depends(get_chat_current_user),
 ):
     owner_user_id = get_owner_user_id(current_user)
+    current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
+    tenant_context = resolve_chat_tenant_context(request=raw_request, db=db, current_user=current_user)
+    current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
     prepared = _prepare_chat_request(
         request,
         db,
         owner_user_id=owner_user_id,
+        current_user=current_user_is_super_admin,
+        current_tenant=current_tenant_id,
     )
     request_id = prepared["request_id"]
     try:
@@ -880,6 +948,8 @@ def chat_simple(
             reply=reply,
             sources=sources,
             owner_user_id=owner_user_id,
+            current_user=current_user_is_super_admin,
+            current_tenant=current_tenant_id,
         )
         return {
             "reply": payload["delivery"]["content"],
