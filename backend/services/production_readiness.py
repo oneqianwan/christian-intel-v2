@@ -295,6 +295,9 @@ class ProductionReadinessChecker:
         )
         conversation_router_tenant_scoped = bool(private_router_binding["conversation_router_tenant_scoped_ready"])
         message_router_tenant_scoped = bool(private_router_binding["message_router_tenant_scoped_ready"])
+        bookmark_router_tenant_scoped = bool(private_router_binding["bookmark_router_tenant_scoped_ready"])
+        feedback_router_tenant_scoped = bool(private_router_binding["feedback_router_tenant_scoped_ready"])
+        feedback_stats_tenant_scoped = bool(private_router_binding["feedback_stats_tenant_scoped_ready"])
         chat_message_tenant_write_ready = bool(private_router_binding["chat_message_tenant_write_ready"])
         conversation_cross_tenant_isolation_ready = bool(
             conversation_router_tenant_scoped and private_tenant_schema["conversation_tenant_id_ready"] == "yes"
@@ -302,8 +305,24 @@ class ProductionReadinessChecker:
         message_cross_tenant_isolation_ready = bool(
             message_router_tenant_scoped and private_tenant_schema["message_tenant_id_ready"] == "yes"
         )
+        bookmark_cross_tenant_isolation_ready = bool(
+            bookmark_router_tenant_scoped and private_tenant_schema["bookmark_tenant_id_ready"] == "yes"
+        )
+        feedback_cross_tenant_isolation_ready = bool(
+            feedback_router_tenant_scoped
+            and feedback_stats_tenant_scoped
+            and private_tenant_schema["feedback_tenant_id_ready"] == "yes"
+        )
         private_router_tenant_binding_ready = (
             "partial"
+            if (
+                conversation_cross_tenant_isolation_ready
+                and message_cross_tenant_isolation_ready
+                and chat_message_tenant_write_ready
+                and bookmark_cross_tenant_isolation_ready
+                and feedback_cross_tenant_isolation_ready
+            )
+            else "partial"
             if conversation_cross_tenant_isolation_ready and message_cross_tenant_isolation_ready and chat_message_tenant_write_ready
             else "no"
         )
@@ -331,8 +350,13 @@ class ProductionReadinessChecker:
             "public_tables_remain_global": private_tenant_schema["public_tables_remain_global"],
             "conversation_router_tenant_scoped_ready": conversation_router_tenant_scoped,
             "message_router_tenant_scoped_ready": message_router_tenant_scoped,
+            "bookmark_router_tenant_scoped_ready": bookmark_router_tenant_scoped,
+            "feedback_router_tenant_scoped_ready": feedback_router_tenant_scoped,
+            "feedback_stats_tenant_scoped_ready": feedback_stats_tenant_scoped,
             "conversation_cross_tenant_isolation_ready": conversation_cross_tenant_isolation_ready,
             "message_cross_tenant_isolation_ready": message_cross_tenant_isolation_ready,
+            "bookmark_cross_tenant_isolation_ready": bookmark_cross_tenant_isolation_ready,
+            "feedback_cross_tenant_isolation_ready": feedback_cross_tenant_isolation_ready,
             "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
             "private_router_tenant_binding_ready": private_router_tenant_binding_ready,
             "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
@@ -702,12 +726,16 @@ class ProductionReadinessChecker:
         try:
             conversations_module = importlib.import_module("routers.conversations")
             chat_module = importlib.import_module("routers.chat")
+            bookmarks_module = importlib.import_module("routers.bookmarks")
+            feedback_module = importlib.import_module("routers.feedback")
             chat_ownership_module = importlib.import_module("services.chat_ownership")
             tenant_context_module = importlib.import_module("dependencies.tenant_context")
             tenant_scope_module = importlib.import_module("services.tenant_scope")
 
             conversations_source = Path(conversations_module.__file__).read_text(encoding="utf-8")
             chat_source = Path(chat_module.__file__).read_text(encoding="utf-8")
+            bookmarks_source = Path(bookmarks_module.__file__).read_text(encoding="utf-8")
+            feedback_source = Path(feedback_module.__file__).read_text(encoding="utf-8")
             chat_ownership_source = Path(chat_ownership_module.__file__).read_text(encoding="utf-8")
 
             chat_simple_signature = pyinspect.signature(chat_module.chat_simple)
@@ -749,9 +777,34 @@ class ProductionReadinessChecker:
                 and 'tenant_id=message_tenant_payload.get("tenant_id")' in chat_source
                 and 'tenant_id=assistant_message_tenant_payload.get("tenant_id")' in chat_source
             )
+            bookmark_router_tenant_scoped = bool(
+                tenant_dependency_ready
+                and tenant_scope_ready
+                and "_get_tenant_context(" in bookmarks_source
+                and "_get_bookmark_or_404(" in bookmarks_source
+                and 'tenant_id=tenant_scope.ensure_tenant_id_for_create({}, current_tenant_id).get("tenant_id")' in bookmarks_source
+                and "filter_by_tenant(db.query(Bookmark), Bookmark, current_tenant_id)" in bookmarks_source
+            )
+            feedback_router_tenant_scoped = bool(
+                tenant_dependency_ready
+                and tenant_scope_ready
+                and "_resolve_feedback_tenant_context(" in feedback_source
+                and "_require_feedback_admin_scope(" in feedback_source
+                and 'tenant_id=tenant_scope.ensure_tenant_id_for_create({}, str(tenant_context.tenant.id)).get("tenant_id")' in feedback_source
+                and "_feedback_query_for_tenant(" in feedback_source
+            )
+            feedback_stats_tenant_scoped = bool(
+                feedback_router_tenant_scoped
+                and "_has_explicit_tenant_selector(" in feedback_source
+                and 'stats["scope"] = "global"' in feedback_source
+                and 'stats["scope"] = "tenant"' in feedback_source
+            )
             return {
                 "conversation_router_tenant_scoped_ready": conversation_router_tenant_scoped,
                 "message_router_tenant_scoped_ready": message_router_tenant_scoped,
+                "bookmark_router_tenant_scoped_ready": bookmark_router_tenant_scoped,
+                "feedback_router_tenant_scoped_ready": feedback_router_tenant_scoped,
+                "feedback_stats_tenant_scoped_ready": feedback_stats_tenant_scoped,
                 "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
                 "tenant_context_dependency_used": tenant_dependency_ready,
                 "tenant_scope_helper_used": tenant_scope_ready,
@@ -760,6 +813,9 @@ class ProductionReadinessChecker:
             return {
                 "conversation_router_tenant_scoped_ready": False,
                 "message_router_tenant_scoped_ready": False,
+                "bookmark_router_tenant_scoped_ready": False,
+                "feedback_router_tenant_scoped_ready": False,
+                "feedback_stats_tenant_scoped_ready": False,
                 "chat_message_tenant_write_ready": False,
                 "tenant_context_dependency_used": False,
                 "tenant_scope_helper_used": False,
