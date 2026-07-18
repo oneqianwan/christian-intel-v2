@@ -303,6 +303,9 @@ class ProductionReadinessChecker:
         signal_tenant_scoped = bool(private_router_binding["signal_tenant_scoped_ready"])
         alert_rule_tenant_scoped = bool(private_router_binding["alert_rule_tenant_scoped_ready"])
         watch_alert_tenant_write_ready = bool(private_router_binding["watch_alert_tenant_write_ready"])
+        diagnostics_router_tenant_scoped = bool(private_router_binding["diagnostics_router_tenant_scoped_ready"])
+        platform_diagnostics_super_admin_only = bool(private_router_binding["platform_diagnostics_super_admin_only_ready"])
+        task_router_tenant_scoped = bool(private_router_binding["task_router_tenant_scoped_ready"])
         chat_message_tenant_write_ready = bool(private_router_binding["chat_message_tenant_write_ready"])
         conversation_cross_tenant_isolation_ready = bool(
             conversation_router_tenant_scoped and private_tenant_schema["conversation_tenant_id_ready"] == "yes"
@@ -326,6 +329,23 @@ class ProductionReadinessChecker:
             and watch_alert_tenant_write_ready
             and private_tenant_schema["watch_alert_tenant_id_ready"] == "yes"
         )
+        request_trace_tenant_scoped_ready = (
+            "partial"
+            if (
+                diagnostics_router_tenant_scoped
+                and platform_diagnostics_super_admin_only
+                and private_tenant_schema["diagnostics_tenant_id_ready"] in {"yes", "partial"}
+            )
+            else "no"
+        )
+        diagnostics_cross_tenant_isolation_ready = bool(
+            diagnostics_router_tenant_scoped
+            and platform_diagnostics_super_admin_only
+            and private_tenant_schema["diagnostics_tenant_id_ready"] in {"yes", "partial"}
+        )
+        task_cross_tenant_isolation_ready = bool(
+            task_router_tenant_scoped and private_tenant_schema["task_tenant_id_ready"] in {"yes", "partial"}
+        )
         private_router_tenant_binding_ready = (
             "partial"
             if (
@@ -335,6 +355,8 @@ class ProductionReadinessChecker:
                 and bookmark_cross_tenant_isolation_ready
                 and feedback_cross_tenant_isolation_ready
                 and watch_alert_cross_tenant_isolation_ready
+                and diagnostics_cross_tenant_isolation_ready
+                and task_cross_tenant_isolation_ready
             )
             else "partial"
             if conversation_cross_tenant_isolation_ready and message_cross_tenant_isolation_ready and chat_message_tenant_write_ready
@@ -371,6 +393,10 @@ class ProductionReadinessChecker:
             "alert_router_tenant_scoped_ready": alert_router_tenant_scoped,
             "signal_tenant_scoped_ready": signal_tenant_scoped,
             "alert_rule_tenant_scoped_ready": alert_rule_tenant_scoped,
+            "diagnostics_router_tenant_scoped_ready": diagnostics_router_tenant_scoped,
+            "request_trace_tenant_scoped_ready": request_trace_tenant_scoped_ready,
+            "platform_diagnostics_super_admin_only_ready": platform_diagnostics_super_admin_only,
+            "task_router_tenant_scoped_ready": task_router_tenant_scoped,
             "conversation_cross_tenant_isolation_ready": conversation_cross_tenant_isolation_ready,
             "message_cross_tenant_isolation_ready": message_cross_tenant_isolation_ready,
             "bookmark_cross_tenant_isolation_ready": bookmark_cross_tenant_isolation_ready,
@@ -378,6 +404,8 @@ class ProductionReadinessChecker:
             "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
             "watch_alert_cross_tenant_isolation_ready": watch_alert_cross_tenant_isolation_ready,
             "watch_alert_tenant_write_ready": watch_alert_tenant_write_ready,
+            "diagnostics_cross_tenant_isolation_ready": diagnostics_cross_tenant_isolation_ready,
+            "task_cross_tenant_isolation_ready": task_cross_tenant_isolation_ready,
             "private_router_tenant_binding_ready": private_router_tenant_binding_ready,
             "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
             "tenant_isolation_readiness": tenant_isolation_readiness,
@@ -750,6 +778,8 @@ class ProductionReadinessChecker:
             feedback_module = importlib.import_module("routers.feedback")
             watch_targets_module = importlib.import_module("routers.watch_targets")
             alerts_module = importlib.import_module("routers.alerts")
+            diagnostics_module = importlib.import_module("routers.diagnostics")
+            tasks_module = importlib.import_module("routers.tasks")
             chat_ownership_module = importlib.import_module("services.chat_ownership")
             watch_target_service_module = importlib.import_module("services.watch_target_service")
             watch_runner_module = importlib.import_module("services.watch_runner")
@@ -763,6 +793,8 @@ class ProductionReadinessChecker:
             feedback_source = Path(feedback_module.__file__).read_text(encoding="utf-8")
             watch_targets_source = Path(watch_targets_module.__file__).read_text(encoding="utf-8")
             alerts_source = Path(alerts_module.__file__).read_text(encoding="utf-8")
+            diagnostics_source = Path(diagnostics_module.__file__).read_text(encoding="utf-8")
+            tasks_source = Path(tasks_module.__file__).read_text(encoding="utf-8")
             chat_ownership_source = Path(chat_ownership_module.__file__).read_text(encoding="utf-8")
             watch_target_service_source = Path(watch_target_service_module.__file__).read_text(encoding="utf-8")
             watch_runner_source = Path(watch_runner_module.__file__).read_text(encoding="utf-8")
@@ -863,6 +895,27 @@ class ProductionReadinessChecker:
                 and "tenant_id=current_tenant_id" in watch_runner_source
                 and "Alert(" in watch_runner_source
             )
+            diagnostics_router_tenant_scoped = bool(
+                tenant_dependency_ready
+                and tenant_scope_ready
+                and "_resolve_diagnostics_tenant_context(" in diagnostics_source
+                and "resolve_tenant_request_context(" in diagnostics_source
+                and "filter_by_tenant(trace_query, RequestTrace, str(context.tenant.id))" in diagnostics_source
+            )
+            platform_diagnostics_super_admin_only = bool(
+                "tenant_service.is_platform_super_admin(current_user)" in diagnostics_source
+                and "RequestTrace.tenant_id.is_(None)" in diagnostics_source
+                and "_has_explicit_tenant_selector(request)" in diagnostics_source
+            )
+            task_router_tenant_scoped = bool(
+                tenant_dependency_ready
+                and tenant_scope_ready
+                and "require_tenant_member" in tasks_source
+                and "_task_query_for_tenant(" in tasks_source
+                and "_get_task_or_404(" in tasks_source
+                and 'tenant_payload = tenant_scope.ensure_tenant_id_for_create({}, str(context.tenant.id))' in tasks_source
+                and 'tenant_id=tenant_payload.get("tenant_id")' in tasks_source
+            )
             return {
                 "conversation_router_tenant_scoped_ready": conversation_router_tenant_scoped,
                 "message_router_tenant_scoped_ready": message_router_tenant_scoped,
@@ -874,6 +927,9 @@ class ProductionReadinessChecker:
                 "signal_tenant_scoped_ready": signal_tenant_scoped,
                 "alert_rule_tenant_scoped_ready": alert_rule_tenant_scoped,
                 "watch_alert_tenant_write_ready": watch_alert_tenant_write_ready,
+                "diagnostics_router_tenant_scoped_ready": diagnostics_router_tenant_scoped,
+                "platform_diagnostics_super_admin_only_ready": platform_diagnostics_super_admin_only,
+                "task_router_tenant_scoped_ready": task_router_tenant_scoped,
                 "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
                 "tenant_context_dependency_used": tenant_dependency_ready,
                 "tenant_scope_helper_used": tenant_scope_ready,
@@ -890,6 +946,9 @@ class ProductionReadinessChecker:
                 "signal_tenant_scoped_ready": False,
                 "alert_rule_tenant_scoped_ready": False,
                 "watch_alert_tenant_write_ready": False,
+                "diagnostics_router_tenant_scoped_ready": False,
+                "platform_diagnostics_super_admin_only_ready": False,
+                "task_router_tenant_scoped_ready": False,
                 "chat_message_tenant_write_ready": False,
                 "tenant_context_dependency_used": False,
                 "tenant_scope_helper_used": False,

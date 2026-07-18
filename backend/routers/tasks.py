@@ -1,12 +1,22 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from dependencies.tenant_context import TenantRequestContext, require_tenant_member
 from models.database import Mission, Task, get_db
+from schemas.watch_alert import ApiErrorResponse
+from services import tenant_scope
 
 router = APIRouter()
+
+
+def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
+    raise HTTPException(
+        status_code=status_code,
+        detail=ApiErrorResponse(error_code=error_code, message=message).model_dump(),
+    )
 
 
 def _serialize_task_view(task: Task, mission: Optional[Mission]) -> dict:
@@ -33,15 +43,30 @@ def _serialize_task_view(task: Task, mission: Optional[Mission]) -> dict:
     }
 
 
+def _task_query_for_tenant(db: Session, *, tenant_id: str):
+    return tenant_scope.filter_by_tenant(db.query(Task), Task, tenant_id)
+
+
+def _get_task_or_404(db: Session, *, task_id: int, tenant_id: str) -> Task:
+    task = _task_query_for_tenant(db, tenant_id=tenant_id).filter(Task.id == task_id).first()
+    if task is None:
+        _raise_api_error(status.HTTP_404_NOT_FOUND, "TASK_NOT_FOUND", "Task not found")
+    tenant_scope.require_record_tenant(task, tenant_id)
+    return task
+
+
 @router.get("/tasks")
 def list_tasks(
     limit: int = 20,
     status: Optional[str] = None,
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     """获取任务列表"""
+    current_tenant_id = str(context.tenant.id)
     rows = (
-        db.query(Task, Mission)
+        _task_query_for_tenant(db, tenant_id=current_tenant_id)
+        .with_entities(Task, Mission)
         .outerjoin(Mission, Task.mission_id == Mission.id)
         .order_by(Task.created_at.desc())
         .limit(max(limit * 3, limit))
@@ -64,6 +89,7 @@ def list_tasks(
 @router.post("/tasks")
 def create_task(
     payload: dict = Body(...),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     """创建任务"""
@@ -72,13 +98,15 @@ def create_task(
     priority = payload.get("priority") or "medium"
     entity_id = payload.get("entity_id")
     mission_id = payload.get("mission_id")
+    tenant_payload = tenant_scope.ensure_tenant_id_for_create({}, str(context.tenant.id))
 
     if mission_id:
         mission = db.query(Mission).filter(Mission.id == mission_id).first()
         if not mission:
-            raise HTTPException(status_code=404, detail="Mission not found")
+            _raise_api_error(status.HTTP_404_NOT_FOUND, "MISSION_NOT_FOUND", "Mission not found")
 
     task = Task(
+        tenant_id=tenant_payload.get("tenant_id"),
         title=title,
         description=description,
         priority=None if mission_id else priority,
@@ -99,16 +127,26 @@ def create_task(
     }
 
 
+@router.get("/tasks/{task_id}")
+def get_task(
+    task_id: int,
+    context: TenantRequestContext = Depends(require_tenant_member),
+    db: Session = Depends(get_db),
+):
+    task = _get_task_or_404(db, task_id=task_id, tenant_id=str(context.tenant.id))
+    mission = db.query(Mission).filter(Mission.id == task.mission_id).first() if task.mission_id else None
+    return _serialize_task_view(task, mission)
+
+
 @router.patch("/tasks/{task_id}")
 def update_task(
     task_id: int,
     payload: dict = Body(...),
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     """更新任务状态或优先级"""
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    task = _get_task_or_404(db, task_id=task_id, tenant_id=str(context.tenant.id))
 
     status = payload.get("status")
     priority = payload.get("priority")
@@ -127,13 +165,12 @@ def update_task(
 @router.delete("/tasks/{task_id}")
 def delete_task(
     task_id: int,
+    context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     """删除任务"""
-    task = db.query(Task).filter(Task.id == task_id).first()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+    task = _get_task_or_404(db, task_id=task_id, tenant_id=str(context.tenant.id))
 
     db.delete(task)
     db.commit()
-    return {"status": "deleted", "task_id": task_id}
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
