@@ -13,7 +13,7 @@ def test_tenant_context_and_scope_readiness_flags(startup_runtime):
     assert report["tenant_readiness"]["tenant_context_ready"] is True
     assert report["tenant_readiness"]["tenant_scope_helper_ready"] is True
     assert report["tenant_readiness"]["tenant_admin_boundary_ready"] == "partial"
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "blocked"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
     assert report["tenant_readiness"]["controlled_beta_tenant_ready"] is False
 
 

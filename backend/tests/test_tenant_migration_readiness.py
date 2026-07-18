@@ -105,7 +105,7 @@ def test_readiness_detects_missing_tenant_tables(startup_runtime):
     assert report["tenant_readiness"]["tenant_core_models_ready"] is True
     assert report["tenant_readiness"]["tenant_membership_ready"] is True
     assert report["tenant_readiness"]["tenant_user_default_tenant_ready"] is True
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "blocked"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert report["environment"]["account_token_storage_ok"] is True
 

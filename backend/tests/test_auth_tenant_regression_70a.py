@@ -88,4 +88,4 @@ def test_login_and_me_do_not_print_secret_and_public_saas_still_no(runtime):
     readiness_module = __import__("services.production_readiness", fromlist=["ProductionReadinessChecker"])
     report = readiness_module.ProductionReadinessChecker().build_report()
     assert report["commercial_readiness"]["public_saas_ready"] is False
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "blocked"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"

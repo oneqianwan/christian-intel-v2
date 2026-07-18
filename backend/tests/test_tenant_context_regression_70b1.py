@@ -101,7 +101,7 @@ def test_public_saas_still_no_and_tenant_isolation_still_blocked(runtime):
 
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert controlled_beta_auth_ready is True
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "blocked"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
     assert "production_authentication_not_fully_validated" not in set(
         report["commercial_readiness"]["reason_public_saas_not_ready"]
     )

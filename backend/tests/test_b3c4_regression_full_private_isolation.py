@@ -6,7 +6,7 @@ from test_production_readiness_core_uat import _block_llm_and_network, seeded_ru
 from test_production_readiness_startup_checks import startup_runtime
 
 
-def test_b3c3a_keeps_b3c2_b3c1_b3b_b2_b1_and_a3_readiness_contracts(startup_runtime):
+def test_b3c4_keeps_full_private_isolation_readiness_contracts(startup_runtime):
     tenant_context = importlib.import_module("dependencies.tenant_context")
     tenant_scope = importlib.import_module("services.tenant_scope")
     checker = startup_runtime["readiness_module"].ProductionReadinessChecker()
@@ -22,17 +22,20 @@ def test_b3c3a_keeps_b3c2_b3c1_b3b_b2_b1_and_a3_readiness_contracts(startup_runt
     assert hasattr(tenant_context, "get_current_tenant_context")
     assert hasattr(tenant_scope, "filter_by_tenant")
     assert tenant_readiness["tenant_core_models_ready"] is True
-    assert tenant_readiness["private_tenant_schema_ready"] in {"yes", "partial"}
+    assert tenant_readiness["private_tenant_schema_ready"] == "yes"
+    assert tenant_readiness["private_tenant_migration_ready"] == "partial"
     assert tenant_readiness["conversation_router_tenant_scoped_ready"] is True
     assert tenant_readiness["message_router_tenant_scoped_ready"] is True
     assert tenant_readiness["bookmark_router_tenant_scoped_ready"] is True
     assert tenant_readiness["feedback_router_tenant_scoped_ready"] is True
+    assert tenant_readiness["feedback_stats_tenant_scoped_ready"] is True
     assert tenant_readiness["watch_target_router_tenant_scoped_ready"] is True
     assert tenant_readiness["alert_router_tenant_scoped_ready"] is True
-    assert tenant_readiness["signal_tenant_scoped_ready"] is True
-    assert tenant_readiness["alert_rule_tenant_scoped_ready"] is True
-    assert tenant_readiness["watch_alert_cross_tenant_isolation_ready"] is True
-    assert tenant_readiness["watch_alert_tenant_write_ready"] is True
+    assert tenant_readiness["diagnostics_router_tenant_scoped_ready"] is True
+    assert tenant_readiness["task_router_tenant_scoped_ready"] is True
+    assert tenant_readiness["cross_tenant_leakage_tests_ready"] is True
+    assert tenant_readiness["request_trace_create_injects_tenant_id"] == "partial"
+    assert tenant_readiness["alert_runner_tenant_safe"] == "partial"
     assert tenant_readiness["private_router_tenant_binding_ready"] == "partial"
     assert tenant_readiness["tenant_isolation_readiness"] == "partial"
     assert tenant_readiness["controlled_beta_tenant_ready"] is False
@@ -42,14 +45,14 @@ def test_b3c3a_keeps_b3c2_b3c1_b3b_b2_b1_and_a3_readiness_contracts(startup_runt
     assert "multi_tenant_isolation_not_fully_validated" in reasons
 
 
-def test_b3c3a_keeps_public_score_graph_and_contact_queries_stable(seeded_runtime, monkeypatch):
+def test_b3c4_keeps_public_score_graph_and_contact_queries_stable(seeded_runtime, monkeypatch):
     brain_module = seeded_runtime["brain_module"]
     _block_llm_and_network(monkeypatch, brain_module)
     brain = brain_module.Brain()
 
-    score_contract = brain.think("Victory Philippines 评分是多少？", conversation_id="b3c3a-reg-score")["response_contract"]
-    graph_contract = brain.think("Victory Philippines 的关系图谱", conversation_id="b3c3a-reg-graph")["response_contract"]
-    contact_contract = brain.think("Victory Philippines 怎么联系？", conversation_id="b3c3a-reg-contact")["response_contract"]
+    score_contract = brain.think("Victory Philippines 评分是多少？", conversation_id="b3c4-reg-score")["response_contract"]
+    graph_contract = brain.think("Victory Philippines 的关系图谱", conversation_id="b3c4-reg-graph")["response_contract"]
+    contact_contract = brain.think("Victory Philippines 怎么联系？", conversation_id="b3c4-reg-contact")["response_contract"]
 
     assert score_contract["payload_type"] == "score_snapshot"
     assert graph_contract["payload_type"] == "relationship_graph"

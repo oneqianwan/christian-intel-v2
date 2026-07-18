@@ -283,6 +283,7 @@ class ProductionReadinessChecker:
         private_router_binding = self._check_private_router_tenant_binding(imports=imports)
         tenant_context_ready = self._check_tenant_context_ready()
         tenant_scope_helper_ready = self._check_tenant_scope_helper_ready()
+        cross_tenant_leakage_tests_ready = self._check_cross_tenant_leakage_tests_ready()
         tenant_core_models_ready = bool(
             tenant_schema["tenants_table_ok"]
             and tenant_schema["tenant_memberships_table_ok"]
@@ -346,6 +347,25 @@ class ProductionReadinessChecker:
         task_cross_tenant_isolation_ready = bool(
             task_router_tenant_scoped and private_tenant_schema["task_tenant_id_ready"] in {"yes", "partial"}
         )
+        request_trace_create_injects_tenant_id = (
+            "partial"
+            if (
+                diagnostics_router_tenant_scoped
+                and private_tenant_schema["diagnostics_tenant_id_ready"] in {"yes", "partial"}
+            )
+            else "no"
+        )
+        alert_runner_tenant_safe = (
+            "partial"
+            if (
+                watch_target_router_tenant_scoped
+                and alert_router_tenant_scoped
+                and signal_tenant_scoped
+                and alert_rule_tenant_scoped
+                and watch_alert_tenant_write_ready
+            )
+            else "no"
+        )
         private_router_tenant_binding_ready = (
             "partial"
             if (
@@ -362,11 +382,49 @@ class ProductionReadinessChecker:
             if conversation_cross_tenant_isolation_ready and message_cross_tenant_isolation_ready and chat_message_tenant_write_ready
             else "no"
         )
-        tenant_isolation_readiness = "blocked"
-        reason_tenant_isolation_not_ready = [
-            "remaining_private_routers_not_yet_tenant_scoped",
-            "cross_tenant_private_data_tests_not_completed",
-        ]
+        core_private_router_isolation_ready = bool(
+            conversation_cross_tenant_isolation_ready
+            and message_cross_tenant_isolation_ready
+            and bookmark_cross_tenant_isolation_ready
+            and feedback_cross_tenant_isolation_ready
+            and watch_alert_cross_tenant_isolation_ready
+            and diagnostics_cross_tenant_isolation_ready
+            and task_cross_tenant_isolation_ready
+            and chat_message_tenant_write_ready
+        )
+        foundational_tenant_capabilities_ready = bool(
+            tenant_core_models_ready
+            and tenant_membership_ready
+            and tenant_user_default_tenant_ready
+            and tenant_context_ready
+            and tenant_scope_helper_ready
+            and private_tenant_schema["private_tenant_schema_ready"] == "yes"
+        )
+        private_router_binding_state = str(private_router_tenant_binding_ready or "").strip().lower()
+        private_router_binding_allows_partial = private_router_binding_state in {"partial", "yes", "ready"}
+        tenant_isolation_readiness = (
+            "partial"
+            if (
+                foundational_tenant_capabilities_ready
+                and private_router_binding_allows_partial
+                and core_private_router_isolation_ready
+                and cross_tenant_leakage_tests_ready
+            )
+            else "blocked"
+        )
+        reason_tenant_isolation_not_ready: list[str] = []
+        if not foundational_tenant_capabilities_ready:
+            reason_tenant_isolation_not_ready.append("foundational_tenant_capabilities_missing")
+        if not core_private_router_isolation_ready:
+            reason_tenant_isolation_not_ready.append("remaining_private_routers_not_yet_tenant_scoped")
+        if not private_router_binding_allows_partial:
+            reason_tenant_isolation_not_ready.append("private_router_tenant_binding_not_ready")
+        if not cross_tenant_leakage_tests_ready:
+            reason_tenant_isolation_not_ready.append("cross_tenant_private_data_tests_not_completed")
+        if request_trace_create_injects_tenant_id != "yes":
+            reason_tenant_isolation_not_ready.append("request_trace_create_tenant_injection_not_fully_validated")
+        if alert_runner_tenant_safe != "yes":
+            reason_tenant_isolation_not_ready.append("alert_runner_tenant_safety_not_fully_validated")
         return {
             "tenant_core_models_ready": tenant_core_models_ready,
             "tenant_context_ready": bool(tenant_context_ready),
@@ -395,6 +453,7 @@ class ProductionReadinessChecker:
             "alert_rule_tenant_scoped_ready": alert_rule_tenant_scoped,
             "diagnostics_router_tenant_scoped_ready": diagnostics_router_tenant_scoped,
             "request_trace_tenant_scoped_ready": request_trace_tenant_scoped_ready,
+            "request_trace_create_injects_tenant_id": request_trace_create_injects_tenant_id,
             "platform_diagnostics_super_admin_only_ready": platform_diagnostics_super_admin_only,
             "task_router_tenant_scoped_ready": task_router_tenant_scoped,
             "conversation_cross_tenant_isolation_ready": conversation_cross_tenant_isolation_ready,
@@ -404,8 +463,10 @@ class ProductionReadinessChecker:
             "chat_message_tenant_write_ready": chat_message_tenant_write_ready,
             "watch_alert_cross_tenant_isolation_ready": watch_alert_cross_tenant_isolation_ready,
             "watch_alert_tenant_write_ready": watch_alert_tenant_write_ready,
+            "alert_runner_tenant_safe": alert_runner_tenant_safe,
             "diagnostics_cross_tenant_isolation_ready": diagnostics_cross_tenant_isolation_ready,
             "task_cross_tenant_isolation_ready": task_cross_tenant_isolation_ready,
+            "cross_tenant_leakage_tests_ready": cross_tenant_leakage_tests_ready,
             "private_router_tenant_binding_ready": private_router_tenant_binding_ready,
             "tenant_admin_boundary_ready": "partial" if tenant_context_ready and tenant_scope_helper_ready else "no",
             "tenant_isolation_readiness": tenant_isolation_readiness,
@@ -571,6 +632,16 @@ class ProductionReadinessChecker:
             return all(hasattr(module, name) for name in required)
         except Exception:
             return False
+
+    def _check_cross_tenant_leakage_tests_ready(self) -> bool:
+        backend_root = Path(__file__).resolve().parents[1]
+        required_files = (
+            backend_root / "tests" / "test_private_tenant_isolation_final_uat.py",
+            backend_root / "tests" / "test_private_tenant_readiness_final.py",
+            backend_root / "tests" / "test_public_intelligence_global_final_regression.py",
+            backend_root / "tests" / "test_b3c4_regression_full_private_isolation.py",
+        )
+        return all(path.exists() for path in required_files)
 
     def _check_private_tenant_schema(self, *, imports: dict[str, Any]) -> dict[str, Any]:
         database_module = imports["imports"].get("config")

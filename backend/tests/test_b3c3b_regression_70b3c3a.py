@@ -38,7 +38,7 @@ def test_b3c3b_keeps_b3c3a_b3c2_b3c1_b3b_b2_b1_and_a3_readiness_contracts(startu
     assert tenant_readiness["diagnostics_cross_tenant_isolation_ready"] is True
     assert tenant_readiness["task_cross_tenant_isolation_ready"] is True
     assert tenant_readiness["private_router_tenant_binding_ready"] == "partial"
-    assert tenant_readiness["tenant_isolation_readiness"] == "blocked"
+    assert tenant_readiness["tenant_isolation_readiness"] == "partial"
     assert tenant_readiness["controlled_beta_tenant_ready"] is False
     assert controlled_beta_auth_ready is True
     assert report["commercial_readiness"]["public_saas_ready"] is False
@@ -61,4 +61,3 @@ def test_b3c3b_keeps_public_score_graph_and_contact_queries_stable(seeded_runtim
     assert score_contract["audit"]["no_llm"] is True
     assert graph_contract["audit"]["no_network"] is True
     assert contact_contract["audit"]["no_fabrication"] is True
-
