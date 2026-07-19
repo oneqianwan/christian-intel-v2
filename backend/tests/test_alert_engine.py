@@ -149,6 +149,7 @@ def _create_watch_target(runtime, *, user_id: str, entity_id: str, frequency: st
     session = _session(runtime)
     try:
         watch_target = database.WatchTarget(
+            tenant_id="tenant-1",
             user_id=user_id,
             entity_id=entity_id,
             entity_type="organization",
@@ -178,6 +179,7 @@ def _create_signal(
     session = _session(runtime)
     try:
         signal = database.Signal(
+            tenant_id="tenant-1",
             watch_target_id=watch_target_id,
             entity_id=entity_id,
             signal_type=signal_type,
@@ -201,6 +203,7 @@ def _create_user_rule(runtime, *, user_id: str, signal_type: str, minimum_severi
     try:
         session.add(
             database.AlertRule(
+                tenant_id="tenant-1",
                 user_id=user_id,
                 signal_type=signal_type,
                 minimum_severity=minimum_severity,
@@ -445,6 +448,43 @@ def test_16_alert_user_id_comes_from_watch_target(runtime):
     assert alert_user_id == "owner-1"
 
 
+def test_16b_alert_tenant_id_comes_from_watch_target_and_mismatched_signal_is_blocked(runtime):
+    _create_org(runtime, "org-tenant-contract")
+    watch_target_id = _create_watch_target(runtime, user_id="tenant-user", entity_id="org-tenant-contract")
+    valid_signal_id = _create_signal(
+        runtime,
+        watch_target_id=watch_target_id,
+        entity_id="org-tenant-contract",
+        signal_type="new_news",
+        severity="low",
+        title="tenant-valid",
+    )
+    invalid_signal_id = _create_signal(
+        runtime,
+        watch_target_id=watch_target_id,
+        entity_id="org-tenant-contract",
+        signal_type="new_video",
+        severity="low",
+        title="tenant-invalid",
+    )
+
+    session = _session(runtime)
+    try:
+        invalid_signal = session.query(runtime["database"].Signal).filter_by(id=invalid_signal_id).one()
+        invalid_signal.tenant_id = "tenant-x"
+        session.commit()
+        valid_alert = runtime["alert_engine"].process_signal(session, valid_signal_id)
+        invalid_alert = runtime["alert_engine"].process_signal(session, invalid_signal_id)
+        valid_alert_tenant_id = valid_alert.tenant_id if valid_alert is not None else None
+        session.commit()
+    finally:
+        session.close()
+
+    assert valid_alert is not None
+    assert valid_alert_tenant_id == "tenant-1"
+    assert invalid_alert is None
+
+
 def test_17_alert_source_url_is_empty_or_real_url(runtime):
     _create_org(runtime, "org-source")
     watch_target_id = _create_watch_target(runtime, user_id="user-1", entity_id="org-source")
@@ -541,7 +581,11 @@ def test_21_alert_engine_exception_does_not_leave_running_watch_run(monkeypatch,
         category="news",
         url="https://news.example.com/fail",
     )
-    monkeypatch.setattr(runtime["watch_runner"], "process_signals", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("alert engine failed")))
+    monkeypatch.setattr(
+        runtime["watch_runner"],
+        "_create_alerts_for_signals",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("alert engine failed")),
+    )
 
     watch_run = _run_watch(runtime, watch_target_id)
 

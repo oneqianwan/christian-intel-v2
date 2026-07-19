@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib
-
 import pytest
 
 from account_lifecycle_testkit import create_user, login, runtime, set_production_auth_defaults
@@ -135,5 +134,101 @@ def test_chat_does_not_write_into_other_tenant_conversation(runtime, monkeypatch
         )
         assert len(messages) == 2
         assert all(message.tenant_id == str(tenant_a.id) for message in messages)
+    finally:
+        db.close()
+
+
+def test_chat_and_profile_traces_write_current_tenant_id(runtime, monkeypatch):
+    chat_router = importlib.import_module("routers.chat")
+    monkeypatch.setattr(chat_router, "TRACE_DB_WRITE_ENABLED", True)
+
+    tenant = create_tenant(runtime, name="Tenant Trace", slug=unique_tenant_slug("tenant-trace"))
+    current_tenant_id = str(tenant.id)
+    simple_conversation_id = "trace-simple-conversation"
+    stream_conversation_id = "trace-stream-conversation"
+
+    trace_db = runtime["database"].SessionLocal()
+    try:
+        chat_router._log_trace(
+            trace_db,
+            "request-simple-trace",
+            "request_received",
+            {"message": "trace simple", "conversation_id": simple_conversation_id, "engine": "brain_v3"},
+            tenant_id=current_tenant_id,
+        )
+        chat_router._log_trace(
+            trace_db,
+            "request-simple-trace",
+            "delivery_emitted",
+            {
+                "conversation_id": simple_conversation_id,
+                "delivery_type": "text",
+                "status": "success",
+                "engine": "brain_v3",
+            },
+            tenant_id=current_tenant_id,
+        )
+        chat_router._log_trace(
+            trace_db,
+            "request-stream-trace",
+            "request_received",
+            {"message": "trace stream", "conversation_id": stream_conversation_id, "engine": "brain_v3"},
+            tenant_id=current_tenant_id,
+        )
+        chat_router._log_trace(
+            trace_db,
+            "request-stream-trace",
+            "delivery_emitted",
+            {
+                "conversation_id": stream_conversation_id,
+                "delivery_type": "text",
+                "status": "success",
+                "engine": "brain_v3",
+            },
+            tenant_id=current_tenant_id,
+        )
+        trace_db.add(
+            runtime["database"].RequestTrace(
+                id="trace-profile-current-tenant",
+                tenant_id=current_tenant_id,
+                request_id=f"profile:{simple_conversation_id}",
+                event_type="user_profile_saved",
+                event_data={"conversation_id": simple_conversation_id, "profile": {"name": "Trace Tenant User"}},
+            )
+        )
+        trace_db.commit()
+    finally:
+        trace_db.close()
+
+    db = runtime["database"].SessionLocal()
+    try:
+        traces = db.query(runtime["database"].RequestTrace).order_by(runtime["database"].RequestTrace.created_at.asc()).all()
+        simple_request_traces = [
+            trace
+            for trace in traces
+            if str(trace.event_type) in {"request_received", "delivery_emitted"}
+            and isinstance(trace.event_data, dict)
+            and trace.event_data.get("conversation_id") == simple_conversation_id
+        ]
+        stream_request_traces = [
+            trace
+            for trace in traces
+            if str(trace.event_type) in {"request_received", "delivery_emitted"}
+            and isinstance(trace.event_data, dict)
+            and trace.event_data.get("conversation_id") == stream_conversation_id
+        ]
+        profile_trace = (
+            db.query(runtime["database"].RequestTrace)
+            .filter(runtime["database"].RequestTrace.request_id == f"profile:{simple_conversation_id}")
+            .filter(runtime["database"].RequestTrace.event_type == "user_profile_saved")
+            .one()
+        )
+        assert simple_request_traces
+        assert stream_request_traces
+        assert all(trace.tenant_id == current_tenant_id for trace in simple_request_traces)
+        assert all(trace.tenant_id == current_tenant_id for trace in stream_request_traces)
+        assert all(trace.tenant_id is not None for trace in simple_request_traces)
+        assert all(trace.tenant_id is not None for trace in stream_request_traces)
+        assert profile_trace.tenant_id == current_tenant_id
     finally:
         db.close()

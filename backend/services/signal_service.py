@@ -85,13 +85,14 @@ def _title_and_summary(change: dict) -> tuple[str, str]:
 
 
 def _dedup_key(watch_target: WatchTarget, change: dict) -> str:
+    normalized_tenant_id = str(getattr(watch_target, "tenant_id", "") or "").strip() or "tenantless"
     signal_type = change["signal_type"]
     if signal_type in {"new_intelligence", "new_news", "new_video"}:
         identity = _normalize_for_key(change.get("new_value"))
-        return f"{watch_target.id}|{signal_type}|{identity}"
+        return f"{normalized_tenant_id}|{watch_target.id}|{signal_type}|{identity}"
     field_name = _normalize_for_key(change.get("field_name"))
     normalized_value = _normalize_for_key(change.get("new_value"))
-    return f"{watch_target.id}|{signal_type}|{field_name}|{normalized_value}"
+    return f"{normalized_tenant_id}|{watch_target.id}|{signal_type}|{field_name}|{normalized_value}"
 
 
 def create_signal_records_for_changes(
@@ -101,6 +102,9 @@ def create_signal_records_for_changes(
     changes: list[dict],
 ) -> list[Signal]:
     created_signals: list[Signal] = []
+    normalized_tenant_id = str(getattr(watch_target, "tenant_id", "") or "").strip() or None
+    if normalized_tenant_id is None:
+        raise ValueError("SIGNAL_TENANT_REQUIRED")
     owner_user_id = None
     if ownership_enabled():
         owner_user_id = str(watch_target.owner_user_id or "").strip() or None
@@ -111,6 +115,7 @@ def create_signal_records_for_changes(
         title, summary = _title_and_summary(change)
         signal = Signal(
             id=str(uuid.uuid4()),
+            tenant_id=normalized_tenant_id,
             watch_target_id=watch_target.id,
             owner_user_id=owner_user_id,
             entity_id=watch_target.entity_id,

@@ -33,13 +33,18 @@ def test_b3c3a_keeps_b3c2_b3c1_b3b_b2_b1_and_a3_readiness_contracts(startup_runt
     assert tenant_readiness["alert_rule_tenant_scoped_ready"] is True
     assert tenant_readiness["watch_alert_cross_tenant_isolation_ready"] is True
     assert tenant_readiness["watch_alert_tenant_write_ready"] is True
-    assert tenant_readiness["private_router_tenant_binding_ready"] == "partial"
-    assert tenant_readiness["tenant_isolation_readiness"] == "partial"
+    assert tenant_readiness["private_router_tenant_binding_ready"] == "yes"
+    assert tenant_readiness["tenant_isolation_readiness"] == "ready"
     assert tenant_readiness["controlled_beta_tenant_ready"] is False
     assert controlled_beta_auth_ready is True
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert "production_authentication_not_fully_validated" not in reasons
-    assert "multi_tenant_isolation_not_fully_validated" in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
+    assert "billing_not_implemented" in reasons
+    assert "rate_limit_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "backup_recovery_not_fully_validated" in reasons
+    assert "deployment_health_checks_not_fully_validated" in reasons
 
 
 def test_b3c3a_keeps_public_score_graph_and_contact_queries_stable(seeded_runtime, monkeypatch):

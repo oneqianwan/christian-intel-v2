@@ -34,15 +34,15 @@ def test_b3c4_keeps_full_private_isolation_readiness_contracts(startup_runtime):
     assert tenant_readiness["diagnostics_router_tenant_scoped_ready"] is True
     assert tenant_readiness["task_router_tenant_scoped_ready"] is True
     assert tenant_readiness["cross_tenant_leakage_tests_ready"] is True
-    assert tenant_readiness["request_trace_create_injects_tenant_id"] == "partial"
-    assert tenant_readiness["alert_runner_tenant_safe"] == "partial"
-    assert tenant_readiness["private_router_tenant_binding_ready"] == "partial"
-    assert tenant_readiness["tenant_isolation_readiness"] == "partial"
+    assert tenant_readiness["request_trace_create_injects_tenant_id"] == "yes"
+    assert tenant_readiness["alert_runner_tenant_safe"] == "yes"
+    assert tenant_readiness["private_router_tenant_binding_ready"] == "yes"
+    assert tenant_readiness["tenant_isolation_readiness"] == "ready"
     assert tenant_readiness["controlled_beta_tenant_ready"] is False
     assert controlled_beta_auth_ready is True
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert "production_authentication_not_fully_validated" not in reasons
-    assert "multi_tenant_isolation_not_fully_validated" in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
 
 
 def test_b3c4_keeps_public_score_graph_and_contact_queries_stable(seeded_runtime, monkeypatch):

@@ -325,7 +325,7 @@ def _build_next_actions(delivery_type: str, status: str) -> list[str]:
     return ["继续追问细节", "改问联系人信息", "指定时间范围重查"]
 
 
-def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict):
+def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict, *, tenant_id: str | None = None):
     print(
         "REQUEST_TRACE_STDOUT "
         + _safe_json_dumps(
@@ -333,6 +333,7 @@ def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict):
                 "request_id": request_id,
                 "event_type": event_type,
                 "event_data": event_data,
+                "tenant_id": tenant_id,
                 "trace_db_write_enabled": TRACE_DB_WRITE_ENABLED,
             }
         )
@@ -345,13 +346,15 @@ def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict):
         _db_persist_trace(
             "INSERT request_trace",
             db,
-            sql="INSERT INTO request_traces (id, request_id, event_type, event_data) VALUES (:id, :request_id, :event_type, :event_data)",
+            sql="INSERT INTO request_traces (id, tenant_id, request_id, event_type, event_data) VALUES (:id, :tenant_id, :request_id, :event_type, :event_data)",
             request_id=request_id,
+            tenant_id=tenant_id,
             event_type=event_type,
         )
         db.add(
             RequestTrace(
                 id=str(uuid.uuid4()),
+                tenant_id=str(tenant_id or "").strip() or None,
                 request_id=request_id,
                 event_type=event_type,
                 event_data=event_data,
@@ -359,18 +362,20 @@ def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict):
         )
         _db_commit_with_trace(
             db,
-            sql="INSERT INTO request_traces (id, request_id, event_type, event_data) VALUES (:id, :request_id, :event_type, :event_data)",
+            sql="INSERT INTO request_traces (id, tenant_id, request_id, event_type, event_data) VALUES (:id, :tenant_id, :request_id, :event_type, :event_data)",
             location="chat.py:_log_trace",
             request_id=request_id,
+            tenant_id=tenant_id,
             event_type=event_type,
         )
     except Exception as exc:
         _db_persist_trace(
             "REQUEST_TRACE_FAIL",
             db,
-            sql="INSERT INTO request_traces (id, request_id, event_type, event_data) VALUES (:id, :request_id, :event_type, :event_data)",
+            sql="INSERT INTO request_traces (id, tenant_id, request_id, event_type, event_data) VALUES (:id, :tenant_id, :request_id, :event_type, :event_data)",
             exc=exc,
             request_id=request_id,
+            tenant_id=tenant_id,
             event_type=event_type,
         )
         print(
@@ -379,6 +384,7 @@ def _log_trace(db: Session, request_id: str, event_type: str, event_data: dict):
                 {
                     "request_id": request_id,
                     "event_type": event_type,
+                    "tenant_id": tenant_id,
                     "error": str(exc),
                 }
             )
@@ -410,6 +416,7 @@ def _prepare_chat_request(
         request_id,
         "request_received",
         {"message": request.message, "conversation_id": conversation_id, "engine": "brain_v3"},
+        tenant_id=str(current_tenant or "").strip() or None,
     )
 
     if not persist_db:
@@ -676,7 +683,13 @@ def _finalize_delivery(
         db,
         request_id,
         "delivery_emitted",
-        {"delivery_type": delivery_type, "status": status, "engine": "brain_v3"},
+        {
+            "conversation_id": conversation_id,
+            "delivery_type": delivery_type,
+            "status": status,
+            "engine": "brain_v3",
+        },
+        tenant_id=str(current_tenant or "").strip() or None,
     )
 
     return {

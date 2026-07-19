@@ -101,10 +101,17 @@ def test_public_saas_still_no_and_tenant_isolation_still_blocked(runtime):
 
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert controlled_beta_auth_ready is True
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "ready"
     assert "production_authentication_not_fully_validated" not in set(
         report["commercial_readiness"]["reason_public_saas_not_ready"]
     )
+    reasons = set(report["commercial_readiness"]["reason_public_saas_not_ready"])
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
+    assert "billing_not_implemented" in reasons
+    assert "rate_limit_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "backup_recovery_not_fully_validated" in reasons
+    assert "deployment_health_checks_not_fully_validated" in reasons
 
 
 def test_unauthenticated_admin_route_still_requires_auth(runtime):

@@ -13,7 +13,7 @@ def test_tenant_context_and_scope_readiness_flags(startup_runtime):
     assert report["tenant_readiness"]["tenant_context_ready"] is True
     assert report["tenant_readiness"]["tenant_scope_helper_ready"] is True
     assert report["tenant_readiness"]["tenant_admin_boundary_ready"] == "partial"
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "ready"
     assert report["tenant_readiness"]["controlled_beta_tenant_ready"] is False
 
 
@@ -30,4 +30,9 @@ def test_production_auth_readiness_stays_ready_and_public_saas_blockers_stay_cor
     assert controlled_beta_auth_ready is True
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert "production_authentication_not_fully_validated" not in reasons
-    assert "multi_tenant_isolation_not_fully_validated" in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
+    assert "billing_not_implemented" in reasons
+    assert "rate_limit_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "backup_recovery_not_fully_validated" in reasons
+    assert "deployment_health_checks_not_fully_validated" in reasons

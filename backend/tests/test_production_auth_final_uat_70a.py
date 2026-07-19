@@ -411,7 +411,7 @@ def test_final_uat_migration_readiness_and_public_saas_status(startup_runtime, t
     assert report["environment"]["account_token_storage_ok"] is True
     assert report["commercial_readiness"]["public_saas_ready"] is False
     reasons = set(report["commercial_readiness"]["reason_public_saas_not_ready"])
-    assert "multi_tenant_isolation_not_fully_validated" in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
     assert "billing_not_implemented" in reasons
     assert "rate_limit_not_fully_validated" in reasons
     assert "monitoring_alerting_not_fully_validated" in reasons

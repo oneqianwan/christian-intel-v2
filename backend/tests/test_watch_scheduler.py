@@ -176,6 +176,7 @@ def _create_watch_target_direct(
     session = _session(runtime)
     try:
         watch_target = database.WatchTarget(
+            tenant_id="tenant-1",
             user_id=user_id,
             entity_id=entity_id,
             entity_type="organization",
@@ -262,7 +263,9 @@ def test_03_daily_due_target_is_enqueued(runtime):
     assert stats["enqueued_count"] == 1
     assert watch_run.status == "pending"
     assert watch_run.watch_target_id == target_id
+    assert watch_run.metadata_json["tenant_id"] == "tenant-1"
     assert len(queue.jobs) == 1
+    assert next(iter(queue.jobs.values())).meta["tenant_id"] == "tenant-1"
 
 
 def test_04_weekly_due_target_is_enqueued(runtime):
@@ -505,3 +508,34 @@ def test_32_scheduler_runs_single_round_and_exits(monkeypatch, runtime):
 
     assert stats["enqueued_count"] == 1
     assert stats["scan_finished_at"] is not None
+
+
+def test_33_null_tenant_target_is_skipped_fail_closed(runtime):
+    now = datetime(2026, 1, 1, 10, 0, 0)
+    queue = FakeQueue()
+    _create_org(runtime, "org-null-tenant")
+    database = runtime["database"]
+    session = _session(runtime)
+    try:
+        watch_target = database.WatchTarget(
+            tenant_id=None,
+            user_id="user-1",
+            entity_id="org-null-tenant",
+            entity_type="organization",
+            status="active",
+            frequency="daily",
+            next_check_at=now - timedelta(minutes=1),
+        )
+        session.add(watch_target)
+        session.commit()
+        session.refresh(watch_target)
+        due = runtime["watch_scheduler"].scan_due_watch_targets(session, now=now)
+        stats = runtime["watch_scheduler"].enqueue_due_watch_targets(session, queue=queue, now=now)
+    finally:
+        session.close()
+
+    assert due == []
+    assert stats["due_count"] == 0
+    assert stats["skipped_count"] == 0
+    assert stats["enqueued_count"] == 0
+    assert queue.jobs == {}

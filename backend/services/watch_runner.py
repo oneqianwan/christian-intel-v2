@@ -108,6 +108,7 @@ def _automatic_watch_run_metadata(
     scheduled_at: datetime | None,
     rq_job_id: str | None,
     retry_number: int,
+    tenant_id: str | None = None,
     watch_run: WatchRun | None = None,
 ) -> dict:
     existing = _base_metadata(watch_run) if watch_run else {}
@@ -115,6 +116,7 @@ def _automatic_watch_run_metadata(
     return {
         **existing,
         "trigger": "automatic",
+        "tenant_id": str(tenant_id or existing.get("tenant_id") or "").strip() or None,
         "scheduled_at": _isoformat(scheduled_at),
         "original_scheduled_at": original_scheduled_at,
         "rq_job_id": rq_job_id,
@@ -169,6 +171,21 @@ def _watch_target_actor_user_id(watch_target: WatchTarget) -> str:
     return actor_user_id
 
 
+def _watch_run_tenant_id(watch_run: WatchRun | None) -> str | None:
+    if watch_run is None or not isinstance(getattr(watch_run, "metadata_json", None), dict):
+        return None
+    tenant_id = str((watch_run.metadata_json or {}).get("tenant_id") or "").strip()
+    return tenant_id or None
+
+
+def _ensure_watch_run_tenant_contract(watch_target: WatchTarget, watch_run: WatchRun | None) -> str:
+    current_tenant_id = _watch_target_tenant_id(watch_target)
+    watch_run_tenant_id = _watch_run_tenant_id(watch_run)
+    if watch_run_tenant_id and watch_run_tenant_id != current_tenant_id:
+        raise WatchTargetNotFoundError()
+    return current_tenant_id
+
+
 def _ensure_tenant_alert_rules(db: Session, watch_target: WatchTarget) -> dict[str, AlertRule]:
     current_tenant_id = _watch_target_tenant_id(watch_target)
     actor_user_id = _watch_target_actor_user_id(watch_target)
@@ -176,6 +193,7 @@ def _ensure_tenant_alert_rules(db: Session, watch_target: WatchTarget) -> dict[s
         str(rule.signal_type): rule
         for rule in db.query(AlertRule)
         .filter(
+            AlertRule.tenant_id == current_tenant_id,
             AlertRule.user_id == actor_user_id,
             AlertRule.signal_type.in_(tuple(DEFAULT_ALERT_RULES.keys())),
         )
@@ -203,6 +221,7 @@ def _ensure_tenant_alert_rules(db: Session, watch_target: WatchTarget) -> dict[s
                 existing = (
                     db.query(AlertRule)
                     .filter(
+                        AlertRule.tenant_id == current_tenant_id,
                         AlertRule.user_id == actor_user_id,
                         AlertRule.signal_type == signal_type,
                     )
@@ -228,9 +247,14 @@ def _create_alerts_for_signals(db: Session, watch_target: WatchTarget, created_s
     created_count = 0
 
     for signal in created_signals:
+        signal_tenant_id = str(getattr(signal, "tenant_id", "") or "").strip()
+        if signal_tenant_id and signal_tenant_id != current_tenant_id:
+            continue
         signal.tenant_id = current_tenant_id
         rule = tenant_rules.get(str(signal.signal_type))
         if rule is None or not bool(getattr(rule, "is_enabled", False)):
+            continue
+        if str(getattr(rule, "tenant_id", "") or "").strip() != current_tenant_id:
             continue
         if not severity_meets_minimum(str(signal.severity), str(rule.minimum_severity)):
             continue
@@ -282,7 +306,9 @@ def _claim_pending_auto_run(
     scheduled_at: datetime | None,
     rq_job_id: str | None,
     retry_number: int,
+    tenant_id: str,
 ) -> WatchRun:
+    current_tenant_id = _watch_target_tenant_id(watch_target)
     if watch_run_id:
         watch_run = (
             db.query(WatchRun)
@@ -294,6 +320,9 @@ def _claim_pending_auto_run(
         )
     else:
         watch_run = None
+
+    if watch_run is not None:
+        _ensure_watch_run_tenant_contract(watch_target, watch_run)
 
     if not watch_run:
         watch_run = WatchRun(
@@ -313,6 +342,7 @@ def _claim_pending_auto_run(
         scheduled_at=scheduled_at,
         rq_job_id=rq_job_id,
         retry_number=retry_number,
+        tenant_id=tenant_id or current_tenant_id,
         watch_run=watch_run,
     )
     db.commit()
@@ -385,7 +415,9 @@ def _mark_run_success(
     watch_run.error_code = None
     watch_run.error_message = None
     watch_run.metadata_json = {
+        **_base_metadata(watch_run),
         **current_snapshot,
+        "tenant_id": _watch_target_tenant_id(watch_target),
         "run_summary": run_summary,
     }
 
@@ -424,6 +456,7 @@ def _mark_run_skipped(
         scheduled_at=_scheduled_at_from_metadata(watch_run),
         rq_job_id=rq_job_id,
         retry_number=int((_base_metadata(watch_run).get("retry_number") or 0)),
+        tenant_id=_watch_run_tenant_id(watch_run),
         watch_run=watch_run,
     )
     metadata["duplicate_reason"] = reason
@@ -491,6 +524,7 @@ def _enqueue_retry_job(
     watch_target_id: str,
     watch_run_id: str,
     retry_number: int,
+    tenant_id: str,
 ) -> str | None:
     if queue is None:
         return None
@@ -512,6 +546,7 @@ def _enqueue_retry_job(
         job_timeout=300,
         result_ttl=3600,
         meta={
+            "tenant_id": tenant_id,
             "watch_target_id": watch_target_id,
             "watch_run_id": watch_run_id,
             "retry_number": retry_number,
@@ -537,6 +572,7 @@ def _mark_auto_run_for_retry(
         scheduled_at=_scheduled_at_from_metadata(watch_run),
         rq_job_id=rq_job_id,
         retry_number=retry_number,
+        tenant_id=_ensure_watch_run_tenant_contract(watch_target, watch_run),
         watch_run=watch_run,
     )
     metadata["retry"] = {
@@ -578,6 +614,7 @@ def _mark_auto_run_failed(
         scheduled_at=scheduled_at,
         rq_job_id=rq_job_id,
         retry_number=int((_base_metadata(watch_run).get("retry_number") or 0)),
+        tenant_id=_ensure_watch_run_tenant_contract(watch_target, watch_run),
         watch_run=watch_run,
     )
     metadata["retry"] = {
@@ -705,15 +742,27 @@ def _run_automatic_watch_target(
             error_code=exc.error_code,
             error_message=exc.message,
         )
+    current_tenant_id = _watch_target_tenant_id(watch_target)
 
-    watch_run = _claim_pending_auto_run(
-        db,
-        watch_target,
-        watch_run_id=watch_run_id,
-        scheduled_at=scheduled_at,
-        rq_job_id=rq_job_id,
-        retry_number=retry_number,
-    )
+    try:
+        watch_run = _claim_pending_auto_run(
+            db,
+            watch_target,
+            watch_run_id=watch_run_id,
+            scheduled_at=scheduled_at,
+            rq_job_id=rq_job_id,
+            retry_number=retry_number,
+            tenant_id=current_tenant_id,
+        )
+    except WatchTargetNotFoundError as exc:
+        return _mark_failed_without_target(
+            db,
+            watch_run_id=watch_run_id,
+            rq_job_id=rq_job_id,
+            error_code=exc.error_code,
+            error_message=exc.message,
+        )
+    current_tenant_id = _ensure_watch_run_tenant_contract(watch_target, watch_run)
     scheduled_at = scheduled_at or _scheduled_at_from_metadata(watch_run) or watch_target.next_check_at
     current_time = utcnow()
 
@@ -768,6 +817,7 @@ def _run_automatic_watch_target(
                     watch_target_id=watch_target.id,
                     watch_run_id=watch_run.id,
                     retry_number=next_retry_number,
+                    tenant_id=current_tenant_id,
                 )
             except Exception as retry_exc:
                 return _mark_auto_run_failed(

@@ -78,23 +78,52 @@ def ensure_default_alert_rules(db: Session) -> list[AlertRule]:
     )
 
 
-def get_applicable_alert_rule(db: Session, *, user_id: str, signal_type: str) -> AlertRule | None:
-    user_rule = (
-        db.query(AlertRule)
-        .filter(
-            AlertRule.user_id == user_id,
-            AlertRule.signal_type == signal_type,
+def get_applicable_alert_rule(
+    db: Session,
+    *,
+    user_id: str,
+    signal_type: str,
+    tenant_id: str | None = None,
+) -> AlertRule | None:
+    normalized_tenant_id = str(tenant_id or "").strip() or None
+    base_query = db.query(AlertRule).filter(AlertRule.signal_type == signal_type)
+
+    if normalized_tenant_id:
+        tenant_user_rule = (
+            base_query.filter(
+                AlertRule.tenant_id == normalized_tenant_id,
+                AlertRule.user_id == user_id,
+            )
+            .first()
         )
-        .first()
-    )
-    if user_rule is not None:
-        return user_rule
+        if tenant_user_rule is not None:
+            return tenant_user_rule
+
+        tenant_default_rule = (
+            base_query.filter(
+                AlertRule.tenant_id == normalized_tenant_id,
+                AlertRule.user_id.is_(None),
+            )
+            .first()
+        )
+        if tenant_default_rule is not None:
+            return tenant_default_rule
+
+    elif str(user_id or "").strip():
+        user_rule = (
+            base_query.filter(
+                AlertRule.tenant_id.is_(None),
+                AlertRule.user_id == user_id,
+            )
+            .first()
+        )
+        if user_rule is not None:
+            return user_rule
 
     return (
-        db.query(AlertRule)
-        .filter(
+        base_query.filter(
+            AlertRule.tenant_id.is_(None),
             AlertRule.user_id.is_(None),
-            AlertRule.signal_type == signal_type,
         )
         .first()
     )

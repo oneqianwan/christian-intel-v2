@@ -5,6 +5,7 @@ import os
 import sys
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -61,6 +62,7 @@ def runtime():
     config = importlib.import_module("config")
     database = importlib.import_module("models.database")
     watch_targets_router = importlib.import_module("routers.watch_targets")
+    watch_runner = importlib.import_module("services.watch_runner")
     main = importlib.import_module("main")
 
     _set_watch_flag(config, True)
@@ -72,6 +74,7 @@ def runtime():
         "config": config,
         "database": database,
         "router_module": watch_targets_router,
+        "watch_runner": watch_runner,
         "app": main.app,
         "client": client,
     }
@@ -92,17 +95,23 @@ def reset_state(runtime):
 
     _set_watch_flag(config, True)
 
-    current_user = {"value": "user-1"}
+    current_user = {"value": "user-1", "tenant_id": "tenant-1"}
 
-    def override_get_current_user_id():
+    def override_require_tenant_member():
         if not current_user["value"]:
             raise HTTPException(
                 status_code=401,
                 detail={"error_code": "AUTH_REQUIRED", "message": "Authentication required"},
             )
-        return current_user["value"]
+        return router_module.TenantRequestContext(
+            user=SimpleNamespace(id=current_user["value"], role="viewer"),
+            tenant=SimpleNamespace(id=current_user["tenant_id"]),
+            membership=SimpleNamespace(role="viewer", status="active"),
+            global_role="viewer",
+            tenant_role="viewer",
+        )
 
-    app.dependency_overrides[router_module.get_current_user_id] = override_get_current_user_id
+    app.dependency_overrides[router_module.require_tenant_member] = override_require_tenant_member
 
     session = database.SessionLocal()
     try:
@@ -194,6 +203,7 @@ def _create_watch_target(runtime, user_id: str, entity_id: str, **overrides) -> 
     session = _session(runtime)
     try:
         watch_target = database.WatchTarget(
+            tenant_id=overrides.pop("tenant_id", "tenant-1"),
             user_id=user_id,
             entity_id=entity_id,
             entity_type=overrides.pop("entity_type", "organization"),
@@ -667,3 +677,44 @@ def test_manual_frequency_watch_target_can_run(runtime):
     response = _run_watch(runtime, watch_target_id)
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+
+
+def test_31_automatic_run_rejects_mismatched_watch_run_tenant_metadata(runtime):
+    now = runtime["watch_runner"].utcnow()
+    _create_org(runtime, "org-auto-tenant-contract")
+    watch_target_id = _create_watch_target(
+        runtime,
+        "user-1",
+        "org-auto-tenant-contract",
+        frequency="daily",
+        next_check_at=now,
+        tenant_id="tenant-a",
+    )
+    database = runtime["database"]
+    session = _session(runtime)
+    try:
+        watch_run = database.WatchRun(
+            id="run-tenant-mismatch",
+            watch_target_id=watch_target_id,
+            status="pending",
+            metadata_json={"trigger": "automatic", "tenant_id": "tenant-b"},
+        )
+        session.add(watch_run)
+        session.commit()
+
+        result = runtime["watch_runner"].run_watch_target(
+            session,
+            watch_target_id,
+            trigger="automatic",
+            watch_run_id=watch_run.id,
+            scheduled_at=now,
+            rq_job_id="rq-mismatch",
+            queue=None,
+        )
+        session.refresh(result)
+    finally:
+        session.close()
+
+    assert result.status == "failed"
+    assert result.error_code == "WATCH_TARGET_NOT_FOUND"
+    assert result.metadata_json["tenant_id"] == "tenant-b"

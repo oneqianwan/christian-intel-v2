@@ -19,20 +19,20 @@ def test_private_tenant_readiness_final_flags_are_correct(startup_runtime):
     assert tenant_readiness["tenant_scope_helper_ready"] is True
     assert tenant_readiness["private_tenant_schema_ready"] == "yes"
     assert tenant_readiness["private_tenant_migration_ready"] == "partial"
-    assert tenant_readiness["private_router_tenant_binding_ready"] == "partial"
+    assert tenant_readiness["private_router_tenant_binding_ready"] == "yes"
     assert tenant_readiness["cross_tenant_leakage_tests_ready"] is True
-    assert tenant_readiness["request_trace_create_injects_tenant_id"] == "partial"
-    assert tenant_readiness["alert_runner_tenant_safe"] == "partial"
-    assert tenant_readiness["tenant_isolation_readiness"] == "partial"
+    assert tenant_readiness["request_trace_create_injects_tenant_id"] == "yes"
+    assert tenant_readiness["alert_runner_tenant_safe"] == "yes"
+    assert tenant_readiness["tenant_isolation_readiness"] == "ready"
     assert tenant_readiness["controlled_beta_tenant_ready"] is False
     assert controlled_beta_auth_ready is True
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert "production_authentication_not_fully_validated" not in reasons
-    assert "multi_tenant_isolation_not_fully_validated" in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
     assert "billing_not_implemented" in reasons
     assert "rate_limit_not_fully_validated" in reasons
     assert "monitoring_alerting_not_fully_validated" in reasons
     assert "backup_recovery_not_fully_validated" in reasons
     assert "deployment_health_checks_not_fully_validated" in reasons
-    assert "request_trace_create_tenant_injection_not_fully_validated" in tenant_readiness["reason_tenant_isolation_not_ready"]
-    assert "alert_runner_tenant_safety_not_fully_validated" in tenant_readiness["reason_tenant_isolation_not_ready"]
+    assert "request_trace_create_tenant_injection_not_fully_validated" not in tenant_readiness["reason_tenant_isolation_not_ready"]
+    assert "alert_runner_tenant_safety_not_fully_validated" not in tenant_readiness["reason_tenant_isolation_not_ready"]

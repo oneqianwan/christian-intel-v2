@@ -86,8 +86,12 @@ class ProductionReadinessChecker:
         if not safety["no_fabrication"]:
             errors.append("fabrication_guard_missing")
 
-        commercial_readiness = self._build_commercial_readiness(settings=settings, environment=environment)
         tenant_readiness = self._build_tenant_readiness(imports=imports)
+        commercial_readiness = self._build_commercial_readiness(
+            settings=settings,
+            environment=environment,
+            tenant_readiness=tenant_readiness,
+        )
         risk_notes.extend(commercial_readiness["reason_public_saas_not_ready"])
         risk_notes.extend(tenant_readiness["reason_tenant_isolation_not_ready"])
 
@@ -259,11 +263,20 @@ class ProductionReadinessChecker:
         auth_storage_ok = bool(environment.get("account_token_storage_ok"))
         return bool(auth_v1_enabled and cookie_required and (not allow_public) and auth_storage_ok)
 
-    def _build_commercial_readiness(self, *, settings: Any, environment: dict[str, bool]) -> dict[str, Any]:
+    def _build_commercial_readiness(
+        self,
+        *,
+        settings: Any,
+        environment: dict[str, bool],
+        tenant_readiness: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         controlled_beta_auth_ready = self._is_controlled_beta_auth_ready(settings=settings, environment=environment)
+        tenant_isolation_ready = (
+            str((tenant_readiness or {}).get("tenant_isolation_readiness") or "").strip().lower() == "ready"
+        )
         reasons: list[str] = [
             *(["production_authentication_not_fully_validated"] if not controlled_beta_auth_ready else []),
-            "multi_tenant_isolation_not_fully_validated",
+            *(["multi_tenant_isolation_not_fully_validated"] if not tenant_isolation_ready else []),
             "billing_not_implemented",
             "rate_limit_not_fully_validated",
             "monitoring_alerting_not_fully_validated",
@@ -308,6 +321,10 @@ class ProductionReadinessChecker:
         platform_diagnostics_super_admin_only = bool(private_router_binding["platform_diagnostics_super_admin_only_ready"])
         task_router_tenant_scoped = bool(private_router_binding["task_router_tenant_scoped_ready"])
         chat_message_tenant_write_ready = bool(private_router_binding["chat_message_tenant_write_ready"])
+        request_trace_create_injects_tenant_id_ready = bool(
+            private_router_binding.get("request_trace_create_injects_tenant_id_ready")
+        )
+        alert_runner_tenant_safe_ready = bool(private_router_binding.get("alert_runner_tenant_safe_ready"))
         conversation_cross_tenant_isolation_ready = bool(
             conversation_router_tenant_scoped and private_tenant_schema["conversation_tenant_id_ready"] == "yes"
         )
@@ -348,15 +365,16 @@ class ProductionReadinessChecker:
             task_router_tenant_scoped and private_tenant_schema["task_tenant_id_ready"] in {"yes", "partial"}
         )
         request_trace_create_injects_tenant_id = (
-            "partial"
-            if (
-                diagnostics_router_tenant_scoped
-                and private_tenant_schema["diagnostics_tenant_id_ready"] in {"yes", "partial"}
-            )
+            "yes"
+            if request_trace_create_injects_tenant_id_ready
+            else "partial"
+            if diagnostics_router_tenant_scoped and private_tenant_schema["diagnostics_tenant_id_ready"] in {"yes", "partial"}
             else "no"
         )
         alert_runner_tenant_safe = (
-            "partial"
+            "yes"
+            if alert_runner_tenant_safe_ready
+            else "partial"
             if (
                 watch_target_router_tenant_scoped
                 and alert_router_tenant_scoped
@@ -364,22 +382,6 @@ class ProductionReadinessChecker:
                 and alert_rule_tenant_scoped
                 and watch_alert_tenant_write_ready
             )
-            else "no"
-        )
-        private_router_tenant_binding_ready = (
-            "partial"
-            if (
-                conversation_cross_tenant_isolation_ready
-                and message_cross_tenant_isolation_ready
-                and chat_message_tenant_write_ready
-                and bookmark_cross_tenant_isolation_ready
-                and feedback_cross_tenant_isolation_ready
-                and watch_alert_cross_tenant_isolation_ready
-                and diagnostics_cross_tenant_isolation_ready
-                and task_cross_tenant_isolation_ready
-            )
-            else "partial"
-            if conversation_cross_tenant_isolation_ready and message_cross_tenant_isolation_ready and chat_message_tenant_write_ready
             else "no"
         )
         core_private_router_isolation_ready = bool(
@@ -392,6 +394,25 @@ class ProductionReadinessChecker:
             and task_cross_tenant_isolation_ready
             and chat_message_tenant_write_ready
         )
+        private_router_tenant_binding_complete_ready = bool(
+            core_private_router_isolation_ready
+            and request_trace_create_injects_tenant_id == "yes"
+            and alert_runner_tenant_safe == "yes"
+        )
+        private_router_tenant_binding_ready = (
+            "yes"
+            if private_router_tenant_binding_complete_ready
+            else "partial"
+            if (
+                core_private_router_isolation_ready
+                or (
+                    conversation_cross_tenant_isolation_ready
+                    and message_cross_tenant_isolation_ready
+                    and chat_message_tenant_write_ready
+                )
+            )
+            else "no"
+        )
         foundational_tenant_capabilities_ready = bool(
             tenant_core_models_ready
             and tenant_membership_ready
@@ -402,8 +423,18 @@ class ProductionReadinessChecker:
         )
         private_router_binding_state = str(private_router_tenant_binding_ready or "").strip().lower()
         private_router_binding_allows_partial = private_router_binding_state in {"partial", "yes", "ready"}
+        private_router_binding_ready_for_ready = private_router_binding_state in {"yes", "ready"}
         tenant_isolation_readiness = (
-            "partial"
+            "ready"
+            if (
+                foundational_tenant_capabilities_ready
+                and core_private_router_isolation_ready
+                and cross_tenant_leakage_tests_ready
+                and request_trace_create_injects_tenant_id == "yes"
+                and alert_runner_tenant_safe == "yes"
+                and private_router_binding_ready_for_ready
+            )
+            else "partial"
             if (
                 foundational_tenant_capabilities_ready
                 and private_router_binding_allows_partial
@@ -854,7 +885,12 @@ class ProductionReadinessChecker:
             chat_ownership_module = importlib.import_module("services.chat_ownership")
             watch_target_service_module = importlib.import_module("services.watch_target_service")
             watch_runner_module = importlib.import_module("services.watch_runner")
+            watch_scheduler_module = importlib.import_module("services.watch_scheduler")
             alert_service_module = importlib.import_module("services.alert_service")
+            alert_rule_service_module = importlib.import_module("services.alert_rule_service")
+            signal_service_module = importlib.import_module("services.signal_service")
+            alert_engine_module = importlib.import_module("services.alert_engine")
+            brain_module = importlib.import_module("services.brain")
             tenant_context_module = importlib.import_module("dependencies.tenant_context")
             tenant_scope_module = importlib.import_module("services.tenant_scope")
 
@@ -869,7 +905,12 @@ class ProductionReadinessChecker:
             chat_ownership_source = Path(chat_ownership_module.__file__).read_text(encoding="utf-8")
             watch_target_service_source = Path(watch_target_service_module.__file__).read_text(encoding="utf-8")
             watch_runner_source = Path(watch_runner_module.__file__).read_text(encoding="utf-8")
+            watch_scheduler_source = Path(watch_scheduler_module.__file__).read_text(encoding="utf-8")
             alert_service_source = Path(alert_service_module.__file__).read_text(encoding="utf-8")
+            alert_rule_service_source = Path(alert_rule_service_module.__file__).read_text(encoding="utf-8")
+            signal_service_source = Path(signal_service_module.__file__).read_text(encoding="utf-8")
+            alert_engine_source = Path(alert_engine_module.__file__).read_text(encoding="utf-8")
+            brain_source = Path(brain_module.__file__).read_text(encoding="utf-8")
 
             chat_simple_signature = pyinspect.signature(chat_module.chat_simple)
             chat_stream_signature = pyinspect.signature(chat_module.chat_stream)
@@ -951,20 +992,44 @@ class ProductionReadinessChecker:
             signal_tenant_scoped = bool(
                 tenant_scope_ready
                 and "tenant_scope.filter_by_tenant(query, Signal, current_tenant_id)" in watch_runner_source
-                and "signal.tenant_id = current_tenant_id" in watch_runner_source
+                and "tenant_id=normalized_tenant_id" in signal_service_source
+                and "signal.tenant_id = watch_target_tenant_id" in alert_engine_source
             )
             alert_rule_tenant_scoped = bool(
                 tenant_scope_ready
                 and "_ensure_tenant_alert_rules(" in watch_runner_source
-                and "tenant_id=current_tenant_id" in watch_runner_source
+                and "AlertRule.tenant_id == current_tenant_id" in watch_runner_source
                 and "AlertRule(" in watch_runner_source
+                and "tenant_id: str | None = None" in alert_rule_service_source
+                and "AlertRule.tenant_id == normalized_tenant_id" in alert_rule_service_source
             )
             watch_alert_tenant_write_ready = bool(
                 signal_tenant_scoped
                 and alert_rule_tenant_scoped
-                and "tenant_id=tenant_payload.get(\"tenant_id\")" not in watch_runner_source
+                and "WatchTarget.tenant_id.is_not(None)" in watch_scheduler_source
+                and '"tenant_id": tenant_id' in watch_scheduler_source
+                and '"tenant_id": str(tenant_id or existing.get("tenant_id") or "").strip() or None' in watch_runner_source
                 and "tenant_id=current_tenant_id" in watch_runner_source
                 and "Alert(" in watch_runner_source
+            )
+            request_trace_create_injects_tenant_id_ready = bool(
+                tenant_scope_ready
+                and "def _log_trace(" in chat_source
+                and "tenant_id: str | None = None" in chat_source
+                and 'tenant_id=str(tenant_id or "").strip() or None' in chat_source
+                and 'tenant_id=str(current_tenant or "").strip() or None' in chat_source
+                and "def _load_legacy_user_profile(" in brain_source
+                and "RequestTrace.tenant_id == normalized_tenant_id" in brain_source
+                and "RequestTrace.tenant_id.is_(None)" in brain_source
+                and "tenant_id=resolved_tenant_id" in brain_source
+            )
+            alert_runner_tenant_safe_ready = bool(
+                watch_alert_tenant_write_ready
+                and "_ensure_watch_run_tenant_contract(" in watch_runner_source
+                and "tenant_id=current_tenant_id" in watch_runner_source
+                and "tenant_id=watch_target_tenant_id" in alert_engine_source
+                and "get_applicable_alert_rule(" in alert_engine_source
+                and "tenant_id=watch_target_tenant_id" in alert_engine_source
             )
             diagnostics_router_tenant_scoped = bool(
                 tenant_dependency_ready
@@ -998,6 +1063,8 @@ class ProductionReadinessChecker:
                 "signal_tenant_scoped_ready": signal_tenant_scoped,
                 "alert_rule_tenant_scoped_ready": alert_rule_tenant_scoped,
                 "watch_alert_tenant_write_ready": watch_alert_tenant_write_ready,
+                "request_trace_create_injects_tenant_id_ready": request_trace_create_injects_tenant_id_ready,
+                "alert_runner_tenant_safe_ready": alert_runner_tenant_safe_ready,
                 "diagnostics_router_tenant_scoped_ready": diagnostics_router_tenant_scoped,
                 "platform_diagnostics_super_admin_only_ready": platform_diagnostics_super_admin_only,
                 "task_router_tenant_scoped_ready": task_router_tenant_scoped,
@@ -1017,6 +1084,8 @@ class ProductionReadinessChecker:
                 "signal_tenant_scoped_ready": False,
                 "alert_rule_tenant_scoped_ready": False,
                 "watch_alert_tenant_write_ready": False,
+                "request_trace_create_injects_tenant_id_ready": False,
+                "alert_runner_tenant_safe_ready": False,
                 "diagnostics_router_tenant_scoped_ready": False,
                 "platform_diagnostics_super_admin_only_ready": False,
                 "task_router_tenant_scoped_ready": False,

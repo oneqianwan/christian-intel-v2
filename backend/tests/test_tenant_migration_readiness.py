@@ -105,9 +105,17 @@ def test_readiness_detects_missing_tenant_tables(startup_runtime):
     assert report["tenant_readiness"]["tenant_core_models_ready"] is True
     assert report["tenant_readiness"]["tenant_membership_ready"] is True
     assert report["tenant_readiness"]["tenant_user_default_tenant_ready"] is True
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "ready"
     assert report["commercial_readiness"]["public_saas_ready"] is False
     assert report["environment"]["account_token_storage_ok"] is True
+    reasons = set(report["commercial_readiness"]["reason_public_saas_not_ready"])
+    assert "production_authentication_not_fully_validated" not in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
+    assert "billing_not_implemented" in reasons
+    assert "rate_limit_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "backup_recovery_not_fully_validated" in reasons
+    assert "deployment_health_checks_not_fully_validated" in reasons
 
     with database.engine.begin() as conn:
         conn.execute(text("DROP TABLE tenant_memberships"))

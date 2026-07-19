@@ -85,6 +85,7 @@ def scan_due_watch_targets(db: Session, now: datetime | None = None, limit: int 
 
     filters = [
         WatchTarget.deleted_at.is_(None),
+        WatchTarget.tenant_id.is_not(None),
         WatchTarget.status == "active",
         WatchTarget.frequency.in_(("daily", "weekly")),
         WatchTarget.next_check_at.is_not(None),
@@ -109,11 +110,13 @@ def _build_watch_run_metadata(
     scheduled_at: datetime | None,
     rq_job_id: str | None,
     retry_number: int,
+    tenant_id: str | None = None,
     original_scheduled_at: datetime | None = None,
     duplicate_reason: str | None = None,
 ) -> dict[str, Any]:
     return {
         "trigger": trigger,
+        "tenant_id": str(tenant_id or "").strip() or None,
         "scheduled_at": _isoformat(scheduled_at),
         "original_scheduled_at": _isoformat(original_scheduled_at or scheduled_at),
         "rq_job_id": rq_job_id,
@@ -142,6 +145,7 @@ def create_pending_watch_run(
             scheduled_at=scheduled_at,
             rq_job_id=rq_job_id,
             retry_number=retry_number,
+            tenant_id=str(getattr(watch_target, "tenant_id", "") or "").strip() or None,
         ),
         created_at=created_at,
     )
@@ -175,6 +179,7 @@ def create_skipped_watch_run(
             scheduled_at=scheduled_at,
             rq_job_id=rq_job_id,
             retry_number=0,
+            tenant_id=str(getattr(watch_target, "tenant_id", "") or "").strip() or None,
             duplicate_reason=reason,
         ),
     )
@@ -218,7 +223,18 @@ def enqueue_due_watch_targets(
 
     for watch_target in due_targets:
         scheduled_at = watch_target.next_check_at
+        tenant_id = str(getattr(watch_target, "tenant_id", "") or "").strip() or None
         if scheduled_at is None:
+            stats["skipped_count"] += 1
+            continue
+        if tenant_id is None:
+            create_skipped_watch_run(
+                db,
+                watch_target,
+                scheduled_at=scheduled_at,
+                reason="target_missing_tenant",
+                now=scan_started_at,
+            )
             stats["skipped_count"] += 1
             continue
 
@@ -287,6 +303,7 @@ def enqueue_due_watch_targets(
                 job_timeout=300,
                 result_ttl=3600,
                 meta={
+                    "tenant_id": tenant_id,
                     "watch_target_id": watch_target.id,
                     "watch_run_id": watch_run.id,
                     "retry_number": 0,

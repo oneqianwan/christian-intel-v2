@@ -88,4 +88,12 @@ def test_login_and_me_do_not_print_secret_and_public_saas_still_no(runtime):
     readiness_module = __import__("services.production_readiness", fromlist=["ProductionReadinessChecker"])
     report = readiness_module.ProductionReadinessChecker().build_report()
     assert report["commercial_readiness"]["public_saas_ready"] is False
-    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "partial"
+    assert report["tenant_readiness"]["tenant_isolation_readiness"] == "ready"
+    reasons = set(report["commercial_readiness"]["reason_public_saas_not_ready"])
+    assert "production_authentication_not_fully_validated" not in reasons
+    assert "multi_tenant_isolation_not_fully_validated" not in reasons
+    assert "billing_not_implemented" in reasons
+    assert "rate_limit_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "backup_recovery_not_fully_validated" in reasons
+    assert "deployment_health_checks_not_fully_validated" in reasons

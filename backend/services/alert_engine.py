@@ -43,6 +43,12 @@ def _load_signal(db: Session, signal_id: str) -> Signal | None:
     )
 
 
+def _watch_target_tenant_id(signal: Signal) -> str | None:
+    watch_target = getattr(signal, "watch_target", None)
+    tenant_id = str(getattr(watch_target, "tenant_id", "") or "").strip()
+    return tenant_id or None
+
+
 def process_signal(db: Session, signal_id: str) -> Alert | None:
     if not notifications_enabled():
         return None
@@ -52,6 +58,13 @@ def process_signal(db: Session, signal_id: str) -> Alert | None:
     signal = _load_signal(db, signal_id)
     if signal is None or signal.watch_target is None:
         return None
+    watch_target_tenant_id = _watch_target_tenant_id(signal)
+    if watch_target_tenant_id is None:
+        return None
+    signal_tenant_id = str(getattr(signal, "tenant_id", "") or "").strip()
+    if signal_tenant_id and signal_tenant_id != watch_target_tenant_id:
+        return None
+    signal.tenant_id = watch_target_tenant_id
 
     if ownership_enabled():
         user_id = str(signal.owner_user_id or signal.watch_target.owner_user_id or "").strip()
@@ -76,14 +89,19 @@ def process_signal(db: Session, signal_id: str) -> Alert | None:
         db,
         user_id=user_id,
         signal_type=signal.signal_type,
+        tenant_id=watch_target_tenant_id,
     )
     if rule is None or not rule.is_enabled:
+        return None
+    rule_tenant_id = str(getattr(rule, "tenant_id", "") or "").strip()
+    if rule_tenant_id and rule_tenant_id != watch_target_tenant_id:
         return None
     if not severity_meets_minimum(signal.severity, rule.minimum_severity):
         return None
 
     alert = Alert(
         id=str(uuid.uuid4()),
+        tenant_id=watch_target_tenant_id,
         user_id=user_id,
         owner_user_id=user_id if ownership_enabled() else None,
         watch_target_id=signal.watch_target_id,

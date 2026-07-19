@@ -9747,18 +9747,67 @@ class Brain:
                 data.setdefault(key, value)
         return data
 
-    def _load_legacy_user_profile(self, db, session_id: str) -> dict:
+    def _resolve_profile_tenant_id(
+        self,
+        db,
+        session_id: str,
+        *,
+        conversation_id: str | None = None,
+        existing_profile=None,
+    ) -> str | None:
+        try:
+            from models.database import Conversation, UserProfile
+        except ImportError:
+            from backend.models.database import Conversation, UserProfile
+
+        existing_tenant_id = str(getattr(existing_profile, "tenant_id", "") or "").strip()
+        if existing_tenant_id:
+            return existing_tenant_id
+
+        conversation_candidates = [
+            str(conversation_id or "").strip(),
+            str(session_id or "").strip(),
+            str(self.conversation_id or "").strip(),
+        ]
+        seen: set[str] = set()
+        for candidate in conversation_candidates:
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            row = db.query(Conversation).filter(Conversation.id == candidate).first()
+            tenant_id = str(getattr(row, "tenant_id", "") or "").strip() if row is not None else ""
+            if tenant_id:
+                return tenant_id
+
+        profile_row = (
+            db.query(UserProfile)
+            .filter(
+                UserProfile.session_id == session_id,
+                UserProfile.tenant_id.is_not(None),
+            )
+            .order_by(UserProfile.updated_at.desc())
+            .first()
+        )
+        tenant_id = str(getattr(profile_row, "tenant_id", "") or "").strip() if profile_row is not None else ""
+        return tenant_id or None
+
+    def _load_legacy_user_profile(self, db, session_id: str, *, tenant_id: str | None = None) -> dict:
         try:
             from models.database import RequestTrace
         except ImportError:
             from backend.models.database import RequestTrace
 
-        traces = (
+        traces_query = (
             db.query(RequestTrace)
             .filter(RequestTrace.event_type == "user_profile_saved")
             .order_by(RequestTrace.created_at.desc())
-            .all()
         )
+        normalized_tenant_id = str(tenant_id or "").strip()
+        if normalized_tenant_id:
+            traces_query = traces_query.filter(RequestTrace.tenant_id == normalized_tenant_id)
+        else:
+            traces_query = traces_query.filter(RequestTrace.tenant_id.is_(None))
+        traces = traces_query.all()
         for item in traces:
             event_data = item.event_data or {}
             if event_data.get("conversation_id") == session_id:
@@ -9775,19 +9824,29 @@ class Brain:
             session_id = self._resolve_profile_session_id(conversation_id)
             db = next(get_db())
             try:
+                resolved_tenant_id = self._resolve_profile_tenant_id(
+                    db,
+                    session_id,
+                    conversation_id=conversation_id,
+                )
+                profile_query = db.query(UserProfile).filter(UserProfile.session_id == session_id)
+                if resolved_tenant_id:
+                    profile_query = profile_query.filter(UserProfile.tenant_id == resolved_tenant_id)
                 profile_row = (
-                    db.query(UserProfile)
-                    .filter(UserProfile.session_id == session_id)
-                    .order_by(UserProfile.updated_at.desc())
-                    .first()
+                    profile_query.order_by(UserProfile.updated_at.desc()).first()
                 )
                 resolved_session_id = session_id
 
                 if not profile_row:
-                    legacy_profile = self._load_legacy_user_profile(db, session_id)
+                    legacy_profile = self._load_legacy_user_profile(
+                        db,
+                        session_id,
+                        tenant_id=resolved_tenant_id,
+                    )
                     if legacy_profile:
                         profile_row = UserProfile(
                             session_id=session_id,
+                            tenant_id=resolved_tenant_id,
                             name=legacy_profile.get("name"),
                             org=legacy_profile.get("org"),
                             role=legacy_profile.get("role"),
@@ -9851,16 +9910,31 @@ class Brain:
             session_id = self._resolve_profile_session_id(conversation_id)
             db = next(get_db())
             try:
+                resolved_tenant_id = self._resolve_profile_tenant_id(
+                    db,
+                    session_id,
+                    conversation_id=conversation_id,
+                )
+                existing_query = db.query(UserProfile).filter(UserProfile.session_id == session_id)
+                if resolved_tenant_id:
+                    existing_query = existing_query.filter(UserProfile.tenant_id == resolved_tenant_id)
                 existing = (
-                    db.query(UserProfile)
-                    .filter(UserProfile.session_id == session_id)
-                    .order_by(UserProfile.updated_at.desc())
-                    .first()
+                    existing_query.order_by(UserProfile.updated_at.desc()).first()
+                )
+                resolved_tenant_id = self._resolve_profile_tenant_id(
+                    db,
+                    session_id,
+                    conversation_id=conversation_id,
+                    existing_profile=existing,
                 )
 
                 previous_profile = self._profile_to_dict(existing) if existing else {}
                 if not previous_profile:
-                    previous_profile = self._load_legacy_user_profile(db, session_id)
+                    previous_profile = self._load_legacy_user_profile(
+                        db,
+                        session_id,
+                        tenant_id=resolved_tenant_id,
+                    )
 
                 profile = {
                     "name": self._merge_profile_value(previous_profile.get("name"), name) or "未命名用户",
@@ -9883,6 +9957,8 @@ class Brain:
                 }
 
                 if existing:
+                    if resolved_tenant_id and not str(existing.tenant_id or "").strip():
+                        existing.tenant_id = resolved_tenant_id
                     existing.name = profile["name"]
                     existing.org = profile["org"]
                     existing.role = profile["role"]
@@ -9902,6 +9978,7 @@ class Brain:
                 else:
                     profile_row = UserProfile(
                         session_id=session_id,
+                        tenant_id=resolved_tenant_id,
                         name=profile["name"],
                         org=profile["org"],
                         role=profile["role"],
@@ -9921,6 +9998,7 @@ class Brain:
 
                 trace = RequestTrace(
                     id=str(uuid.uuid4()),
+                    tenant_id=resolved_tenant_id,
                     request_id=f"profile:{session_id}",
                     event_type="user_profile_saved",
                     event_data={"conversation_id": session_id, "profile": profile},
