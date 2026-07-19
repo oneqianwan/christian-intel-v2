@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -9,6 +7,7 @@ from sqlalchemy.orm import Session
 import config
 from dependencies import tenant_context
 from dependencies.auth import require_authenticated_user, require_authenticated_user_no_touch
+from dependencies.rate_limit import get_client_ip
 from models.auth import User
 from models.database import get_db
 from models.schemas import (
@@ -79,8 +78,7 @@ def _delete_cookie(response: Response) -> None:
 
 
 def _client_fingerprint(request: Request) -> str:
-    host = getattr(getattr(request, "client", None), "host", None) or "unknown"
-    return hashlib.sha256(str(host).encode("utf-8")).hexdigest()
+    return str(get_client_ip(request))
 
 
 def _raise_lifecycle_error(exc: AccountLifecycleError) -> None:

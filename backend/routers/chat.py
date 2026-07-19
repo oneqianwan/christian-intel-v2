@@ -20,6 +20,7 @@ from fastapi.exceptions import HTTPException
 from sqlalchemy.orm import Session
 
 from dependencies.chat_auth import get_chat_current_user
+from dependencies.rate_limit import enforce_rate_limit_for_request
 from models.auth import User
 from models.database import Conversation, Message, RequestTrace, emit_db_runtime_debug, get_db
 from models.schemas import ChatRequest
@@ -726,6 +727,14 @@ async def chat_stream(
         current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
         tenant_context = resolve_chat_tenant_context(request=request, db=db, current_user=current_user)
         current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+        enforce_rate_limit_for_request(
+            request,
+            rule_name="chat_stream",
+            user_id=str(owner_user_id or "anonymous"),
+            tenant_id=str(current_tenant_id or "no-tenant"),
+            route="/api/chat/stream",
+            method="POST",
+        )
         generator_id = f"chat-stream-{uuid.uuid4()}"
         persist_db = is_chat_user_ownership_enabled()
         prepared = _prepare_chat_request(
@@ -941,6 +950,14 @@ def chat_simple(
     current_user_is_super_admin = tenant_service.is_platform_super_admin(current_user) if current_user is not None else False
     tenant_context = resolve_chat_tenant_context(request=raw_request, db=db, current_user=current_user)
     current_tenant_id = str(tenant_context.tenant.id) if tenant_context is not None else None
+    enforce_rate_limit_for_request(
+        raw_request,
+        rule_name="chat_simple",
+        user_id=str(owner_user_id or "anonymous"),
+        tenant_id=str(current_tenant_id or "no-tenant"),
+        route="/api/chat/simple",
+        method="POST",
+    )
     prepared = _prepare_chat_request(
         request,
         db,

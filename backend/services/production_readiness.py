@@ -87,6 +87,10 @@ class ProductionReadinessChecker:
             errors.append("fabrication_guard_missing")
 
         tenant_readiness = self._build_tenant_readiness(imports=imports)
+        rate_limit_readiness = self._build_rate_limit_readiness(
+            imports=imports,
+            tenant_readiness=tenant_readiness,
+        )
         commercial_readiness = self._build_commercial_readiness(
             settings=settings,
             environment=environment,
@@ -94,6 +98,7 @@ class ProductionReadinessChecker:
         )
         risk_notes.extend(commercial_readiness["reason_public_saas_not_ready"])
         risk_notes.extend(tenant_readiness["reason_tenant_isolation_not_ready"])
+        risk_notes.extend(rate_limit_readiness["reason_rate_limit_not_ready"])
 
         critical_groups = [
             all(environment.values()) or (
@@ -129,6 +134,7 @@ class ProductionReadinessChecker:
             "risk_notes": risk_notes,
             "commercial_readiness": commercial_readiness,
             "tenant_readiness": tenant_readiness,
+            "rate_limit_readiness": rate_limit_readiness,
         }
 
     def _collect_imports(self) -> dict[str, Any]:
@@ -506,6 +512,238 @@ class ProductionReadinessChecker:
             "schema": tenant_schema,
             "private_schema": private_tenant_schema["schema"],
             "private_router_binding": private_router_binding,
+        }
+
+    def _build_rate_limit_readiness(
+        self,
+        *,
+        imports: dict[str, Any],
+        tenant_readiness: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        imports_map = imports.get("imports") or {}
+        rate_limiter_module = None
+        rate_limit_dependency_module = None
+        rate_limiter_source = ""
+        dependency_source = ""
+        chat_source = ""
+        watch_targets_source = ""
+        auth_source = ""
+        url_analysis_source = ""
+        search_source = ""
+        collection_source = ""
+        missions_source = ""
+        auth_service_source = ""
+
+        try:
+            rate_limiter_module = importlib.import_module("services.rate_limiter")
+            rate_limiter_source = Path(rate_limiter_module.__file__).read_text(encoding="utf-8")
+        except Exception:
+            rate_limiter_module = None
+
+        try:
+            rate_limit_dependency_module = importlib.import_module("dependencies.rate_limit")
+            dependency_source = Path(rate_limit_dependency_module.__file__).read_text(encoding="utf-8")
+        except Exception:
+            rate_limit_dependency_module = None
+
+        try:
+            chat_source = Path(importlib.import_module("routers.chat").__file__).read_text(encoding="utf-8")
+        except Exception:
+            chat_source = ""
+        try:
+            watch_targets_source = Path(importlib.import_module("routers.watch_targets").__file__).read_text(encoding="utf-8")
+        except Exception:
+            watch_targets_source = ""
+        try:
+            auth_source = Path(importlib.import_module("routers.auth").__file__).read_text(encoding="utf-8")
+        except Exception:
+            auth_source = ""
+        try:
+            url_analysis_source = Path(importlib.import_module("routers.url_analysis").__file__).read_text(encoding="utf-8")
+        except Exception:
+            url_analysis_source = ""
+        try:
+            search_source = Path(importlib.import_module("routers.search").__file__).read_text(encoding="utf-8")
+        except Exception:
+            search_source = ""
+        try:
+            collection_source = Path(importlib.import_module("routers.collection").__file__).read_text(encoding="utf-8")
+        except Exception:
+            collection_source = ""
+        try:
+            missions_source = Path(importlib.import_module("routers.missions").__file__).read_text(encoding="utf-8")
+        except Exception:
+            missions_source = ""
+        try:
+            auth_service_source = Path(importlib.import_module("services.auth_service").__file__).read_text(encoding="utf-8")
+        except Exception:
+            auth_service_source = ""
+
+        in_memory_rate_limiter_ready = bool(
+            hasattr(rate_limiter_module, "InMemoryRateLimiter")
+            and hasattr(rate_limiter_module, "RateLimitRule")
+            and hasattr(rate_limiter_module, "RateLimitDecision")
+            and hasattr(rate_limiter_module, "get_default_rate_limiter")
+            and hasattr(rate_limiter_module, "reset_rate_limiter_for_tests")
+            and hasattr(rate_limiter_module, "set_rate_limiter_time_for_tests")
+            and hasattr(rate_limiter_module, "advance_rate_limiter_time_for_tests")
+            and "class InMemoryRateLimiter" in rate_limiter_source
+            and "def reset_for_tests(self)" in rate_limiter_source
+            and "def set_time_for_tests(self" in rate_limiter_source
+            and "def advance_time_for_tests(self" in rate_limiter_source
+        )
+        rate_limit_429_contract_ready = bool(
+            hasattr(rate_limit_dependency_module, "get_client_ip")
+            and hasattr(rate_limit_dependency_module, "build_rate_limit_key")
+            and hasattr(rate_limit_dependency_module, "enforce_rate_limit_for_request")
+            and "status.HTTP_429_TOO_MANY_REQUESTS" in dependency_source
+            and '"Retry-After"' in dependency_source
+            and '"X-RateLimit-Limit"' in dependency_source
+            and '"X-RateLimit-Remaining"' in dependency_source
+            and '"X-RateLimit-Reset"' in dependency_source
+            and '"retry_after_seconds"' in dependency_source
+        )
+        auth_login_rate_limit_ready = (
+            "yes"
+            if (
+                "get_client_ip" in auth_source
+                and "def _client_fingerprint(request: Request) -> str:" in auth_source
+                and "return str(get_client_ip(request))" in auth_source
+                and "LOGIN_RATE_LIMITED" in auth_service_source
+                and "def _client_key(*, normalized_email: str, client_fingerprint: str) -> str:" in auth_service_source
+            )
+            else "partial"
+            if "LOGIN_RATE_LIMITED" in auth_service_source
+            else "no"
+        )
+        analyze_url_rate_limited = bool(
+            "enforce_rate_limit_for_request(request, rule_name=\"analyze_url\")" in url_analysis_source
+        )
+        search_rate_limited = bool(
+            "enforce_rate_limit_for_request(request, rule_name=\"public_high_cost\")" in search_source
+        )
+        collection_start_rate_limited = bool(
+            "enforce_rate_limit_for_request(request, rule_name=\"public_high_cost\")" in collection_source
+        )
+        missions_rate_limited = bool(
+            "enforce_rate_limit_for_request(request, rule_name=\"public_high_cost\")" in missions_source
+        )
+        public_high_cost_endpoint_rate_limit_ready = (
+            "yes"
+            if all(
+                (
+                    analyze_url_rate_limited,
+                    search_rate_limited,
+                    collection_start_rate_limited,
+                    missions_rate_limited,
+                )
+            )
+            else "partial"
+            if any(
+                (
+                    analyze_url_rate_limited,
+                    search_rate_limited,
+                    collection_start_rate_limited,
+                    missions_rate_limited,
+                )
+            )
+            else "no"
+        )
+        chat_rate_limit_ready = (
+            "yes"
+            if (
+                'rule_name="chat_simple"' in chat_source
+                and 'route="/api/chat/simple"' in chat_source
+                and 'rule_name="chat_stream"' in chat_source
+                and 'route="/api/chat/stream"' in chat_source
+                and 'tenant_id=str(current_tenant_id or "no-tenant")' in chat_source
+                and 'user_id=str(owner_user_id or "anonymous")' in chat_source
+            )
+            else "no"
+        )
+        watch_run_rate_limit_ready = (
+            "yes"
+            if (
+                'rule_name="watch_run"' in watch_targets_source
+                and 'tenant_id=str(context.tenant.id)' in watch_targets_source
+                and 'user_id=str(context.user.id)' in watch_targets_source
+                and 'resource_id=str(watch_target_id)' in watch_targets_source
+            )
+            else "no"
+        )
+        tenant_ready = str((tenant_readiness or {}).get("tenant_isolation_readiness") or "").strip().lower() == "ready"
+        per_ip_rate_limit_ready = (
+            "partial"
+            if in_memory_rate_limiter_ready and rate_limit_429_contract_ready
+            else "no"
+        )
+        per_user_rate_limit_ready = (
+            "partial"
+            if chat_rate_limit_ready == "yes" and watch_run_rate_limit_ready == "yes"
+            else "no"
+        )
+        per_tenant_rate_limit_ready = (
+            "partial"
+            if tenant_ready and chat_rate_limit_ready == "yes" and watch_run_rate_limit_ready == "yes"
+            else "no"
+        )
+        global_rate_limiter_ready = "no"
+        x_rate_limit_headers_ready = "partial" if rate_limit_429_contract_ready else "no"
+        reason_rate_limit_not_ready: list[str] = []
+        if not in_memory_rate_limiter_ready:
+            reason_rate_limit_not_ready.append("in_memory_rate_limiter_not_implemented")
+        if not rate_limit_429_contract_ready:
+            reason_rate_limit_not_ready.append("rate_limit_429_contract_not_ready")
+        if auth_login_rate_limit_ready == "no":
+            reason_rate_limit_not_ready.append("auth_login_rate_limit_not_ready")
+        if public_high_cost_endpoint_rate_limit_ready == "no":
+            reason_rate_limit_not_ready.append("public_high_cost_endpoint_rate_limit_not_ready")
+        if chat_rate_limit_ready != "yes":
+            reason_rate_limit_not_ready.append("chat_rate_limit_not_ready")
+        if watch_run_rate_limit_ready != "yes":
+            reason_rate_limit_not_ready.append("watch_run_rate_limit_not_ready")
+        reason_rate_limit_not_ready.extend(
+            [
+                "global_or_distributed_rate_limiter_not_implemented",
+                "billing_or_plan_quota_not_implemented",
+                "rate_limit_not_fully_validated",
+            ]
+        )
+        rate_limit_readiness = (
+            "partial"
+            if (
+                in_memory_rate_limiter_ready
+                and rate_limit_429_contract_ready
+                and auth_login_rate_limit_ready in {"yes", "partial"}
+                and public_high_cost_endpoint_rate_limit_ready in {"yes", "partial"}
+                and chat_rate_limit_ready == "yes"
+                and watch_run_rate_limit_ready == "yes"
+            )
+            else "blocked"
+        )
+        return {
+            "expected_rate_limit_readiness_after_c1b": "partial",
+            "rate_limit_readiness": rate_limit_readiness,
+            "global_rate_limiter_ready": global_rate_limiter_ready,
+            "in_memory_rate_limiter_ready": "yes" if in_memory_rate_limiter_ready else "no",
+            "rate_limit_429_contract_ready": "yes" if rate_limit_429_contract_ready else "no",
+            "x_rate_limit_headers_ready": x_rate_limit_headers_ready,
+            "auth_login_rate_limit_ready": auth_login_rate_limit_ready,
+            "public_high_cost_endpoint_rate_limit_ready": public_high_cost_endpoint_rate_limit_ready,
+            "analyze_url_rate_limited": analyze_url_rate_limited,
+            "search_rate_limited": search_rate_limited,
+            "collection_start_rate_limited": collection_start_rate_limited,
+            "missions_rate_limited": missions_rate_limited,
+            "chat_rate_limit_ready": chat_rate_limit_ready,
+            "watch_run_rate_limit_ready": watch_run_rate_limit_ready,
+            "per_tenant_rate_limit_ready": per_tenant_rate_limit_ready,
+            "per_user_rate_limit_ready": per_user_rate_limit_ready,
+            "per_ip_rate_limit_ready": per_ip_rate_limit_ready,
+            "reason_rate_limit_not_ready": reason_rate_limit_not_ready,
+            "imports_present": {
+                "config": imports_map.get("config") is not None,
+                "production_readiness": imports_map.get("production_readiness") is not None,
+            },
         }
 
     def _is_response_contract_ok(self, contract: dict[str, Any]) -> bool:

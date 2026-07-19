@@ -5,8 +5,10 @@ import threading
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
+
+from dependencies.rate_limit import enforce_rate_limit_for_request
 
 try:
     from backend.services.agent import get_agent
@@ -186,20 +188,21 @@ def _count_recent_collection_missions() -> int:
 
 
 @router.post("/start", response_model=StartCollectionResponse)
-async def start_collection(request: StartCollectionRequest):
+async def start_collection(payload: StartCollectionRequest, request: Request):
     """启动采集任务"""
-    keywords = [(item or "").strip() for item in request.keywords if (item or "").strip()]
+    enforce_rate_limit_for_request(request, rule_name="public_high_cost")
+    keywords = [(item or "").strip() for item in payload.keywords if (item or "").strip()]
     if not keywords:
         raise HTTPException(status_code=400, detail="keywords is required")
 
-    source = (request.source or "newsapi").strip().lower()
+    source = (payload.source or "newsapi").strip().lower()
     if source not in {"newsapi", "rss", "webpage"}:
         raise HTTPException(status_code=400, detail="unsupported source")
 
-    limit_per_keyword = max(1, min(int(request.limit_per_keyword or 30), 100))
+    limit_per_keyword = max(1, min(int(payload.limit_per_keyword or 30), 100))
     mission = create_collection_mission(
         query=f"Collection Start | {source} | {', '.join(keywords)}",
-        country=request.country or "全球",
+        country=payload.country or "全球",
         source=source,
         keywords=keywords,
         limit_per_keyword=limit_per_keyword,

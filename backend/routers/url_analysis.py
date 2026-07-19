@@ -1,7 +1,8 @@
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
+from dependencies.rate_limit import enforce_rate_limit_for_request
 from services.llm_client import llm
 from services.url_analyzer import analyze_url
 
@@ -9,7 +10,8 @@ router = APIRouter()
 
 
 @router.post("/analyze-url")
-async def analyze_url_endpoint(data: dict):
+async def analyze_url_endpoint(data: dict, request: Request):
+    enforce_rate_limit_for_request(request, rule_name="analyze_url")
     url = (data or {}).get("url", "")
     if not url or not isinstance(url, str) or not url.startswith("http"):
         return {"error": "无效的URL"}

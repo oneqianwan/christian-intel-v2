@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import ConfigDict
 from sqlalchemy.orm import Session
 
 from config import settings
+from dependencies.rate_limit import enforce_rate_limit_for_request
 from dependencies.tenant_context import TenantRequestContext, require_tenant_member
 from models.database import get_db
 from schemas.watch_alert import (
@@ -180,11 +181,21 @@ def delete_watch_target_route(
 @router.post("/{watch_target_id}/run", response_model=WatchRunResponse)
 def run_watch_target_route(
     watch_target_id: str,
+    request: Request,
     _: None = Depends(require_watch_alert_enabled),
     context: TenantRequestContext = Depends(require_tenant_member),
     db: Session = Depends(get_db),
 ):
     try:
+        enforce_rate_limit_for_request(
+            request,
+            rule_name="watch_run",
+            user_id=str(context.user.id),
+            tenant_id=str(context.tenant.id),
+            resource_id=str(watch_target_id),
+            route="/api/watch-targets/{watch_target_id}/run",
+            method="POST",
+        )
         watch_run = run_watch_target(
             db,
             watch_target_id,

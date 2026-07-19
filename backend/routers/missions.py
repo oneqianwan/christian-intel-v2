@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
+from dependencies.rate_limit import enforce_rate_limit_for_request
 from models.database import get_db, Mission, JobRun, IntelligenceItem, Source
 from queue_client import DEFAULT_COLLECTION_PRIORITY, HIGH_COLLECTION_PRIORITY
 from services.mission_service import create_collection_mission
@@ -9,11 +10,13 @@ router = APIRouter()
 
 @router.post("/missions")
 def create_mission(
+    request: Request,
     query: str,
     country: str = "菲律宾",
     priority: int = HIGH_COLLECTION_PRIORITY,
     db: Session = Depends(get_db),
 ):
+    enforce_rate_limit_for_request(request, rule_name="public_high_cost")
     mission = create_collection_mission(
         query=query,
         country=country,
