@@ -94,6 +94,6 @@ def test_login_and_me_do_not_print_secret_and_public_saas_still_no(runtime):
     assert "multi_tenant_isolation_not_fully_validated" not in reasons
     assert "billing_not_implemented" in reasons
     assert "rate_limit_not_fully_validated" in reasons
-    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" not in reasons
     assert "backup_recovery_not_fully_validated" in reasons
     assert "deployment_health_checks_not_fully_validated" in reasons

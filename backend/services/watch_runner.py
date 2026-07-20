@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from models.watch_alert import Alert, AlertRule, Signal, WatchRun, WatchTarget
 from services.alert_rule_service import DEFAULT_ALERT_RULES, notifications_enabled, severity_meets_minimum
 from services.signal_service import create_signal_records_for_changes
+from services.monitoring_events import record_background_job_failure, record_tenant_isolation_denial
 from services import tenant_scope, tenant_service
 from services.watch_change_detector import detect_watch_changes
 from services.watch_scheduler import (
@@ -182,6 +183,10 @@ def _ensure_watch_run_tenant_contract(watch_target: WatchTarget, watch_run: Watc
     current_tenant_id = _watch_target_tenant_id(watch_target)
     watch_run_tenant_id = _watch_run_tenant_id(watch_run)
     if watch_run_tenant_id and watch_run_tenant_id != current_tenant_id:
+        record_tenant_isolation_denial(
+            error_code="WATCH_TARGET_NOT_FOUND",
+            route="watch_runner._ensure_watch_run_tenant_contract",
+        )
         raise WatchTargetNotFoundError()
     return current_tenant_id
 
@@ -433,6 +438,7 @@ def _mark_run_success(
 
 
 def _mark_manual_run_failed(db: Session, watch_run: WatchRun, watch_target: WatchTarget, error_code: str, error_message: str) -> None:
+    record_background_job_failure(error_code=error_code, component="watch_runner")
     finished_at = utcnow()
     watch_run.status = "failed"
     watch_run.finished_at = finished_at
@@ -605,6 +611,7 @@ def _mark_auto_run_failed(
     scheduled_at: datetime | None,
     rq_job_id: str | None,
 ) -> WatchRun:
+    record_background_job_failure(error_code=error_code, component="watch_runner")
     current_time = utcnow()
     watch_target.last_checked_at = current_time
     watch_target.last_error_at = current_time
@@ -655,6 +662,7 @@ def _mark_failed_without_target(
     error_code: str,
     error_message: str,
 ) -> WatchRun:
+    record_background_job_failure(error_code=error_code, component="watch_runner")
     watch_run = db.query(WatchRun).filter(WatchRun.id == watch_run_id).first()
     if not watch_run:
         raise WatchTargetNotFoundError()

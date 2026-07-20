@@ -10,6 +10,7 @@ from dependencies.tenant_context import TenantRequestContext, resolve_tenant_req
 from models.auth import User
 from models.database import RequestTrace, get_db
 from schemas.watch_alert import ApiErrorResponse
+from services.monitoring_events import record_tenant_isolation_denial
 from services import tenant_scope, tenant_service
 
 router = APIRouter()
@@ -19,6 +20,8 @@ _SENSITIVE_VALUE_MARKERS = ("password", "token", "session", "secret")
 
 
 def _raise_api_error(status_code: int, error_code: str, message: str) -> None:
+    if error_code in {"TENANT_REQUIRED", "ROLE_FORBIDDEN"}:
+        record_tenant_isolation_denial(error_code=error_code)
     raise HTTPException(
         status_code=status_code,
         detail=ApiErrorResponse(error_code=error_code, message=message).model_dump(),
@@ -87,6 +90,10 @@ def get_request_diagnostics(
     trace_query = db.query(RequestTrace).filter(RequestTrace.request_id == request_id)
     if context is None:
         if not tenant_service.is_platform_super_admin(current_user):
+            record_tenant_isolation_denial(
+                error_code="ROLE_FORBIDDEN",
+                route="/api/diagnostics/request/{request_id}",
+            )
             _raise_api_error(status.HTTP_403_FORBIDDEN, "ROLE_FORBIDDEN", "Insufficient permissions")
         trace_query = trace_query.filter(RequestTrace.tenant_id.is_(None))
     else:

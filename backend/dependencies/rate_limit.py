@@ -5,6 +5,7 @@ from collections.abc import Callable
 from fastapi import HTTPException, Request, status
 
 from schemas.watch_alert import ApiErrorResponse
+from services.monitoring_events import record_rate_limit_trip
 from services.rate_limiter import RateLimitDecision, get_default_rate_limiter
 
 
@@ -67,6 +68,7 @@ def _raise_rate_limit(
     error_code: str,
     message: str,
 ) -> None:
+    record_rate_limit_trip(rule_name=decision.rule_name, error_code=error_code)
     headers = {
         "Retry-After": str(int(decision.retry_after_seconds)),
         "X-RateLimit-Limit": str(int(decision.limit)),

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 import config
 from models.auth import AuthSession, User
+from services.monitoring_events import record_auth_failure, record_rate_limit_trip
 from services import tenant_service
 
 
@@ -151,15 +152,19 @@ def authenticate_user(
 ) -> User:
     normalized = normalize_email(email)
     if not normalized:
+        record_auth_failure(error_code="INVALID_CREDENTIALS", email=normalized)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
     if not password:
+        record_auth_failure(error_code="INVALID_CREDENTIALS", email=normalized)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
     limiter_key = _client_key(normalized_email=normalized, client_fingerprint=client_fingerprint)
     if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
         retry_after = _default_rate_limiter.is_limited(key=limiter_key)
         if retry_after is not None:
+            record_rate_limit_trip(rule_name="auth_login", error_code="LOGIN_RATE_LIMITED")
+            record_auth_failure(error_code="LOGIN_RATE_LIMITED", email=normalized)
             raise AuthError(429, "LOGIN_RATE_LIMITED", "Too many login attempts", retry_after_seconds=retry_after)
 
     user: User | None = db.query(User).filter(User.email_normalized == normalized).first()
@@ -168,25 +173,31 @@ def authenticate_user(
         verify_password(_DUMMY_PASSWORD_HASH, password)
         if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
             _default_rate_limiter.record_failure(key=limiter_key)
+        record_auth_failure(error_code="INVALID_CREDENTIALS", email=normalized)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
     if user.deleted_at is not None:
+        record_auth_failure(error_code="ACCOUNT_DISABLED", email=normalized)
         raise AuthError(403, "ACCOUNT_DISABLED", "Account is disabled")
 
     status_value = str(user.status or "").strip().lower()
     if status_value == "disabled":
+        record_auth_failure(error_code="ACCOUNT_DISABLED", email=normalized)
         raise AuthError(403, "ACCOUNT_DISABLED", "Account is disabled")
     if status_value == "pending":
+        record_auth_failure(error_code="ACCOUNT_PENDING", email=normalized)
         raise AuthError(403, "ACCOUNT_PENDING", "Account is pending")
 
     if not verify_password(user.password_hash, password):
         if bool(config.settings.AUTH_LOGIN_RATE_LIMIT_ENABLED):
             _default_rate_limiter.record_failure(key=limiter_key)
+        record_auth_failure(error_code="INVALID_CREDENTIALS", email=normalized)
         raise AuthError(401, "INVALID_CREDENTIALS", "Invalid credentials")
 
     try:
         tenant_service.assert_user_default_tenant_active(db, user=user)
     except tenant_service.TenantError as exc:
+        record_auth_failure(error_code=exc.error_code, email=normalized)
         raise AuthError(int(exc.status_code), exc.error_code, exc.message)
 
     if needs_rehash(user.password_hash):

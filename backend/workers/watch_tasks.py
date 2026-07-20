@@ -9,6 +9,7 @@ from rq import get_current_job
 from models.database import SessionLocal
 from models.watch_alert import WatchRun
 from queue_client import get_collection_queue
+from services.monitoring_events import record_background_job_failure
 from services.watch_runner import run_watch_target
 
 
@@ -19,6 +20,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 
 def _mark_failed_without_target(db, watch_run_id: str | None, rq_job_id: str | None, error_message: str) -> WatchRun | None:
+    record_background_job_failure(error_code="WATCH_TARGET_NOT_FOUND", component="watch_tasks")
     if not watch_run_id:
         return None
 
@@ -64,6 +66,7 @@ def execute_watch_target_job(
                 queue=get_collection_queue(),
             )
         except Exception as exc:
+            record_background_job_failure(error_code="WATCH_RUN_FAILED", component="watch_tasks")
             watch_run = _mark_failed_without_target(db, watch_run_id, rq_job_id, str(exc))
 
         payload = {

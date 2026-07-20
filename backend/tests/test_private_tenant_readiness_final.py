@@ -31,7 +31,7 @@ def test_private_tenant_readiness_final_flags_are_correct(startup_runtime):
     assert "multi_tenant_isolation_not_fully_validated" not in reasons
     assert "billing_not_implemented" in reasons
     assert "rate_limit_not_fully_validated" in reasons
-    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" not in reasons
     assert "backup_recovery_not_fully_validated" in reasons
     assert "deployment_health_checks_not_fully_validated" in reasons
     assert "request_trace_create_tenant_injection_not_fully_validated" not in tenant_readiness["reason_tenant_isolation_not_ready"]

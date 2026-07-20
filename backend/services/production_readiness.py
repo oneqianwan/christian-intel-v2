@@ -91,14 +91,21 @@ class ProductionReadinessChecker:
             imports=imports,
             tenant_readiness=tenant_readiness,
         )
+        monitoring_alerting_readiness = self._build_monitoring_alerting_readiness(
+            imports=imports,
+            tenant_readiness=tenant_readiness,
+            rate_limit_readiness=rate_limit_readiness,
+        )
         commercial_readiness = self._build_commercial_readiness(
             settings=settings,
             environment=environment,
             tenant_readiness=tenant_readiness,
+            monitoring_alerting_readiness=monitoring_alerting_readiness,
         )
         risk_notes.extend(commercial_readiness["reason_public_saas_not_ready"])
         risk_notes.extend(tenant_readiness["reason_tenant_isolation_not_ready"])
         risk_notes.extend(rate_limit_readiness["reason_rate_limit_not_ready"])
+        risk_notes.extend(monitoring_alerting_readiness["reason_monitoring_alerting_not_ready"])
 
         critical_groups = [
             all(environment.values()) or (
@@ -135,6 +142,7 @@ class ProductionReadinessChecker:
             "commercial_readiness": commercial_readiness,
             "tenant_readiness": tenant_readiness,
             "rate_limit_readiness": rate_limit_readiness,
+            "monitoring_alerting_readiness": monitoring_alerting_readiness,
         }
 
     def _collect_imports(self) -> dict[str, Any]:
@@ -275,17 +283,22 @@ class ProductionReadinessChecker:
         settings: Any,
         environment: dict[str, bool],
         tenant_readiness: dict[str, Any] | None = None,
+        monitoring_alerting_readiness: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         controlled_beta_auth_ready = self._is_controlled_beta_auth_ready(settings=settings, environment=environment)
         tenant_isolation_ready = (
             str((tenant_readiness or {}).get("tenant_isolation_readiness") or "").strip().lower() == "ready"
+        )
+        monitoring_ready = (
+            str((monitoring_alerting_readiness or {}).get("monitoring_alerting_readiness") or "").strip().lower()
+            == "ready"
         )
         reasons: list[str] = [
             *(["production_authentication_not_fully_validated"] if not controlled_beta_auth_ready else []),
             *(["multi_tenant_isolation_not_fully_validated"] if not tenant_isolation_ready else []),
             "billing_not_implemented",
             "rate_limit_not_fully_validated",
-            "monitoring_alerting_not_fully_validated",
+            *(["monitoring_alerting_not_fully_validated"] if not monitoring_ready else []),
             "backup_recovery_not_fully_validated",
             "deployment_health_checks_not_fully_validated",
         ]
@@ -744,6 +757,154 @@ class ProductionReadinessChecker:
                 "config": imports_map.get("config") is not None,
                 "production_readiness": imports_map.get("production_readiness") is not None,
             },
+        }
+
+    def _build_monitoring_alerting_readiness(
+        self,
+        *,
+        imports: dict[str, Any],
+        tenant_readiness: dict[str, Any] | None = None,
+        rate_limit_readiness: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        health_source = ""
+        runtime_metrics_source = ""
+        monitoring_events_source = ""
+        diagnostics_source = ""
+        auth_service_source = ""
+        watch_runner_source = ""
+        watch_tasks_source = ""
+
+        try:
+            health_source = Path(importlib.import_module("routers.health").__file__).read_text(encoding="utf-8")
+        except Exception:
+            health_source = ""
+        try:
+            runtime_metrics_source = Path(importlib.import_module("services.runtime_metrics").__file__).read_text(encoding="utf-8")
+        except Exception:
+            runtime_metrics_source = ""
+        try:
+            monitoring_events_source = Path(importlib.import_module("services.monitoring_events").__file__).read_text(encoding="utf-8")
+        except Exception:
+            monitoring_events_source = ""
+        try:
+            diagnostics_source = Path(importlib.import_module("routers.diagnostics").__file__).read_text(encoding="utf-8")
+        except Exception:
+            diagnostics_source = ""
+        try:
+            auth_service_source = Path(importlib.import_module("services.auth_service").__file__).read_text(encoding="utf-8")
+        except Exception:
+            auth_service_source = ""
+        try:
+            watch_runner_source = Path(importlib.import_module("services.watch_runner").__file__).read_text(encoding="utf-8")
+        except Exception:
+            watch_runner_source = ""
+        try:
+            watch_tasks_source = Path(importlib.import_module("workers.watch_tasks").__file__).read_text(encoding="utf-8")
+        except Exception:
+            watch_tasks_source = ""
+
+        runtime_health_endpoint_ready = bool(
+            '@router.get("/health/runtime")' in health_source
+            and "def runtime_health():" in health_source
+            and "monitoring_snapshot()" in health_source
+            and "build_production_readiness_report()" in health_source
+        )
+        readiness_endpoint_ready = bool(
+            '@router.get("/ready")' in health_source
+            and "def readiness():" in health_source
+            and '"public_saas_blockers"' in health_source
+            and '"monitoring_alerting_readiness"' in health_source
+        )
+        metrics_snapshot_ready = bool(
+            "class RuntimeMetrics" in runtime_metrics_source
+            and "def snapshot(self)" in runtime_metrics_source
+            and "def counter_total(self, name: str" in runtime_metrics_source
+            and "monitoring_events_total" in monitoring_events_source
+            and "alert_events_total" in monitoring_events_source
+            and "rate_limit_trips" in monitoring_events_source
+            and "auth_failures" in monitoring_events_source
+            and "tenant_isolation_denials" in monitoring_events_source
+            and "background_job_failures" in monitoring_events_source
+        )
+        internal_monitoring_event_sink_ready = bool(
+            "class InMemoryMonitoringEventSink" in monitoring_events_source
+            and "def reset_monitoring_for_tests()" in monitoring_events_source
+            and "def monitoring_snapshot()" in monitoring_events_source
+            and "def set_monitoring_time_for_tests(" in monitoring_events_source
+            and "def advance_monitoring_time_for_tests(" in monitoring_events_source
+        )
+        internal_alert_sink_ready = bool(
+            internal_monitoring_event_sink_ready
+            and "alert=True" in monitoring_events_source
+            and '"alerts": alerts' in monitoring_events_source
+        )
+        rate_limit_trip_monitoring_ready = bool("record_rate_limit_trip" in monitoring_events_source and "record_rate_limit_trip(" in Path(importlib.import_module("dependencies.rate_limit").__file__).read_text(encoding="utf-8"))
+        auth_failure_monitoring_ready = bool(
+            "record_auth_failure" in auth_service_source
+            and "LOGIN_RATE_LIMITED" in auth_service_source
+            and "INVALID_CREDENTIALS" in auth_service_source
+        )
+        tenant_isolation_denial_monitoring_ready = bool(
+            "record_tenant_isolation_denial" in diagnostics_source
+            and "TENANT_REQUIRED" in diagnostics_source
+            and "ROLE_FORBIDDEN" in diagnostics_source
+            and "record_tenant_isolation_denial" in watch_runner_source
+        )
+        background_job_failure_monitoring_ready = bool(
+            "record_background_job_failure" in watch_runner_source
+            and "record_background_job_failure" in watch_tasks_source
+        )
+        tenant_ready = str((tenant_readiness or {}).get("tenant_isolation_readiness") or "").strip().lower() == "ready"
+        rate_limit_partial = str((rate_limit_readiness or {}).get("rate_limit_readiness") or "").strip().lower() == "partial"
+        reason_monitoring_alerting_not_ready: list[str] = []
+        if not runtime_health_endpoint_ready:
+            reason_monitoring_alerting_not_ready.append("runtime_health_endpoint_not_ready")
+        if not readiness_endpoint_ready:
+            reason_monitoring_alerting_not_ready.append("readiness_endpoint_not_ready")
+        if not metrics_snapshot_ready:
+            reason_monitoring_alerting_not_ready.append("metrics_snapshot_not_ready")
+        if not internal_monitoring_event_sink_ready:
+            reason_monitoring_alerting_not_ready.append("internal_monitoring_event_sink_not_ready")
+        if not internal_alert_sink_ready:
+            reason_monitoring_alerting_not_ready.append("internal_alert_sink_not_ready")
+        if not rate_limit_trip_monitoring_ready:
+            reason_monitoring_alerting_not_ready.append("rate_limit_trip_monitoring_not_ready")
+        if not auth_failure_monitoring_ready:
+            reason_monitoring_alerting_not_ready.append("auth_failure_monitoring_not_ready")
+        if not tenant_isolation_denial_monitoring_ready:
+            reason_monitoring_alerting_not_ready.append("tenant_isolation_denial_monitoring_not_ready")
+        if not background_job_failure_monitoring_ready:
+            reason_monitoring_alerting_not_ready.append("background_job_failure_monitoring_not_ready")
+
+        monitoring_alerting_readiness = (
+            "ready"
+            if (
+                runtime_health_endpoint_ready
+                and readiness_endpoint_ready
+                and metrics_snapshot_ready
+                and internal_monitoring_event_sink_ready
+                and internal_alert_sink_ready
+                and rate_limit_trip_monitoring_ready
+                and auth_failure_monitoring_ready
+                and tenant_isolation_denial_monitoring_ready
+                and background_job_failure_monitoring_ready
+                and tenant_ready
+                and rate_limit_partial
+            )
+            else "blocked"
+        )
+        return {
+            "monitoring_alerting_readiness": monitoring_alerting_readiness,
+            "runtime_health_endpoint_ready": "yes" if runtime_health_endpoint_ready else "no",
+            "readiness_endpoint_ready": "yes" if readiness_endpoint_ready else "no",
+            "metrics_snapshot_ready": "yes" if metrics_snapshot_ready else "no",
+            "internal_monitoring_event_sink_ready": "yes" if internal_monitoring_event_sink_ready else "no",
+            "internal_alert_sink_ready": "yes" if internal_alert_sink_ready else "no",
+            "rate_limit_trip_monitoring_ready": "yes" if rate_limit_trip_monitoring_ready else "no",
+            "auth_failure_monitoring_ready": "yes" if auth_failure_monitoring_ready else "no",
+            "tenant_isolation_denial_monitoring_ready": "yes" if tenant_isolation_denial_monitoring_ready else "no",
+            "background_job_failure_monitoring_ready": "yes" if background_job_failure_monitoring_ready else "no",
+            "reason_monitoring_alerting_not_ready": reason_monitoring_alerting_not_ready,
         }
 
     def _is_response_contract_ok(self, contract: dict[str, Any]) -> bool:

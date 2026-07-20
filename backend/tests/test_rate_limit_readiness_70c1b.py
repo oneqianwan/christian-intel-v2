@@ -36,7 +36,7 @@ def test_rate_limit_readiness_is_partial_after_c1b(startup_runtime):
 
     assert "billing_not_implemented" in reasons
     assert "rate_limit_not_fully_validated" in reasons
-    assert "monitoring_alerting_not_fully_validated" in reasons
+    assert "monitoring_alerting_not_fully_validated" not in reasons
     assert "backup_recovery_not_fully_validated" in reasons
     assert "deployment_health_checks_not_fully_validated" in reasons
     assert "production_authentication_not_fully_validated" not in reasons
